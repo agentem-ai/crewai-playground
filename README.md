@@ -29,7 +29,7 @@ A modern web interface for interacting with CrewAI crews through an intuitive, f
 ### From PyPI (when published)
 
 ```bash
-pip install crewai-chat-ui
+pip install crewai-playground
 ```
 
 ### From source
@@ -54,7 +54,7 @@ pip install -e .
 2. Run the chat UI:
 
 ```bash
-crewai-chat-ui
+crewai-playground
 ```
 
 3. Open your browser and go to `http://localhost:5000`

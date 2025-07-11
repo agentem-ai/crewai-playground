@@ -35,7 +35,7 @@ class CrewAITelemetry:
     def __init__(self):
         """Initialize the telemetry service."""
         # Set up the tracer provider
-        resource = Resource.create({"service.name": "crewai-chat-ui"})
+        resource = Resource.create({"service.name": "crewai-playground"})
         trace.set_tracer_provider(TracerProvider(resource=resource))
 
         # Add console exporter for debugging
