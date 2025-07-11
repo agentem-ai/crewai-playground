@@ -1,8 +1,0 @@
-README.md
-pyproject.toml
-src/crewai_playground.egg-info/PKG-INFO
-src/crewai_playground.egg-info/SOURCES.txt
-src/crewai_playground.egg-info/dependency_links.txt
-src/crewai_playground.egg-info/entry_points.txt
-src/crewai_playground.egg-info/requires.txt
-src/crewai_playground.egg-info/top_level.txt
