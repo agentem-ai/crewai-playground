@@ -57,7 +57,7 @@ export default function Landing() {
       {/* Header */}
       <header className="py-4 px-6 border-b bg-background">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">CrewAI Chat UI</h1>
+          <h1 className="text-2xl font-bold">CrewAI Playground</h1>
           <Button
             variant="ghost"
             size="icon"
@@ -146,8 +146,8 @@ export default function Landing() {
             </div>
             <h3 className="text-2xl font-bold mb-4 text-center">Flow Mode</h3>
             <p className="text-center flex-grow">
-              Visualize and execute CrewAI flows with real-time updates. See steps
-              and outputs as they happen in an interactive flow diagram.
+              Visualize and execute CrewAI flows with real-time updates. See
+              steps and outputs as they happen in an interactive flow diagram.
             </p>
             <div className="flex justify-center mt-6 pt-2">
               <Button onClick={handleFlowMode} className="w-full" size="lg">
@@ -162,7 +162,7 @@ export default function Landing() {
       <footer className="py-6 px-8 border-t">
         <div className="container mx-auto text-center">
           <p className="text-sm text-muted-foreground">
-            CrewAI Chat UI - Created by{" "}
+            CrewAI Playground - Created by{" "}
             <a
               href="https://github.com/zinyando"
               className="text-primary hover:underline"

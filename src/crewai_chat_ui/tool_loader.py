@@ -1,6 +1,7 @@
 """
-Tool discovery and loading utilities for CrewAI Chat UI.
+Tool discovery and loading utilities for CrewAI Playground.
 """
+
 import inspect
 import importlib
 import logging
@@ -12,10 +13,10 @@ from typing import Dict, Any, List, Optional, get_type_hints, cast
 
 def is_user_project_file(path):
     """Filter out system directories and files.
-    
+
     Args:
         path: Path to check
-        
+
     Returns:
         True if the path is a user project file, False otherwise
     """
@@ -38,10 +39,10 @@ def is_user_project_file(path):
 
 def discover_available_tools(directory: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Discover all available tools from any 'tools' directories in the project.
-    
+
     Args:
         directory: Optional directory to search in. If None, uses current working directory.
-        
+
     Returns:
         List of dictionaries containing tool information.
     """
@@ -62,33 +63,33 @@ def discover_available_tools(directory: Optional[Path] = None) -> List[Dict[str,
                 return []
 
     tools_list = []
-    
+
     # Use current working directory if no directory is specified
     current_dir = directory or Path(os.getcwd())
-    
+
     # Find all tools directories
     tools_dirs = list(current_dir.glob("**/tools"))
-    
+
     # Filter out system directories and keep only user project directories
     tools_dirs = [d for d in tools_dirs if is_user_project_file(d)]
-    
+
     if not tools_dirs:
         logging.warning(f"No tools directories found in {current_dir}")
         return []
-    
+
     # Process each tools directory
     for tools_dir in tools_dirs:
         logging.info(f"Searching for tools in {tools_dir}")
-        
+
         for file_path in tools_dir.glob("*.py"):
             if file_path.name.startswith("__"):
                 continue
-                
+
             # Add the parent directory to sys.path temporarily to enable imports
             parent_dir = str(file_path.parent.parent)
             if parent_dir not in sys.path:
                 sys.path.insert(0, parent_dir)
-                
+
             # Determine the module name based on the file path
             relative_path = file_path.relative_to(Path(parent_dir))
             module_parts = list(relative_path.parts)
@@ -110,16 +111,22 @@ def discover_available_tools(directory: Optional[Path] = None) -> List[Dict[str,
                         and issubclass(attr, BaseTool)
                         and attr is not BaseTool
                     ):
-                        tool_info = _extract_class_tool_info(attr, attr_name, module_name)
+                        tool_info = _extract_class_tool_info(
+                            attr, attr_name, module_name
+                        )
 
                     # Instance-based tools returned by @tool decorator
                     elif BaseTool is not None and isinstance(attr, BaseTool):
-                        tool_info = _extract_instance_tool_info(attr, attr_name, module_name)
+                        tool_info = _extract_instance_tool_info(
+                            attr, attr_name, module_name
+                        )
 
                     # Function-based tools (decorated with @tool)
-                    elif inspect.isfunction(attr) and (hasattr(attr, "_crewai_tool") or 
-                                                      hasattr(attr, "name") or 
-                                                      getattr(attr, "__crewai_tool__", False)):
+                    elif inspect.isfunction(attr) and (
+                        hasattr(attr, "_crewai_tool")
+                        or hasattr(attr, "name")
+                        or getattr(attr, "__crewai_tool__", False)
+                    ):
 
                         tool_info = _extract_function_tool_info(
                             attr, attr_name, module_name
@@ -193,12 +200,14 @@ def _extract_function_tool_info(
         tool_name = tool_func.name
     elif hasattr(tool_func, "_crewai_tool") and hasattr(tool_func._crewai_tool, "name"):
         tool_name = tool_func._crewai_tool.name
-    
+
     # Get tool description from docstring or _crewai_tool attribute
     tool_description = "No description available"
     if tool_func.__doc__:
         tool_description = tool_func.__doc__.strip()
-    elif hasattr(tool_func, "_crewai_tool") and hasattr(tool_func._crewai_tool, "description"):
+    elif hasattr(tool_func, "_crewai_tool") and hasattr(
+        tool_func._crewai_tool, "description"
+    ):
         tool_description = tool_func._crewai_tool.description
 
     # Extract parameters from function signature
@@ -218,7 +227,7 @@ def _ensure_property_descriptions(parameters: Dict[str, Any]):
     """Ensure each property in the JSON schema has a non-empty description."""
     if not parameters or not isinstance(parameters, dict):
         return
-        
+
     for prop_name, prop_schema in parameters.get("properties", {}).items():
         # Always copy title to description if title exists
         if prop_schema.get("title"):
@@ -226,7 +235,7 @@ def _ensure_property_descriptions(parameters: Dict[str, Any]):
         # If no description exists, add a default one
         elif not prop_schema.get("description"):
             prop_schema["description"] = f"Parameter: {prop_name}"
-        
+
         # Handle nested properties (for objects)
         if prop_schema.get("type") == "object" and "properties" in prop_schema:
             _ensure_property_descriptions(prop_schema)
@@ -347,11 +356,15 @@ def _extract_schema_parameters(schema_class) -> Dict[str, Any]:
     return parameters
 
 
-def _extract_instance_tool_info(tool_instance, attr_name: str, module_name: str) -> Dict[str, Any]:
+def _extract_instance_tool_info(
+    tool_instance, attr_name: str, module_name: str
+) -> Dict[str, Any]:
     """Extract information from a BaseTool *instance* (returned by @tool decorator)."""
     # Try to get name and description attributes present in BaseTool
     tool_name = getattr(tool_instance, "name", attr_name)
-    tool_description = getattr(tool_instance, "description", "No description available").strip()
+    tool_description = getattr(
+        tool_instance, "description", "No description available"
+    ).strip()
 
     # Parameters: If the instance has args_schema use same logic
     parameters: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}

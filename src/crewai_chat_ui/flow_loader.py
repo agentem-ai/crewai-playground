@@ -1,5 +1,5 @@
 """
-Flow Loader for CrewAI Chat UI
+Flow Loader for CrewAI Playground
 
 This module provides functionality to discover and load CrewAI flows from
 the user's environment, similar to how crews are discovered.
@@ -166,19 +166,19 @@ def extract_flows_from_file(file_path: str) -> List[FlowInfo]:
 
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
-            
+
             # Set up proper package structure for relative imports
             # Determine the package name from the file path
             package_parts = file_path.split(os.sep)
             try:
                 # Find 'src' in the path to determine the package structure
-                if 'src' in package_parts:
-                    src_index = package_parts.index('src')
+                if "src" in package_parts:
+                    src_index = package_parts.index("src")
                     if src_index + 1 < len(package_parts):
                         # Set the package name to the module's parent package
-                        parent_package = '.'.join(package_parts[src_index+1:-1])
+                        parent_package = ".".join(package_parts[src_index + 1 : -1])
                         module.__package__ = parent_package
-                        
+
                 # If no 'src' directory, try to infer from directory structure
                 else:
                     # Use the parent directory as the package name
@@ -187,7 +187,7 @@ def extract_flows_from_file(file_path: str) -> List[FlowInfo]:
             except (ValueError, IndexError):
                 # If we can't determine the package, use a fallback
                 pass
-                
+
             try:
                 spec.loader.exec_module(module)
             except ImportError as e:
@@ -211,9 +211,7 @@ def extract_flows_from_file(file_path: str) -> List[FlowInfo]:
                         return []
                 else:
                     # Log import errors but continue with other files
-                    logger.debug(
-                        f"Import error executing module {file_path}: {str(e)}"
-                    )
+                    logger.debug(f"Import error executing module {file_path}: {str(e)}")
                     # Clean up module from sys.modules
                     if module_name in sys.modules:
                         del sys.modules[module_name]
@@ -621,6 +619,7 @@ def _analyze_method_from_source(
 
 import types
 
+
 def _extract_missing_module_name(err_msg: str) -> Optional[str]:
     """Extract the missing module name from an ImportError message."""
     # Typical message formats:
@@ -645,12 +644,14 @@ def _install_stub_module(module_name: str):
         sub_name = ".".join(parts[:i])
         if sub_name not in sys.modules:
             stub = types.ModuleType(sub_name)
+
             # Provide a placeholder that raises on attribute usage to avoid
             # silent failures further down the line.
             def _getattr_stub(name):
                 if name in stub.__dict__:
                     return stub.__dict__[name]
                 else:
+
                     class _Dummy:
                         def __init__(self, *args, **kwargs):
                             pass

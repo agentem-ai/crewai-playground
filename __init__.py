@@ -1,3 +1,3 @@
-"""CrewAI Chat UI - Web interface for CrewAI chat functionality."""
+"""CrewAI Playground - Web interface for CrewAI functionality."""
 
 __version__ = "0.1.0"

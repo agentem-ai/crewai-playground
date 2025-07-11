@@ -217,7 +217,10 @@ export default function Tools() {
                     {Object.entries(selectedTool.parameters.properties).map(
                       ([paramName, paramDetails]) => (
                         <div key={paramName} className="space-y-2">
-                          <Label htmlFor={paramName} className="text-base font-medium">
+                          <Label
+                            htmlFor={paramName}
+                            className="text-base font-medium"
+                          >
                             {paramName}
                             {selectedTool.parameters.required?.includes(
                               paramName
@@ -272,14 +275,14 @@ export default function Tools() {
                     disabled={loading}
                     className="px-8"
                   >
-                  {loading ? (
-                    <>
-                      <span className="animate-spin mr-2">⏳</span>
-                      Processing...
-                    </>
-                  ) : (
-                    "Execute Tool"
-                  )}
+                    {loading ? (
+                      <>
+                        <span className="animate-spin mr-2">⏳</span>
+                        Processing...
+                      </>
+                    ) : (
+                      "Execute Tool"
+                    )}
                   </Button>
                 </div>
 
@@ -317,7 +320,7 @@ export default function Tools() {
       <footer className="py-6 px-8 border-t">
         <div className="container mx-auto text-center">
           <p className="text-sm text-muted-foreground">
-            CrewAI Chat UI - Created by{" "}
+            CrewAI Playground - Created by{" "}
             <a
               href="https://github.com/zinyando"
               className="text-primary hover:underline"

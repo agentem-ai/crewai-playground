@@ -1,13 +1,13 @@
-# CrewAI Chat UI
+# CrewAI Playground
 
 A modern web interface for interacting with CrewAI crews through an intuitive, feature-rich chat UI.
 
-![CrewAI Chat UI Screenshot light mode](https://github.com/user-attachments/assets/b8b08a7c-d404-4b91-b4c9-6c8c0e84b468)
+![CrewAI Playground Screenshot light mode](https://github.com/user-attachments/assets/b8b08a7c-d404-4b91-b4c9-6c8c0e84b468)
 
-![CrewAI Chat UI Screenshot dark mode](https://github.com/user-attachments/assets/c09ccfb2-1881-44e1-8eb7-02cf24dc6b78)
+![CrewAI Playground Screenshot dark mode](https://github.com/user-attachments/assets/c09ccfb2-1881-44e1-8eb7-02cf24dc6b78)
 
 
-*Screenshot: CrewAI Chat UI in action*
+*Screenshot: CrewAI Playground in action*
 
 ## Features
 
@@ -62,7 +62,7 @@ crewai-chat-ui
 
 ## How It Works
 
-The CrewAI Chat UI:
+The CrewAI Playground:
 
 1. Searches for crew.py or *_crew.py files in your current directory
 2. Loads your crew instance
