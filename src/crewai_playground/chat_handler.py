@@ -60,7 +60,7 @@ class ChatHandler:
         self.is_initialized = False
 
         # Register event listeners
-        from crewai_chat_ui.event_listener import crew_visualization_listener
+        from crewai_playground.event_listener import crew_visualization_listener
 
         crew_visualization_listener.setup_listeners(crewai_event_bus)
 
@@ -72,7 +72,7 @@ class ChatHandler:
         This allows the visualization to display agents before the crew starts running.
         """
         try:
-            from crewai_chat_ui.event_listener import crew_visualization_listener
+            from crewai_playground.event_listener import crew_visualization_listener
             import uuid
 
             # Get or create a crew ID
@@ -116,7 +116,9 @@ class ChatHandler:
                     # Determine agent ID if the task has an associated agent object
                     assigned_agent_id = (
                         str(task.agent.id)
-                        if hasattr(task, "agent") and getattr(task, "agent", None) is not None and hasattr(task.agent, "id")
+                        if hasattr(task, "agent")
+                        and getattr(task, "agent", None) is not None
+                        and hasattr(task.agent, "id")
                         else None
                     )
 
@@ -300,11 +302,12 @@ class ChatHandler:
         # Ensure crew has a valid ID for telemetry tracking
         if not hasattr(self.crew, "id") or not self.crew.id:
             import uuid
+
             self.crew.id = str(uuid.uuid4())
             logging.info(f"Set crew ID to {self.crew.id} in run_crew method")
         else:
             logging.info(f"Using existing crew ID: {self.crew.id} in run_crew method")
-            
+
         if not self.is_initialized:
             self.initialize()
 
