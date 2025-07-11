@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "fastapi", "uvicorn", "pydantic"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "crewai-chat-ui"
+name = "crewai-playground"
 version = "0.2.0"
 authors = [{ name = "Lennex Zinyando", email = "brizdigital@gmail.com" }]
 description = "Web UI for CrewAI chat functionality"
@@ -22,11 +22,11 @@ dependencies = [
 ]
 
 [project.scripts]
-crewai-chat-ui = "crewai_chat_ui.server:main"
+crewai-playground = "crewai_chat_ui.server:main"
 
 [project.urls]
-"Github" = "https://github.com/zinyando/crewai_chat_ui"
-"Bug Tracker" = "https://github.com/zinyando/crewai_chat_ui/issues"
+"Github" = "https://github.com/agentem-ai/crewai_playground"
+"Bug Tracker" = "https://github.com/agentem-ai/crewai_playground/issues"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
