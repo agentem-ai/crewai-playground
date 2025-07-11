@@ -1,0 +1,2 @@
+[console_scripts]
+crewai-playground = crewai_playground.server:main
