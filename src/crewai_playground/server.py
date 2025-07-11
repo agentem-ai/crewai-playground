@@ -18,7 +18,7 @@ import socket
 import asyncio
 import importlib
 import inspect
-from crewai_chat_ui.tool_loader import discover_available_tools
+from crewai_playground.tool_loader import discover_available_tools
 
 # Configure logging
 logging.basicConfig(
@@ -47,16 +47,16 @@ except ImportError:
     # python-dotenv not installed; proceed without loading
     pass
 
-from crewai_chat_ui.crew_loader import (
+from crewai_playground.crew_loader import (
     load_crew,
     load_crew_from_module,
     discover_available_crews,
 )
-from crewai_chat_ui.chat_handler import ChatHandler
-from crewai_chat_ui.event_listener import crew_visualization_listener
-from crewai_chat_ui.tool_loader import discover_available_tools as discover_tools
-from crewai_chat_ui.telemetry import telemetry_service
-from crewai_chat_ui.flow_api import router as flow_router, get_active_execution
+from crewai_playground.chat_handler import ChatHandler
+from crewai_playground.event_listener import crew_visualization_listener
+from crewai_playground.tool_loader import discover_available_tools as discover_tools
+from crewai_playground.telemetry import telemetry_service
+from crewai_playground.flow_api import router as flow_router, get_active_execution
 
 # Create FastAPI app
 app = FastAPI()
@@ -634,7 +634,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Send a test message to verify the connection is working
         try:
-            from crewai_chat_ui.event_listener import CustomJSONEncoder
+            from crewai_playground.event_listener import CustomJSONEncoder
 
             test_message = {
                 "type": "connection_test",

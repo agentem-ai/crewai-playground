@@ -84,7 +84,7 @@ The chat UI uses the following configuration from your crew:
 
 ```
 src/
-└── crewai_chat_ui/
+└── crewai_playground/
     ├── __init__.py        # Package initialization
     ├── server.py          # Web server implementation
     ├── crew_loader.py     # Logic to load user's crew

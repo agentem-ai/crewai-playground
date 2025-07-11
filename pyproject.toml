@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-crewai-playground = "crewai_chat_ui.server:main"
+crewai-playground = "crewai_playground.server:main"
 
 [project.urls]
 "Github" = "https://github.com/agentem-ai/crewai_playground"
@@ -33,7 +33,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["crewai_chat_ui*"]
+include = ["crewai_playground*"]
 
 [tool.setuptools.package-data]
-crewai_chat_ui = ["static/*"]
+crewai_playground = ["static/*"]

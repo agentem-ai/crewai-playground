@@ -2,6 +2,6 @@ __pycache__
 .mypy_cache
 .venv
 .eggs
-crewai_chat_ui.egg-info
+crewai_playground.egg-info
 dist
 .ruff_cache
