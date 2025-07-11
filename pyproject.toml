@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "crewai-playground"
 version = "0.2.0"
 authors = [{ name = "Lennex Zinyando", email = "brizdigital@gmail.com" }]
-description = "Web UI for CrewAI chat functionality"
+description = "Web UI for CrewAI playground functionality"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
