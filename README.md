@@ -2,9 +2,11 @@
 
 A modern web interface for interacting with CrewAI crews through an intuitive, feature-rich chat UI.
 
-![CrewAI Playground Screenshot light mode](https://github.com/user-attachments/assets/b8857208-3221-41a4-8114-2950dff67401)
+<img width="1618" height="966" alt="Screenshot 2025-07-12 at 10 22 25" src="https://github.com/user-attachments/assets/9e41d5ae-7cd7-49db-acc8-06ebb8fb081b" />
 
-![CrewAI Playground Screenshot dark mode](https://github.com/user-attachments/assets/25f2e2e9-5b61-494a-b137-e4aecd80b20f)
+<img width="1616" height="964" alt="Screenshot 2025-07-12 at 10 22 55" src="https://github.com/user-attachments/assets/0029bc08-f09d-404c-b8ef-07c556003b14" />
+
+<img width="1614" height="964" alt="Screenshot 2025-07-12 at 10 23 20" src="https://github.com/user-attachments/assets/add0947c-46ec-43c8-9a1f-a5eff5d186af" />
 
 
 *Screenshot: CrewAI Playground in action*
