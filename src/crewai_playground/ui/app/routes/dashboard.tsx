@@ -11,7 +11,7 @@ export function meta() {
   ];
 }
 
-export default function Landing() {
+export default function Dashboard() {
   const navigate = useNavigate();
   const { crews, setCrews, isDarkMode, toggleDarkMode } = useChatStore();
   const [loading, setLoading] = useState(true);

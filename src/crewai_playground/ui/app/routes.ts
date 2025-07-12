@@ -1,7 +1,7 @@
 import { type RouteConfig } from "@react-router/dev/routes";
 
 export default [
-  { index: true, file: "routes/landing.tsx" },
+  { index: true, file: "routes/dashboard.tsx" },
   { path: "chat", file: "routes/chat.tsx" },
   { path: "kickoff", file: "routes/kickoff.tsx" },
   { path: "kickoff/traces", file: "routes/kickoff.traces.tsx" },
