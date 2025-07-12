@@ -917,31 +917,8 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
         }
       });
 
-      // Add output node if flow is completed and it doesn't exist yet
-      if (
-        state.status === "completed" &&
-        state.outputs &&
-        (typeof state.outputs === "string"
-          ? state.outputs.trim().length > 0
-          : Object.keys(state.outputs).length > 0) &&
-        !nodeMap.has("output-node")
-      ) {
-        // Find the last node's position to place output below it
-        const lastNodeY = Math.max(...currentNodes.map((n) => n.position.y));
-        const centerX =
-          currentNodes.reduce((sum, n) => sum + n.position.x, 0) /
-          currentNodes.length;
-
-        const outputNode: Node = {
-          id: "output-node",
-          type: "outputNode",
-          position: { x: centerX, y: lastNodeY + 200 },
-          data: {
-            outputs: state.outputs,
-          },
-        };
-        updatedNodes.push(outputNode);
-      }
+      // Output node has been removed as per user request
+      // Flow results will only be displayed in the results section below the visualization
 
       return updatedNodes;
     });
