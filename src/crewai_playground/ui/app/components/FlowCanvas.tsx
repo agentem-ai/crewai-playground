@@ -13,12 +13,15 @@ import {
 } from "@xyflow/react";
 import type { Node, Edge, NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import "./flow-animations.css";
 import dagre from "@dagrejs/dagre";
 import { Loader2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
+import ReactMarkdown from "react-markdown";
 import { Button } from "~/components/ui/button";
 import "./flow-node.css";
+import { Card } from "./ui/card";
 
 // Initial empty arrays with proper types
 const initialNodes: Node[] = [];
@@ -190,7 +193,6 @@ interface FlowCanvasProps {
   flowId: string;
   isRunning: boolean;
   resetKey: number; // Key to trigger reset
-  viewMode?: "init" | "execution"; // New prop to control view mode
 }
 
 interface FlowState {
@@ -198,7 +200,7 @@ interface FlowState {
   name: string;
   status: "pending" | "running" | "completed" | "failed";
   steps: FlowStep[];
-  outputs: Record<string, any>;
+  outputs?: string | Record<string, any>;
   error?: string;
 }
 
@@ -309,7 +311,7 @@ const FlowNode = ({ data }: { data: any }) => {
     <div
       ref={ref}
       className={`px-4 py-2 shadow-md rounded-md border bg-card flex flex-col justify-center ${
-        data.uniformWidth && data.uniformHeight ? 'uniform-sized' : ''
+        data.uniformWidth && data.uniformHeight ? "uniform-sized" : ""
       }`}
       style={nodeStyle}
     >
@@ -360,6 +362,10 @@ const StepNode = ({ data }: { data: any }) => {
         return "bg-green-500";
       case "failed":
         return "bg-red-500";
+      case "initializing":
+        return "bg-purple-500";
+      case "pending":
+        return "bg-gray-500";
       default:
         return "bg-gray-500";
     }
@@ -380,7 +386,7 @@ const StepNode = ({ data }: { data: any }) => {
     <div
       ref={ref}
       className={`px-4 py-2 shadow-md rounded-md border bg-card relative overflow-hidden ${
-        data.uniformWidth && data.uniformHeight ? 'uniform-sized' : ''
+        data.uniformWidth && data.uniformHeight ? "uniform-sized" : ""
       }`}
       style={nodeStyle}
     >
@@ -423,15 +429,26 @@ const StepNode = ({ data }: { data: any }) => {
                 ? "outline"
                 : data.status === "failed"
                 ? "destructive"
+                : data.status === "initializing"
+                ? "default"
                 : "outline"
             }
+            className={`${
+              data.status === "completed"
+                ? "bg-green-100 text-green-800 border-green-500 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800"
+                : ""
+            } ${data.status === "running" ? "animate-pulse" : ""}`}
           >
+            {data.status === "running" && <span className="mr-1">⚡</span>}
+            {data.status === "completed" && <span className="mr-1">✓</span>}
+            {data.status === "failed" && <span className="mr-1">✗</span>}
             {data.status}
           </Badge>
         </div>
         {data.error && (
-          <div className="mt-2 text-xs text-red-500 text-center truncate">
-            Error: {data.error}
+          <div className="mt-2 p-2 bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-500 dark:text-red-400 text-center max-h-16 overflow-y-auto">
+            <div className="font-semibold">Error:</div>
+            <div>{data.error}</div>
           </div>
         )}
         {data.dependencies &&
@@ -483,7 +500,7 @@ const OutputNode = ({ data }: { data: any }) => {
     <div
       ref={ref}
       className={`px-4 py-2 shadow-md rounded-md border bg-card overflow-hidden ${
-        data.uniformWidth && data.uniformHeight ? 'uniform-sized' : ''
+        data.uniformWidth && data.uniformHeight ? "uniform-sized" : ""
       }`}
       style={nodeStyle}
     >
@@ -522,7 +539,7 @@ const MethodNode = ({ data }: { data: any }) => {
     <div
       ref={ref}
       className={`px-4 py-2 shadow-md rounded-md border bg-card relative overflow-hidden ${
-        data.uniformWidth && data.uniformHeight ? 'uniform-sized' : ''
+        data.uniformWidth && data.uniformHeight ? "uniform-sized" : ""
       }`}
       style={nodeStyle}
     >
@@ -573,12 +590,7 @@ const MethodNode = ({ data }: { data: any }) => {
   );
 };
 
-const FlowCanvas = ({
-  flowId,
-  isRunning,
-  resetKey,
-  viewMode = "execution",
-}: FlowCanvasProps) => {
+const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
   const navigate = useNavigate();
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -621,24 +633,23 @@ const FlowCanvas = ({
   const [flowStructure, setFlowStructure] = useState<any>(null);
   const [loadingStructure, setLoadingStructure] = useState(false);
 
-  // Reset state when resetKey changes
+  // Reset execution state when resetKey changes, but preserve flow structure
   useEffect(() => {
     setState(null);
     setError(null);
-    setNodes([]);
-    setEdges([]);
-    setFlowStructure(null);
+    // Don't clear nodes/edges or flowStructure - we want to preserve the visualization
+    // The nodes and edges will be updated by the WebSocket messages during execution
 
     // Close existing socket if any
     if (socket) {
       socket.close();
       setSocket(null);
     }
-  }, [resetKey, setNodes, setEdges]);
+  }, [resetKey]);
 
-  // Fetch flow structure for initialization view
+  // Fetch flow structure when flowId changes or component mounts
   useEffect(() => {
-    if (!flowId || viewMode !== "init") return;
+    if (!flowId) return;
 
     const fetchFlowStructure = async () => {
       setLoadingStructure(true);
@@ -682,7 +693,7 @@ const FlowCanvas = ({
 
         if (data.status === "success" && data.flow) {
           setFlowStructure(data.flow);
-          createInitializationVisualization(data.flow);
+          createInitialVisualization(data.flow);
         } else {
           setError(data.detail || "Failed to fetch flow structure");
         }
@@ -695,43 +706,49 @@ const FlowCanvas = ({
     };
 
     fetchFlowStructure();
-  }, [flowId, viewMode]);
+  }, [flowId]);
 
   // Connect to WebSocket when flowId changes or isRunning becomes true
   useEffect(() => {
-    if (!flowId || !isRunning || viewMode !== "execution") return;
+    if (!flowId || !isRunning) return;
 
     setLoading(true);
     setError(null);
-    
+
     // Track connection attempts
     let connectionAttempts = 0;
     const maxConnectionAttempts = 3;
     let connectionTimer: ReturnType<typeof setTimeout> | null = null;
-    
+
     // Function to create and connect WebSocket
     const connectWebSocket = () => {
       // Determine WebSocket URL based on current location
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = `${protocol}//${window.location.host}/ws/flow/${flowId}`;
-      
-      console.log(`Connecting to WebSocket (attempt ${connectionAttempts + 1}): ${wsUrl}`);
-      
+
+      console.log(
+        `Connecting to WebSocket (attempt ${connectionAttempts + 1}): ${wsUrl}`
+      );
+
       const newSocket = new WebSocket(wsUrl);
-      
+
       // Set a timeout for connection establishment
       const connectionTimeout = setTimeout(() => {
         if (newSocket.readyState !== WebSocket.OPEN) {
           console.warn("WebSocket connection timeout");
           newSocket.close();
-          
+
           // Try to reconnect if we haven't exceeded max attempts
           if (connectionAttempts < maxConnectionAttempts) {
             connectionAttempts++;
-            console.log(`Retrying connection (${connectionAttempts}/${maxConnectionAttempts})`);
+            console.log(
+              `Retrying connection (${connectionAttempts}/${maxConnectionAttempts})`
+            );
             connectionTimer = setTimeout(connectWebSocket, 1000); // Wait 1 second before retry
           } else {
-            setError("Failed to connect to flow execution after multiple attempts. Please try again.");
+            setError(
+              "Failed to connect to flow execution after multiple attempts. Please try again."
+            );
             setLoading(false);
           }
         }
@@ -746,10 +763,57 @@ const FlowCanvas = ({
       newSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log("Flow WebSocket message:", data);
+          console.log("Flow WebSocket message received:", data);
 
           if (data.type === "flow_state") {
-            setState(data.payload);
+            console.log("Processing flow_state update", {
+              flowId,
+              status: data.payload?.status,
+              stepsCount: data.payload?.steps?.length || 0,
+              timestamp: new Date().toISOString(),
+            });
+
+            // Deep copy to avoid state mutation issues
+            setState((prevState) => {
+              // If no previous state, just use the new payload
+              if (!prevState) return data.payload;
+
+              const newState = JSON.parse(JSON.stringify(prevState));
+
+              // Update flow status
+              newState.status = data.payload.status;
+
+              // Update outputs if available
+              if (data.payload.outputs) {
+                newState.outputs = data.payload.outputs;
+              }
+
+              // Update steps using a Map for efficient merging
+              if (data.payload.steps && Array.isArray(data.payload.steps)) {
+                const stepMap = new Map(
+                  newState.steps.map((s: any) => [s.id, s])
+                );
+
+                data.payload.steps.forEach((newStep: any) => {
+                  stepMap.set(newStep.id, {
+                    ...(stepMap.get(newStep.id) || {}),
+                    ...newStep,
+                  });
+                });
+
+                newState.steps = Array.from(stepMap.values());
+              }
+
+              // Update errors if any
+              if (data.payload.errors && Array.isArray(data.payload.errors)) {
+                newState.errors = [
+                  ...(newState.errors || []),
+                  ...data.payload.errors,
+                ];
+              }
+
+              return newState;
+            });
           } else if (data.type === "error") {
             setError(data.message || "An error occurred during flow execution");
           }
@@ -761,7 +825,7 @@ const FlowCanvas = ({
       newSocket.onerror = (event) => {
         console.error("WebSocket error:", event);
         clearTimeout(connectionTimeout);
-        
+
         // Only set error if we've exhausted our retries
         if (connectionAttempts >= maxConnectionAttempts) {
           setError("Failed to connect to flow execution. Please try again.");
@@ -772,18 +836,24 @@ const FlowCanvas = ({
       newSocket.onclose = (event) => {
         console.log("WebSocket connection closed", event);
         clearTimeout(connectionTimeout);
-        
+
         // If this wasn't a normal closure and we haven't exceeded retries, try to reconnect
-        if (event.code !== 1000 && event.code !== 1001 && connectionAttempts < maxConnectionAttempts) {
+        if (
+          event.code !== 1000 &&
+          event.code !== 1001 &&
+          connectionAttempts < maxConnectionAttempts
+        ) {
           connectionAttempts++;
-          console.log(`Connection closed unexpectedly. Retrying (${connectionAttempts}/${maxConnectionAttempts})`);
+          console.log(
+            `Connection closed unexpectedly. Retrying (${connectionAttempts}/${maxConnectionAttempts})`
+          );
           connectionTimer = setTimeout(connectWebSocket, 1000);
         }
       };
 
       setSocket(newSocket);
     };
-    
+
     // Start the connection process
     connectWebSocket();
 
@@ -792,7 +862,7 @@ const FlowCanvas = ({
       if (socket) {
         socket.close();
       }
-      
+
       // Clear any pending connection timers
       if (connectionTimer) {
         clearTimeout(connectionTimer);
@@ -800,132 +870,118 @@ const FlowCanvas = ({
     };
   }, [flowId, isRunning, resetKey]);
 
-  // Create nodes and edges based on flow state for execution view
+  // Update nodes and edges based on flow state during execution
   useEffect(() => {
-    if (!state || viewMode !== "execution") return;
+    if (!state) return;
 
-    const newNodes: Node[] = [];
-    const newEdges: Edge[] = [];
+    // Use callback to get current nodes and edges to avoid infinite loop
+    setNodes((currentNodes) => {
+      if (currentNodes.length === 0) return currentNodes;
 
-    // Create flow node (main/root node)
-    const flowNode: Node = {
-      id: `flow-${state.id}`,
-      type: "flowNode",
-      position: { x: 400, y: 50 },
-      data: {
-        label: state.name,
-        status: state.status,
-        id: state.id,
-      },
-    };
-    newNodes.push(flowNode);
+      // Create a map of existing nodes for easy lookup
+      const nodeMap = new Map(currentNodes.map((node) => [node.id, node]));
 
-    // Create step nodes with horizontal positioning
-    const stepCount = state.steps.length;
-    const stepWidth = 250;
-    const totalWidth = stepCount * stepWidth;
-    const startX = 400 - totalWidth / 2 + stepWidth / 2;
+      // Update the flow node status if it exists
+      const flowNodeId = `flow-${state.id}`;
+      const updatedNodes = [...currentNodes];
 
-    state.steps.forEach((step, index) => {
-      // Create step node
-      const stepNode: Node = {
-        id: `step-${step.id}`,
-        type: "stepNode",
-        position: { x: startX + index * stepWidth, y: 200 },
-        data: {
-          label: step.name,
-          description: step.description,
-          status: step.status,
-          id: step.id,
-          inputs: step.inputs,
-          outputs: step.outputs,
-          error: step.error,
-          isFirst: index === 0,
-          isLast: index === stepCount - 1,
-        },
-      };
-      newNodes.push(stepNode);
+      // Update flow node if it exists
+      const flowNodeIndex = currentNodes.findIndex((n) => n.id === flowNodeId);
+      if (flowNodeIndex >= 0) {
+        updatedNodes[flowNodeIndex] = {
+          ...currentNodes[flowNodeIndex],
+          data: {
+            ...currentNodes[flowNodeIndex].data,
+            status: state.status,
+          },
+        };
+      }
 
-      // Create edge from flow to step
-      newEdges.push({
-        id: `flow-to-step-${step.id}`,
-        source: `flow-${state.id}`,
-        target: `step-${step.id}`,
-        type: "smoothstep",
-        animated: step.status === "running",
-        style: {
-          stroke: getStatusColor(step.status),
-          strokeWidth: 2,
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: getStatusColor(step.status),
-        },
+      // Update step nodes with their current status
+      state.steps.forEach((step) => {
+        const stepNodeId = `method-${step.id}`;
+        const nodeIndex = currentNodes.findIndex((n) => n.id === stepNodeId);
+
+        if (nodeIndex >= 0) {
+          // Update existing node with new status and outputs
+          updatedNodes[nodeIndex] = {
+            ...currentNodes[nodeIndex],
+            data: {
+              ...currentNodes[nodeIndex].data,
+              status: step.status,
+              outputs: step.outputs,
+              error: step.error,
+            },
+            className: getStatusAnimation(step.status),
+          };
+        }
       });
 
-      // Create edges between steps based on dependencies
-      if (step.dependencies && step.dependencies.length > 0) {
-        step.dependencies.forEach((depId) => {
-          newEdges.push({
-            id: `step-${depId}-to-step-${step.id}`,
-            source: `step-${depId}`,
-            target: `step-${step.id}`,
-            type: "smoothstep",
-            animated: step.status === "running",
-            style: {
-              stroke: "#ff9800",
-              strokeWidth: 2,
-              strokeDasharray: "5 5",
-            },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: "#ff9800",
-            },
-          });
-        });
-      }
+      // Output node has been removed as per user request
+      // Flow results will only be displayed in the results section below the visualization
+
+      return updatedNodes;
     });
 
-    // Create output node if flow is completed
-    if (
-      state.status === "completed" &&
-      Object.keys(state.outputs || {}).length > 0
-    ) {
-      const outputNode: Node = {
-        id: "output-node",
-        type: "outputNode",
-        position: { x: 400, y: 350 },
-        data: {
-          outputs: state.outputs,
-        },
-      };
-      newNodes.push(outputNode);
+    // Update edges separately
+    setEdges((currentEdges) => {
+      const updatedEdges = [...currentEdges];
 
-      // Create edge from flow to output
-      newEdges.push({
-        id: "flow-to-output",
-        source: `flow-${state.id}`,
-        target: "output-node",
-        type: "smoothstep",
-        style: {
-          stroke: "#4caf50",
-          strokeWidth: 2,
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: "#4caf50",
-        },
+      // Update edges connected to step nodes
+      state.steps.forEach((step) => {
+        const stepNodeId = `method-${step.id}`;
+
+        updatedEdges.forEach((edge, index) => {
+          if (edge.source === stepNodeId || edge.target === stepNodeId) {
+            updatedEdges[index] = {
+              ...edge,
+              animated: step.status === "running",
+              style: {
+                ...edge.style,
+                stroke: getStatusColor(step.status),
+                strokeWidth: step.status === "running" ? 3 : 2,
+                opacity: step.status === "pending" ? 0.6 : 1,
+              },
+              markerEnd: edge.markerEnd
+                ? {
+                    ...(edge.markerEnd as any),
+                    color: getStatusColor(step.status),
+                  }
+                : undefined,
+            };
+          }
+        });
       });
-    }
 
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-      newNodes,
-      newEdges,
-      layoutDirection
-    );
-    setNodes(layoutedNodes);
-    setEdges(layoutedEdges);
-  }, [state, setNodes, setEdges, layoutDirection]);
+      // Add output edge if flow is completed and it doesn't exist yet
+      if (
+        state.status === "completed" &&
+        state.outputs &&
+        (typeof state.outputs === "string"
+          ? state.outputs.trim().length > 0
+          : Object.keys(state.outputs).length > 0) &&
+        !currentEdges.some((e) => e.id === "flow-to-output")
+      ) {
+        const flowNodeId = `flow-${state.id}`;
+        updatedEdges.push({
+          id: "flow-to-output",
+          source: flowNodeId,
+          target: "output-node",
+          type: "smoothstep",
+          style: {
+            stroke: "#4caf50",
+            strokeWidth: 2,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "#4caf50",
+          },
+        });
+      }
+
+      return updatedEdges;
+    });
+  }, [state]);
 
   // Update layout when nodes, edges, or layout direction changes
   useEffect(() => {
@@ -962,18 +1018,34 @@ const FlowCanvas = ({
   const getStatusColor = (status: string) => {
     switch (status) {
       case "running":
-        return "#2196f3"; // Blue
+        return "#2196f3"; // Bright Blue
       case "completed":
-        return "#4caf50"; // Green
+        return "#4caf50"; // Bright Green
       case "failed":
-        return "#f44336"; // Red
+        return "#f44336"; // Bright Red
+      case "pending":
+        return "#9e9e9e"; // Gray
+      case "initializing":
+        return "#9c27b0"; // Purple
       default:
         return "#9e9e9e"; // Gray
     }
   };
 
-  // Create visualization for initialization view
-  const createInitializationVisualization = (flowData: any) => {
+  // Helper function to get animation class based on status
+  const getStatusAnimation = (status: string) => {
+    switch (status) {
+      case "running":
+        return "animate-pulse-subtle";
+      case "initializing":
+        return "animate-fade-in";
+      default:
+        return "";
+    }
+  };
+
+  // Create initial visualization that will be updated during execution
+  const createInitialVisualization = (flowData: any) => {
     if (!flowData || !flowData.methods) return;
 
     const newNodes: Node[] = [];
@@ -1097,8 +1169,8 @@ const FlowCanvas = ({
   };
 
   return (
-    <div className="w-full h-full border rounded-lg overflow-hidden bg-background flex flex-col">
-      <div className="p-4 border-b flex justify-between items-center flex-shrink-0">
+    <Card className="p-6 mb-6 overflow-hidden">
+      <div className="p-4 flex justify-between items-center flex-shrink-0">
         <h3 className="font-semibold text-lg">Flow Visualization</h3>
         <Button
           variant="outline"
@@ -1113,7 +1185,7 @@ const FlowCanvas = ({
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
             <p className="text-sm text-muted-foreground">
-              {viewMode === "execution"
+              {loading
                 ? "Connecting to flow execution..."
                 : "Loading flow structure..."}
             </p>
@@ -1130,33 +1202,22 @@ const FlowCanvas = ({
         </div>
       )}
 
-      {viewMode === "execution" && !isRunning && !state && !loading && (
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center max-w-md">
-            <h3 className="text-lg font-medium mb-2">
-              Flow Execution Visualization
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Run the flow to see its execution visualized here.
-            </p>
+      {!flowStructure &&
+        nodes.length === 0 &&
+        !loading &&
+        !loadingStructure &&
+        !error && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center max-w-md">
+              <h3 className="text-lg font-medium mb-2">Flow Visualization</h3>
+              <p className="text-sm text-muted-foreground">
+                Select a flow to visualize its structure.
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {viewMode === "init" && !flowStructure && !loadingStructure && !error && (
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center max-w-md">
-            <h3 className="text-lg font-medium mb-2">
-              Flow Structure Visualization
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Select a flow to visualize its structure.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="flex-grow w-full h-full relative">
+      <div className="h-[600px] border rounded-md overflow-hidden mb-6">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1179,7 +1240,143 @@ const FlowCanvas = ({
           <MiniMap />
         </ReactFlow>
       </div>
-    </div>
+
+      {/* Flow Results Section */}
+      {state?.status === "completed" &&
+        state?.outputs &&
+        (typeof state.outputs === "string"
+          ? state.outputs.trim().length > 0
+          : Object.keys(state.outputs).length > 0) && (
+          <div className="mt-4">
+            <h3 className="text-lg font-semibold mb-4">Flow Results</h3>
+            <div className="p-6 rounded-lg border bg-card overflow-auto">
+              <div className="text-base leading-7">
+                {typeof state.outputs === "string" ? (
+                  <ReactMarkdown
+                    components={{
+                      h1: ({ ...props }) => (
+                        <h1
+                          className="text-2xl font-bold mt-6 mb-4"
+                          {...props}
+                        />
+                      ),
+                      h2: ({ ...props }) => (
+                        <h2
+                          className="text-xl font-bold mt-5 mb-3"
+                          {...props}
+                        />
+                      ),
+                      h3: ({ ...props }) => (
+                        <h3
+                          className="text-lg font-bold mt-4 mb-2"
+                          {...props}
+                        />
+                      ),
+                      p: ({ ...props }) => <p className="mb-4" {...props} />,
+                      ul: ({ ...props }) => (
+                        <ul className="list-disc pl-6 mb-4" {...props} />
+                      ),
+                      ol: ({ ...props }) => (
+                        <ol className="list-decimal pl-6 mb-4" {...props} />
+                      ),
+                      li: ({ ...props }) => <li className="mb-1" {...props} />,
+                      a: ({ ...props }) => (
+                        <a
+                          className="text-blue-500 hover:underline"
+                          {...props}
+                        />
+                      ),
+                      blockquote: ({ ...props }) => (
+                        <blockquote
+                          className="border-l-4 border-muted pl-4 italic my-4"
+                          {...props}
+                        />
+                      ),
+                      code: ({ children, className, ...props }: any) => {
+                        const match = /language-(\w+)/.exec(className || "");
+                        const isInline =
+                          !match && !children?.toString().includes("\n");
+                        return isInline ? (
+                          <code
+                            className="bg-muted px-1 py-0.5 rounded"
+                            {...props}
+                          >
+                            {children}
+                          </code>
+                        ) : (
+                          <pre className="bg-muted p-4 rounded-md overflow-x-auto mb-4">
+                            <code className={className} {...props}>
+                              {children}
+                            </code>
+                          </pre>
+                        );
+                      },
+                    }}
+                  >
+                    {state.outputs}
+                  </ReactMarkdown>
+                ) : (
+                  <div className="space-y-4">
+                    {Object.entries(state.outputs).map(([key, value]) => (
+                      <div
+                        key={key}
+                        className="border-b border-muted pb-4 last:border-b-0"
+                      >
+                        <h4 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-2">
+                          {key}
+                        </h4>
+                        <div className="text-sm">
+                          {typeof value === "string" ? (
+                            <ReactMarkdown
+                              components={{
+                                p: ({ ...props }) => (
+                                  <p className="mb-2" {...props} />
+                                ),
+                                code: ({
+                                  children,
+                                  className,
+                                  ...props
+                                }: any) => {
+                                  const match = /language-(\w+)/.exec(
+                                    className || ""
+                                  );
+                                  const isInline =
+                                    !match &&
+                                    !children?.toString().includes("\n");
+                                  return isInline ? (
+                                    <code
+                                      className="bg-muted px-1 py-0.5 rounded"
+                                      {...props}
+                                    >
+                                      {children}
+                                    </code>
+                                  ) : (
+                                    <pre className="bg-muted p-2 rounded-md overflow-x-auto mb-2">
+                                      <code className={className} {...props}>
+                                        {children}
+                                      </code>
+                                    </pre>
+                                  );
+                                },
+                              }}
+                            >
+                              {value}
+                            </ReactMarkdown>
+                          ) : (
+                            <pre className="bg-muted p-2 rounded-md overflow-x-auto text-xs">
+                              {JSON.stringify(value, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+    </Card>
   );
 };
 
