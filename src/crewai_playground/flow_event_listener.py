@@ -157,18 +157,28 @@ class FlowWebSocketEventListener:
     
     async def _handle_flow_finished(self, flow_id: str, event: FlowFinishedEvent):
         """Handle flow finished event asynchronously."""
+        logging.info(f"Flow finished event received for flow: {flow_id}, name: {event.flow_name}")
+        
+        # Check if this is an internal flow ID that needs to be mapped to an API flow ID
+        from .flow_api import reverse_flow_id_mapping
+        api_flow_id = reverse_flow_id_mapping.get(flow_id)
+        broadcast_flow_id = api_flow_id if api_flow_id else flow_id
         
         # Get current flow state
-        if flow_id not in flow_states:
-            logger.warning(f"No flow state found for flow completion: {flow_id}")
+        if broadcast_flow_id not in flow_states:
+            logger.warning(f"No flow state found for flow completion: {broadcast_flow_id}")
             return
         
-        flow_state = flow_states[flow_id]
+        flow_state = flow_states[broadcast_flow_id]
         flow_state["status"] = "completed"
         flow_state["timestamp"] = asyncio.get_event_loop().time()
         
+        # Add outputs if available
+        if hasattr(event, 'outputs') and event.outputs:
+            flow_state["outputs"] = event.outputs
+        
         # Broadcast flow state update
-        await broadcast_flow_update(flow_id, {"type": "flow_state", "payload": flow_state})
+        await broadcast_flow_update(broadcast_flow_id, {"type": "flow_state", "payload": flow_state})
     
     async def _handle_method_started(self, flow_id: str, event: MethodExecutionStartedEvent):
         """Handle method execution started event asynchronously."""

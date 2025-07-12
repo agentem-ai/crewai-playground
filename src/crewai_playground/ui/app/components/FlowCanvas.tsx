@@ -18,6 +18,7 @@ import dagre from "@dagrejs/dagre";
 import { Loader2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Badge } from "~/components/ui/badge";
+import ReactMarkdown from "react-markdown";
 import { Button } from "~/components/ui/button";
 import "./flow-node.css";
 
@@ -1242,6 +1243,136 @@ const FlowCanvas = ({
           <MiniMap />
         </ReactFlow>
       </div>
+      
+      {/* Flow Results Section */}
+      {state?.status === "completed" && state?.outputs && Object.keys(state.outputs).length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-lg font-semibold mb-4">Flow Results</h3>
+          <div className="p-6 rounded-lg border bg-card overflow-auto">
+            <div className="text-base leading-7">
+              {typeof state.outputs === 'string' ? (
+                <ReactMarkdown
+                  components={{
+                    h1: ({ ...props }) => (
+                      <h1
+                        className="text-2xl font-bold mt-6 mb-4"
+                        {...props}
+                      />
+                    ),
+                    h2: ({ ...props }) => (
+                      <h2
+                        className="text-xl font-bold mt-5 mb-3"
+                        {...props}
+                      />
+                    ),
+                    h3: ({ ...props }) => (
+                      <h3
+                        className="text-lg font-bold mt-4 mb-2"
+                        {...props}
+                      />
+                    ),
+                    p: ({ ...props }) => (
+                      <p className="mb-4" {...props} />
+                    ),
+                    ul: ({ ...props }) => (
+                      <ul className="list-disc pl-6 mb-4" {...props} />
+                    ),
+                    ol: ({ ...props }) => (
+                      <ol className="list-decimal pl-6 mb-4" {...props} />
+                    ),
+                    li: ({ ...props }) => (
+                      <li className="mb-1" {...props} />
+                    ),
+                    a: ({ ...props }) => (
+                      <a
+                        className="text-blue-500 hover:underline"
+                        {...props}
+                      />
+                    ),
+                    blockquote: ({ ...props }) => (
+                      <blockquote
+                        className="border-l-4 border-muted pl-4 italic my-4"
+                        {...props}
+                      />
+                    ),
+                    code: ({ children, className, ...props }: any) => {
+                      const match = /language-(\w+)/.exec(className || "");
+                      const isInline =
+                        !match && !children?.toString().includes("\n");
+                      return isInline ? (
+                        <code
+                          className="bg-muted px-1 py-0.5 rounded"
+                          {...props}
+                        >
+                          {children}
+                        </code>
+                      ) : (
+                        <pre
+                          className="bg-muted p-4 rounded-md overflow-x-auto mb-4"
+                        >
+                          <code className={className} {...props}>
+                            {children}
+                          </code>
+                        </pre>
+                      );
+                    },
+                  }}
+                >
+                  {state.outputs}
+                </ReactMarkdown>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(state.outputs).map(([key, value]) => (
+                    <div key={key} className="border-b border-muted pb-4 last:border-b-0">
+                      <h4 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground mb-2">
+                        {key}
+                      </h4>
+                      <div className="text-sm">
+                        {typeof value === 'string' ? (
+                          <ReactMarkdown
+                            components={{
+                              p: ({ ...props }) => (
+                                <p className="mb-2" {...props} />
+                              ),
+                              code: ({ children, className, ...props }: any) => {
+                                const match = /language-(\w+)/.exec(className || "");
+                                const isInline =
+                                  !match && !children?.toString().includes("\n");
+                                return isInline ? (
+                                  <code
+                                    className="bg-muted px-1 py-0.5 rounded"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </code>
+                                ) : (
+                                  <pre
+                                    className="bg-muted p-2 rounded-md overflow-x-auto mb-2"
+                                  >
+                                    <code className={className} {...props}>
+                                      {children}
+                                    </code>
+                                  </pre>
+                                );
+                              },
+                            }}
+                          >
+                            {value}
+                          </ReactMarkdown>
+                        ) : (
+                          <pre className="bg-muted p-2 rounded-md overflow-x-auto text-xs">
+                            {JSON.stringify(value, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
