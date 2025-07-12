@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crewai-playground"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 authors = [{ name = "Lennex Zinyando", email = "brizdigital@gmail.com" }]
-description = "Web UI for CrewAI playground functionality"
+description = "CrewAI playground web interface"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -25,8 +25,8 @@ dependencies = [
 crewai-playground = "crewai_playground.server:main"
 
 [project.urls]
-"Github" = "https://github.com/agentem-ai/crewai_playground"
-"Bug Tracker" = "https://github.com/agentem-ai/crewai_playground/issues"
+"Github" = "https://github.com/agentem-ai/crewai-playground"
+"Bug Tracker" = "https://github.com/agentem-ai/crewai-playground/issues"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
