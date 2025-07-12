@@ -191,7 +191,6 @@ interface FlowCanvasProps {
   flowId: string;
   isRunning: boolean;
   resetKey: number; // Key to trigger reset
-  viewMode?: "init" | "execution"; // New prop to control view mode
 }
 
 interface FlowState {
@@ -599,7 +598,6 @@ const FlowCanvas = ({
   flowId,
   isRunning,
   resetKey,
-  viewMode = "execution",
 }: FlowCanvasProps) => {
   const navigate = useNavigate();
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -643,24 +641,23 @@ const FlowCanvas = ({
   const [flowStructure, setFlowStructure] = useState<any>(null);
   const [loadingStructure, setLoadingStructure] = useState(false);
 
-  // Reset state when resetKey changes
+  // Reset execution state when resetKey changes, but preserve flow structure
   useEffect(() => {
     setState(null);
     setError(null);
-    setNodes([]);
-    setEdges([]);
-    setFlowStructure(null);
+    // Don't clear nodes/edges or flowStructure - we want to preserve the visualization
+    // The nodes and edges will be updated by the WebSocket messages during execution
 
     // Close existing socket if any
     if (socket) {
       socket.close();
       setSocket(null);
     }
-  }, [resetKey, setNodes, setEdges]);
+  }, [resetKey]);
 
-  // Fetch flow structure for initialization view
+  // Fetch flow structure when flowId changes or component mounts
   useEffect(() => {
-    if (!flowId || viewMode !== "init") return;
+    if (!flowId) return;
 
     const fetchFlowStructure = async () => {
       setLoadingStructure(true);
@@ -704,7 +701,7 @@ const FlowCanvas = ({
 
         if (data.status === "success" && data.flow) {
           setFlowStructure(data.flow);
-          createInitializationVisualization(data.flow);
+          createInitialVisualization(data.flow);
         } else {
           setError(data.detail || "Failed to fetch flow structure");
         }
@@ -717,11 +714,11 @@ const FlowCanvas = ({
     };
 
     fetchFlowStructure();
-  }, [flowId, viewMode]);
+  }, [flowId]);
 
   // Connect to WebSocket when flowId changes or isRunning becomes true
   useEffect(() => {
-    if (!flowId || !isRunning || viewMode !== "execution") return;
+    if (!flowId || !isRunning) return;
 
     setLoading(true);
     setError(null);
@@ -866,143 +863,131 @@ const FlowCanvas = ({
     };
   }, [flowId, isRunning, resetKey]);
 
-  // Create nodes and edges based on flow state for execution view
+  // Update nodes and edges based on flow state during execution
   useEffect(() => {
-    if (!state || viewMode !== "execution") return;
-
-    const newNodes: Node[] = [];
-    const newEdges: Edge[] = [];
-
-    // Create flow node (main/root node)
-    const flowNode: Node = {
-      id: `flow-${state.id}`,
-      type: "flowNode",
-      position: { x: 400, y: 50 },
-      data: {
-        label: state.name,
-        status: state.status,
-        id: state.id,
-      },
-    };
-    newNodes.push(flowNode);
-
-    // Create step nodes with horizontal positioning
-    const stepCount = state.steps.length;
-    const stepWidth = 250;
-    const totalWidth = stepCount * stepWidth;
-    const startX = 400 - totalWidth / 2 + stepWidth / 2;
-
-    state.steps.forEach((step, index) => {
-      // Create step node
-      const stepNode: Node = {
-        id: `step-${step.id}`,
-        type: "stepNode",
-        position: { x: startX + index * stepWidth, y: 200 },
-        data: {
-          label: step.name,
-          description: step.description,
-          status: step.status,
-          id: step.id,
-          inputs: step.inputs,
-          outputs: step.outputs,
-          error: step.error,
-          isFirst: index === 0,
-          isLast: index === stepCount - 1,
-        },
-      };
-      newNodes.push(stepNode);
-
-      // Create edge from flow to step
-      newEdges.push({
-        id: `flow-to-step-${step.id}`,
-        source: `flow-${state.id}`,
-        target: `step-${step.id}`,
-        type: "smoothstep",
-        animated: step.status === "running",
-        style: {
-          stroke: getStatusColor(step.status),
-          strokeWidth: step.status === "running" ? 3 : 2,
-          opacity: step.status === "pending" ? 0.6 : 1,
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: getStatusColor(step.status),
-          width: step.status === "running" ? 20 : 15,
-          height: step.status === "running" ? 20 : 15,
-        },
+    if (!state) return;
+    
+    // Use callback to get current nodes and edges to avoid infinite loop
+    setNodes((currentNodes) => {
+      if (currentNodes.length === 0) return currentNodes;
+      
+      // Create a map of existing nodes for easy lookup
+      const nodeMap = new Map(currentNodes.map(node => [node.id, node]));
+      
+      // Update the flow node status if it exists
+      const flowNodeId = `flow-${state.id}`;
+      const updatedNodes = [...currentNodes];
+    
+      // Update flow node if it exists
+      const flowNodeIndex = currentNodes.findIndex(n => n.id === flowNodeId);
+      if (flowNodeIndex >= 0) {
+        updatedNodes[flowNodeIndex] = {
+          ...currentNodes[flowNodeIndex],
+          data: {
+            ...currentNodes[flowNodeIndex].data,
+            status: state.status
+          }
+        };
+      }
+    
+      // Update step nodes with their current status
+      state.steps.forEach(step => {
+        const stepNodeId = `method-${step.id}`;
+        const nodeIndex = currentNodes.findIndex(n => n.id === stepNodeId);
+        
+        if (nodeIndex >= 0) {
+          // Update existing node with new status and outputs
+          updatedNodes[nodeIndex] = {
+            ...currentNodes[nodeIndex],
+            data: {
+              ...currentNodes[nodeIndex].data,
+              status: step.status,
+              outputs: step.outputs,
+              error: step.error
+            },
+            className: getStatusAnimation(step.status)
+          };
+        }
       });
-
-      // Create edges between steps based on dependencies
-      if (step.dependencies && step.dependencies.length > 0) {
-        step.dependencies.forEach((depId) => {
-          // Get the dependency step to check its status
-          const depStep = state.steps.find((s) => s.id === depId);
-          const isDependencyCompleted = depStep?.status === "completed";
-          const isStepRunning = step.status === "running";
-          
-          newEdges.push({
-            id: `step-${depId}-to-step-${step.id}`,
-            source: `step-${depId}`,
-            target: `step-${step.id}`,
-            type: "smoothstep",
-            animated: isStepRunning,
-            style: {
-              stroke: isDependencyCompleted ? "#4caf50" : (isStepRunning ? "#2196f3" : "#ff9800"),
-              strokeWidth: isStepRunning ? 3 : 2,
-              strokeDasharray: isDependencyCompleted ? "" : "5 5",
-              opacity: isDependencyCompleted ? 1 : 0.8,
-            },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: isDependencyCompleted ? "#4caf50" : (isStepRunning ? "#2196f3" : "#ff9800"),
-              width: isStepRunning ? 20 : 15,
-              height: isStepRunning ? 20 : 15,
-            },
-          });
+    
+      // Add output node if flow is completed and it doesn't exist yet
+      if (
+        state.status === "completed" &&
+        Object.keys(state.outputs || {}).length > 0 &&
+        !nodeMap.has("output-node")
+      ) {
+        // Find the last node's position to place output below it
+        const lastNodeY = Math.max(...currentNodes.map(n => n.position.y));
+        const centerX = currentNodes.reduce((sum, n) => sum + n.position.x, 0) / currentNodes.length;
+        
+        const outputNode: Node = {
+          id: "output-node",
+          type: "outputNode",
+          position: { x: centerX, y: lastNodeY + 200 },
+          data: {
+            outputs: state.outputs,
+          },
+        };
+        updatedNodes.push(outputNode);
+      }
+      
+      return updatedNodes;
+    });
+    
+    // Update edges separately
+    setEdges((currentEdges) => {
+      const updatedEdges = [...currentEdges];
+      
+      // Update edges connected to step nodes
+      state.steps.forEach(step => {
+        const stepNodeId = `method-${step.id}`;
+        
+        updatedEdges.forEach((edge, index) => {
+          if (edge.source === stepNodeId || edge.target === stepNodeId) {
+            updatedEdges[index] = {
+              ...edge,
+              animated: step.status === "running",
+              style: {
+                ...edge.style,
+                stroke: getStatusColor(step.status),
+                strokeWidth: step.status === "running" ? 3 : 2,
+                opacity: step.status === "pending" ? 0.6 : 1
+              },
+              markerEnd: edge.markerEnd ? {
+                ...edge.markerEnd as any,
+                color: getStatusColor(step.status)
+              } : undefined
+            };
+          }
+        });
+      });
+      
+      // Add output edge if flow is completed and it doesn't exist yet
+      if (
+        state.status === "completed" &&
+        Object.keys(state.outputs || {}).length > 0 &&
+        !currentEdges.some(e => e.id === "flow-to-output")
+      ) {
+        const flowNodeId = `flow-${state.id}`;
+        updatedEdges.push({
+          id: "flow-to-output",
+          source: flowNodeId,
+          target: "output-node",
+          type: "smoothstep",
+          style: {
+            stroke: "#4caf50",
+            strokeWidth: 2,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "#4caf50",
+          },
         });
       }
+      
+      return updatedEdges;
     });
-
-    // Create output node if flow is completed
-    if (
-      state.status === "completed" &&
-      Object.keys(state.outputs || {}).length > 0
-    ) {
-      const outputNode: Node = {
-        id: "output-node",
-        type: "outputNode",
-        position: { x: 400, y: 350 },
-        data: {
-          outputs: state.outputs,
-        },
-      };
-      newNodes.push(outputNode);
-
-      // Create edge from flow to output
-      newEdges.push({
-        id: "flow-to-output",
-        source: `flow-${state.id}`,
-        target: "output-node",
-        type: "smoothstep",
-        style: {
-          stroke: "#4caf50",
-          strokeWidth: 2,
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: "#4caf50",
-        },
-      });
-    }
-
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-      newNodes,
-      newEdges,
-      layoutDirection
-    );
-    setNodes(layoutedNodes);
-    setEdges(layoutedEdges);
-  }, [state, setNodes, setEdges, layoutDirection]);
+  }, [state]);
 
   // Update layout when nodes, edges, or layout direction changes
   useEffect(() => {
@@ -1065,8 +1050,8 @@ const FlowCanvas = ({
     }
   };
 
-  // Create visualization for initialization view
-  const createInitializationVisualization = (flowData: any) => {
+  // Create initial visualization that will be updated during execution
+  const createInitialVisualization = (flowData: any) => {
     if (!flowData || !flowData.methods) return;
 
     const newNodes: Node[] = [];
@@ -1206,9 +1191,7 @@ const FlowCanvas = ({
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
             <p className="text-sm text-muted-foreground">
-              {viewMode === "execution"
-                ? "Connecting to flow execution..."
-                : "Loading flow structure..."}
+              {loading ? "Connecting to flow execution..." : "Loading flow structure..."}
             </p>
           </div>
         </div>
@@ -1223,24 +1206,11 @@ const FlowCanvas = ({
         </div>
       )}
 
-      {viewMode === "execution" && !isRunning && !state && !loading && (
+      {!flowStructure && nodes.length === 0 && !loading && !loadingStructure && !error && (
         <div className="flex items-center justify-center h-full">
           <div className="text-center max-w-md">
             <h3 className="text-lg font-medium mb-2">
-              Flow Execution Visualization
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Run the flow to see its execution visualized here.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {viewMode === "init" && !flowStructure && !loadingStructure && !error && (
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center max-w-md">
-            <h3 className="text-lg font-medium mb-2">
-              Flow Structure Visualization
+              Flow Visualization
             </h3>
             <p className="text-sm text-muted-foreground">
               Select a flow to visualize its structure.
