@@ -32,10 +32,10 @@ function Sidebar() {
 
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/" },
-    { icon: BotMessageSquare, label: "Chat Mode", path: "/chat" },
-    { icon: Zap, label: "Kickoff Mode", path: "/kickoff" },
+    { icon: BotMessageSquare, label: "Chat", path: "/chat" },
+    { icon: Zap, label: "Crews", path: "/kickoff" },
     { icon: Wrench, label: "Tools", path: "/tools" },
-    { icon: Network, label: "Flow Mode", path: "/flow" },
+    { icon: Network, label: "Flows", path: "/flow" },
   ];
 
   return (
@@ -67,7 +67,12 @@ interface StatCardProps {
   isLoading?: boolean;
 }
 
-function StatCard({ title, value, icon: Icon, isLoading = false }: StatCardProps) {
+function StatCard({
+  title,
+  value,
+  icon: Icon,
+  isLoading = false,
+}: StatCardProps) {
   return (
     <div className="bg-card p-6 rounded-lg shadow-sm">
       <div className="flex items-center justify-between mb-4">
@@ -133,7 +138,7 @@ interface RecentTraceCardProps {
 
 function RecentTraceCard({ trace }: RecentTraceCardProps) {
   const date = new Date(trace.timestamp * 1000).toLocaleString();
-  
+
   return (
     <Card className="p-4">
       <div className="flex justify-between items-center">
@@ -141,7 +146,11 @@ function RecentTraceCard({ trace }: RecentTraceCardProps) {
           <div className="font-medium">{trace.crew_name || "Unknown Crew"}</div>
           <div className="text-sm text-muted-foreground">{date}</div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => window.open(`/traces/${trace.id}`, '_blank')}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.open(`/traces/${trace.id}`, "_blank")}
+        >
           View
         </Button>
       </div>
@@ -166,36 +175,36 @@ export default function Dashboard() {
     counts: {
       crews: 0,
       tools: 0,
-      flows: 0
+      flows: 0,
     },
     recent_traces: [],
-    active_flows: []
+    active_flows: [],
   });
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch('/api/dashboard');
+        const response = await fetch("/api/dashboard");
         const result = await response.json();
-        
-        if (result.status === 'success' && result.data) {
+
+        if (result.status === "success" && result.data) {
           setDashboardData(result.data);
         } else {
-          console.error('Failed to fetch dashboard data:', result);
+          console.error("Failed to fetch dashboard data:", result);
         }
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        console.error("Error fetching dashboard data:", error);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchDashboardData();
-    
+
     // Set up a refresh interval (every 30 seconds)
     const intervalId = setInterval(fetchDashboardData, 30000);
-    
+
     // Clean up the interval on component unmount
     return () => clearInterval(intervalId);
   }, []);
@@ -223,9 +232,24 @@ export default function Dashboard() {
         </header>
         <main className="flex-grow p-8 overflow-auto">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <StatCard title="Crews" value={dashboardData.counts.crews} icon={BookUser} isLoading={isLoading} />
-            <StatCard title="Tools" value={dashboardData.counts.tools} icon={Wrench} isLoading={isLoading} />
-            <StatCard title="Flows" value={dashboardData.counts.flows} icon={Network} isLoading={isLoading} />
+            <StatCard
+              title="Crews"
+              value={dashboardData.counts.crews}
+              icon={BookUser}
+              isLoading={isLoading}
+            />
+            <StatCard
+              title="Tools"
+              value={dashboardData.counts.tools}
+              icon={Wrench}
+              isLoading={isLoading}
+            />
+            <StatCard
+              title="Flows"
+              value={dashboardData.counts.flows}
+              icon={Network}
+              isLoading={isLoading}
+            />
           </div>
 
           {dashboardData.active_flows.length > 0 && (
@@ -253,19 +277,31 @@ export default function Dashboard() {
           <div className="mt-12">
             <h2 className="text-2xl font-bold mb-6">Quick Actions</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-              <Button className="h-auto py-6 flex flex-col items-center justify-center gap-2" onClick={() => window.location.href = '/chat'}>
+              <Button
+                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+                onClick={() => (window.location.href = "/chat")}
+              >
                 <BotMessageSquare className="h-8 w-8" />
                 <span>Start Chat</span>
               </Button>
-              <Button className="h-auto py-6 flex flex-col items-center justify-center gap-2" onClick={() => window.location.href = '/kickoff'}>
+              <Button
+                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+                onClick={() => (window.location.href = "/kickoff")}
+              >
                 <Zap className="h-8 w-8" />
                 <span>Kickoff Crew</span>
               </Button>
-              <Button className="h-auto py-6 flex flex-col items-center justify-center gap-2" onClick={() => window.location.href = '/flow'}>
+              <Button
+                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+                onClick={() => (window.location.href = "/flow")}
+              >
                 <Network className="h-8 w-8" />
                 <span>Run Flow</span>
               </Button>
-              <Button className="h-auto py-6 flex flex-col items-center justify-center gap-2" onClick={() => window.location.href = '/tools'}>
+              <Button
+                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+                onClick={() => (window.location.href = "/tools")}
+              >
                 <Wrench className="h-8 w-8" />
                 <span>Explore Tools</span>
               </Button>
