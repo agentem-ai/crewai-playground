@@ -157,7 +157,7 @@ const flattenSpans = (
 function formatTime(timestamp: string | number) {
   try {
     const date = typeof timestamp === 'number' 
-      ? new Date(timestamp / 1000) 
+      ? new Date(timestamp * 1000) 
       : new Date(timestamp);
     return date.toLocaleString();
   } catch (e) {
@@ -169,7 +169,7 @@ function formatTime(timestamp: string | number) {
 function calculateDuration(startTime: string | number, endTime?: string | number) {
   try {
     const start = typeof startTime === 'number' 
-      ? new Date(startTime / 1000) 
+      ? new Date(startTime * 1000) 
       : new Date(startTime);
     
     if (!endTime) {
@@ -177,7 +177,7 @@ function calculateDuration(startTime: string | number, endTime?: string | number
     }
     
     const end = typeof endTime === 'number' 
-      ? new Date(endTime / 1000) 
+      ? new Date(endTime * 1000) 
       : new Date(endTime);
     
     const durationMs = end.getTime() - start.getTime();
@@ -255,15 +255,44 @@ const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
   });
 };
 
-// Convert TraceSpan to SpanData for detail view
-const convertToSpanData = (span: TraceSpan) => {
+// Convert raw span to TimelineSpan format
+const convertToTimelineSpan = (span: TraceSpan): TimelineSpan => {
   const startTime = typeof span.start_time === 'number' 
-    ? new Date(span.start_time) 
+    ? new Date(span.start_time * 1000) 
     : new Date(span.start_time);
   
   const endTime = span.end_time 
     ? typeof span.end_time === 'number'
-      ? new Date(span.end_time)
+      ? new Date(span.end_time * 1000)
+      : new Date(span.end_time)
+    : null;
+  
+  return {
+    id: span.id,
+    name: span.name,
+    startTime,
+    endTime,
+    status: span.status,
+    parentId: span.parent_id,
+    children: span.children ? convertToTimelineSpans(span.children) : [],
+    depth: 0, // Will be calculated by TraceTimeline
+    duration: endTime && startTime 
+      ? endTime.getTime() - startTime.getTime() 
+      : 0,
+    serviceName: span.attributes?.service_name,
+    operation: span.attributes?.operation,
+  };
+};
+
+// Convert TraceSpan to SpanData for detail view
+const convertToSpanData = (span: TraceSpan) => {
+  const startTime = typeof span.start_time === 'number' 
+    ? new Date(span.start_time * 1000) 
+    : new Date(span.start_time);
+  
+  const endTime = span.end_time 
+    ? typeof span.end_time === 'number'
+      ? new Date(span.end_time * 1000)
       : new Date(span.end_time)
     : null;
   
@@ -411,6 +440,13 @@ export default function FlowTraces() {
                 trace.status === "running" ||
                 trace.status === "initializing")
           );
+          
+          // Sort traces by start_time (newest first)
+          validTraces.sort((a: any, b: any) => {
+            const timeA = typeof a.start_time === 'number' ? a.start_time : 0;
+            const timeB = typeof b.start_time === 'number' ? b.start_time : 0;
+            return timeB - timeA;
+          });
 
           console.log("Valid traces after filtering:", validTraces);
           setTraces(validTraces);
