@@ -1,25 +1,25 @@
-import { type ReactNode, useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router'
-import { Moon, Plus, Sun, Trash2 } from 'lucide-react'
-import { Button } from '~/components/ui/button'
+import { type ReactNode, useState, useEffect } from "react";
+import { useSearchParams } from "react-router";
+import { Moon, Plus, Sun, Trash2 } from "lucide-react";
+import { Button } from "~/components/ui/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "~/components/ui/select"
-import { useChatStore } from '~/lib/store'
-import { cn } from '~/lib/utils'
-import { DeleteChatModal } from './delete-chat-modal'
+} from "~/components/ui/select";
+import { useChatStore } from "~/lib/store";
+import { cn } from "~/lib/utils";
+import { DeleteChatModal } from "./delete-chat-modal";
 
 interface ChatSidebarProps {
-  children?: ReactNode
+  children?: ReactNode;
 }
 
 export const ChatSidebar = ({ children }: ChatSidebarProps) => {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [chatToDelete, setChatToDelete] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [chatToDelete, setChatToDelete] = useState<string | null>(null);
   const {
     crews,
     currentCrewId,
@@ -32,35 +32,35 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
     createChat,
     deleteChat,
     toggleDarkMode,
-  } = useChatStore()
+  } = useChatStore();
 
   // Generate a new chat ID
   const generateChatId = () => {
-    return Math.random().toString(36).substring(2, 15)
-  }
+    return Math.random().toString(36).substring(2, 15);
+  };
 
   // Set initial chat when component mounts
   useEffect(() => {
     // Fetch crews if not already loaded
     if (crews.length === 0) {
-      fetch('/api/crews')
-        .then(response => response.json())
-        .then(data => {
-          if (data.status === 'success' && Array.isArray(data.crews)) {
+      fetch("/api/crews")
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.status === "success" && Array.isArray(data.crews)) {
             setCrews(data.crews);
           }
         })
-        .catch(error => console.error('Error fetching crews:', error));
+        .catch((error) => console.error("Error fetching crews:", error));
     }
-    
+
     // Check if we have a chat ID in the URL
-    const chatIdFromUrl = searchParams.get('chatId');
-    const crewIdFromUrl = searchParams.get('crew');
-    
+    const chatIdFromUrl = searchParams.get("chatId");
+    const crewIdFromUrl = searchParams.get("crew");
+
     // Check if we have a stored chat ID in localStorage
-    const storedChatId = localStorage.getItem('crewai_chat_id');
-    const storedCrewId = localStorage.getItem('crewai_crew_id');
-    
+    const storedChatId = localStorage.getItem("crewai_chat_id");
+    const storedCrewId = localStorage.getItem("crewai_crew_id");
+
     if (!chatIdFromUrl) {
       // No chat ID in URL, check localStorage and chat history
       if (storedChatId && chatHistory[storedChatId]) {
@@ -69,12 +69,12 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
         if (storedCrewId) {
           setCurrentCrew(storedCrewId);
         }
-        
+
         // Update URL params
-        setSearchParams(params => {
-          params.set('chatId', storedChatId);
+        setSearchParams((params) => {
+          params.set("chatId", storedChatId);
           if (storedCrewId) {
-            params.set('crew', storedCrewId);
+            params.set("crew", storedCrewId);
           }
           return params;
         });
@@ -85,23 +85,23 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
           (a, b) => b.lastUpdated - a.lastUpdated
         );
         const mostRecentChat = sortedChats[0];
-        
+
         setCurrentChat(mostRecentChat.id);
         if (mostRecentChat.crewId) {
           setCurrentCrew(mostRecentChat.crewId);
         }
-        
+
         // Update localStorage
-        localStorage.setItem('crewai_chat_id', mostRecentChat.id);
+        localStorage.setItem("crewai_chat_id", mostRecentChat.id);
         if (mostRecentChat.crewId) {
-          localStorage.setItem('crewai_crew_id', mostRecentChat.crewId);
+          localStorage.setItem("crewai_crew_id", mostRecentChat.crewId);
         }
-        
+
         // Update URL params
-        setSearchParams(params => {
-          params.set('chatId', mostRecentChat.id);
+        setSearchParams((params) => {
+          params.set("chatId", mostRecentChat.id);
           if (mostRecentChat.crewId) {
-            params.set('crew', mostRecentChat.crewId);
+            params.set("crew", mostRecentChat.crewId);
           }
           return params;
         });
@@ -110,18 +110,18 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
         const newChatId = generateChatId();
         createChat(newChatId, currentCrewId);
         setCurrentChat(newChatId);
-        
+
         // Update localStorage
-        localStorage.setItem('crewai_chat_id', newChatId);
+        localStorage.setItem("crewai_chat_id", newChatId);
         if (currentCrewId) {
-          localStorage.setItem('crewai_crew_id', currentCrewId);
+          localStorage.setItem("crewai_crew_id", currentCrewId);
         }
-        
+
         // Update URL params
-        setSearchParams(params => {
-          params.set('chatId', newChatId);
+        setSearchParams((params) => {
+          params.set("chatId", newChatId);
           if (currentCrewId) {
-            params.set('crew', currentCrewId);
+            params.set("crew", currentCrewId);
           }
           return params;
         });
@@ -129,85 +129,95 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
     } else if (chatHistory[chatIdFromUrl]) {
       // Chat ID from URL exists in history, use it
       setCurrentChat(chatIdFromUrl);
-      
+
       // Update localStorage
-      localStorage.setItem('crewai_chat_id', chatIdFromUrl);
-      
+      localStorage.setItem("crewai_chat_id", chatIdFromUrl);
+
       // Handle crew ID if present
       if (crewIdFromUrl) {
         setCurrentCrew(crewIdFromUrl);
-        localStorage.setItem('crewai_crew_id', crewIdFromUrl);
+        localStorage.setItem("crewai_crew_id", crewIdFromUrl);
       }
     }
-  }, [chatHistory, currentCrewId, searchParams, setCurrentChat, setSearchParams, createChat, crews.length, setCrews, setCurrentCrew])
+  }, [
+    chatHistory,
+    currentCrewId,
+    searchParams,
+    setCurrentChat,
+    setSearchParams,
+    createChat,
+    crews.length,
+    setCrews,
+    setCurrentCrew,
+  ]);
 
   // Create a new chat
   const handleNewChat = () => {
-    const chatId = generateChatId()
-    const chatTitle = "New Chat" // Set a default title or prompt for user input
-    createChat(chatId, currentCrewId, chatTitle) // Pass the title to createChat
-    setCurrentChat(chatId)
-    setSearchParams(params => {
-      params.set('chatId', chatId)
+    const chatId = generateChatId();
+    const chatTitle = "New Chat"; // Set a default title or prompt for user input
+    createChat(chatId, currentCrewId, chatTitle); // Pass the title to createChat
+    setCurrentChat(chatId);
+    setSearchParams((params) => {
+      params.set("chatId", chatId);
       if (currentCrewId) {
-        params.set('crew', currentCrewId)
+        params.set("crew", currentCrewId);
       }
-      return params
-    })
-  }
+      return params;
+    });
+  };
 
   // Handle crew selection
   const handleCrewChange = (crewId: string) => {
-    setCurrentCrew(crewId)
-    setSearchParams(params => {
-      params.set('crew', crewId)
-      return params
-    })
-  }
+    setCurrentCrew(crewId);
+    setSearchParams((params) => {
+      params.set("crew", crewId);
+      return params;
+    });
+  };
 
   // Handle chat selection
   const handleChatSelect = (chatId: string) => {
-    setCurrentChat(chatId)
-    const chat = chatHistory[chatId]
-    
+    setCurrentChat(chatId);
+    const chat = chatHistory[chatId];
+
     // Update localStorage with selected chat
-    localStorage.setItem('crewai_chat_id', chatId);
+    localStorage.setItem("crewai_chat_id", chatId);
     if (chat.crewId) {
-      localStorage.setItem('crewai_crew_id', chat.crewId);
+      localStorage.setItem("crewai_crew_id", chat.crewId);
     }
-    
-    setSearchParams(params => {
-      params.set('chatId', chatId)
+
+    setSearchParams((params) => {
+      params.set("chatId", chatId);
       if (chat.crewId) {
-        params.set('crew', chat.crewId)
+        params.set("crew", chat.crewId);
       }
-      return params
-    })
-  }
+      return params;
+    });
+  };
 
   // Handle chat deletion
   const handleDeleteChat = (chatId: string) => {
-    setChatToDelete(chatId)
-  }
+    setChatToDelete(chatId);
+  };
 
   const confirmDelete = () => {
     if (chatToDelete) {
-      deleteChat(chatToDelete)
+      deleteChat(chatToDelete);
       if (currentChatId === chatToDelete) {
-        setCurrentChat(null)
-        setSearchParams(params => {
-          params.delete('chatId')
-          return params
-        })
+        setCurrentChat(null);
+        setSearchParams((params) => {
+          params.delete("chatId");
+          return params;
+        });
       }
-      setChatToDelete(null)
+      setChatToDelete(null);
     }
-  }
+  };
 
   // Sort chats by last updated
   const sortedChats = Object.values(chatHistory).sort(
     (a, b) => b.lastUpdated - a.lastUpdated
-  )
+  );
 
   return (
     <>
@@ -217,13 +227,11 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
         </div>
 
         <div className="p-4">
-          <Select
-            value={currentCrewId ?? ""}
-            onValueChange={handleCrewChange}
-          >
+          <Select value={currentCrewId ?? ""} onValueChange={handleCrewChange}>
             <SelectTrigger>
               <SelectValue placeholder="Select a crew">
-                {crews.find(c => c.id === currentCrewId)?.name || "Select a crew"}
+                {crews.find((c) => c.id === currentCrewId)?.name ||
+                  "Select a crew"}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -236,10 +244,7 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
           </Select>
         </div>
 
-        <Button
-          onClick={handleNewChat}
-          className="mx-4 mb-4"
-        >
+        <Button onClick={handleNewChat} className="mx-4 mb-4">
           <Plus className="mr-2 h-4 w-4" />
           New Chat
         </Button>
@@ -249,8 +254,8 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
             <div
               key={chat.id}
               className={cn(
-                'group flex items-center justify-between rounded-lg px-3 py-2 hover:bg-accent/50 cursor-pointer',
-                currentChatId === chat.id && 'bg-accent'
+                "group flex items-center justify-between rounded-lg px-3 py-2 hover:bg-accent/50 cursor-pointer",
+                currentChatId === chat.id && "bg-accent"
               )}
               onClick={() => handleChatSelect(chat.id)}
             >
@@ -267,8 +272,8 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
                 size="icon"
                 className="h-8 w-8 opacity-0 group-hover:opacity-100"
                 onClick={(e: React.MouseEvent) => {
-                  e.stopPropagation()
-                  handleDeleteChat(chat.id)
+                  e.stopPropagation();
+                  handleDeleteChat(chat.id);
                 }}
               >
                 <Trash2 className="h-4 w-4" />
@@ -283,5 +288,5 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
         onConfirm={confirmDelete}
       />
     </>
-  )
-} 
+  );
+};

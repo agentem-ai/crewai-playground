@@ -4,6 +4,7 @@ import { Button } from "~/components/ui/button";
 import { useChatStore } from "~/lib/store";
 import { Card } from "~/components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
+import { Layout } from "../components/Layout";
 import {
   MessageSquare,
   Zap,
@@ -25,39 +26,6 @@ export function meta() {
     { title: "CrewAI - Dashboard" },
     { name: "description", content: "Dashboard for CrewAI Playground" },
   ];
-}
-
-function Sidebar() {
-  const navigate = useNavigate();
-
-  const navItems = [
-    { icon: LayoutDashboard, label: "Dashboard", path: "/" },
-    { icon: BotMessageSquare, label: "Chat", path: "/chat" },
-    { icon: Zap, label: "Crews", path: "/kickoff" },
-    { icon: Wrench, label: "Tools", path: "/tools" },
-    { icon: Network, label: "Flows", path: "/flow" },
-  ];
-
-  return (
-    <aside className="w-64 flex-shrink-0 border-r bg-background p-4 flex flex-col">
-      <div className="flex items-center mb-8">
-        <h2 className="text-2xl font-bold">CrewAI Playground</h2>
-      </div>
-      <nav className="flex flex-col space-y-2">
-        {navItems.map((item, index) => (
-          <Button
-            key={index}
-            variant="ghost"
-            className="justify-start"
-            onClick={() => navigate(item.path)}
-          >
-            <item.icon className="mr-2 h-5 w-5" />
-            {item.label}
-          </Button>
-        ))}
-      </nav>
-    </aside>
-  );
 }
 
 interface StatCardProps {
@@ -159,7 +127,6 @@ function RecentTraceCard({ trace }: RecentTraceCardProps) {
 }
 
 export default function Dashboard() {
-  const { isDarkMode, toggleDarkMode } = useChatStore();
   const [isLoading, setIsLoading] = useState(true);
   interface DashboardData {
     counts: {
@@ -210,105 +177,84 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
-      <Sidebar />
-      <div className="flex flex-col flex-1">
-        <header className="py-4 px-8 border-b bg-background">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">Dashboard</h1>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleDarkMode}
-              className="h-8 w-8"
-            >
-              {isDarkMode ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        </header>
-        <main className="flex-grow p-8 overflow-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <StatCard
-              title="Crews"
-              value={dashboardData.counts.crews}
-              icon={BookUser}
-              isLoading={isLoading}
-            />
-            <StatCard
-              title="Tools"
-              value={dashboardData.counts.tools}
-              icon={Wrench}
-              isLoading={isLoading}
-            />
-            <StatCard
-              title="Flows"
-              value={dashboardData.counts.flows}
-              icon={Network}
-              isLoading={isLoading}
-            />
-          </div>
-
-          {dashboardData.active_flows.length > 0 && (
-            <div className="mt-12">
-              <h2 className="text-2xl font-bold mb-6">Active Flows</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {dashboardData.active_flows.map((flow) => (
-                  <ActiveFlowCard key={flow.id} flow={flow} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {dashboardData.recent_traces.length > 0 && (
-            <div className="mt-12">
-              <h2 className="text-2xl font-bold mb-6">Recent Activity</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {dashboardData.recent_traces.map((trace) => (
-                  <RecentTraceCard key={trace.id} trace={trace} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-12">
-            <h2 className="text-2xl font-bold mb-6">Quick Actions</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-              <Button
-                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
-                onClick={() => (window.location.href = "/chat")}
-              >
-                <BotMessageSquare className="h-8 w-8" />
-                <span>Start Chat</span>
-              </Button>
-              <Button
-                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
-                onClick={() => (window.location.href = "/kickoff")}
-              >
-                <Zap className="h-8 w-8" />
-                <span>Kickoff Crew</span>
-              </Button>
-              <Button
-                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
-                onClick={() => (window.location.href = "/flow")}
-              >
-                <Network className="h-8 w-8" />
-                <span>Run Flow</span>
-              </Button>
-              <Button
-                className="h-auto py-6 flex flex-col items-center justify-center gap-2"
-                onClick={() => (window.location.href = "/tools")}
-              >
-                <Wrench className="h-8 w-8" />
-                <span>Explore Tools</span>
-              </Button>
-            </div>
-          </div>
-        </main>
+    <Layout>
+      <h1 className="text-2xl font-bold mb-8">Dashboard</h1>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <StatCard
+          title="Crews"
+          value={dashboardData.counts.crews}
+          icon={BookUser}
+          isLoading={isLoading}
+        />
+        <StatCard
+          title="Tools"
+          value={dashboardData.counts.tools}
+          icon={Wrench}
+          isLoading={isLoading}
+        />
+        <StatCard
+          title="Flows"
+          value={dashboardData.counts.flows}
+          icon={Network}
+          isLoading={isLoading}
+        />
       </div>
-    </div>
+
+      {dashboardData.active_flows.length > 0 && (
+        <div className="mt-12">
+          <h2 className="text-2xl font-bold mb-6">Active Flows</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {dashboardData.active_flows.map((flow) => (
+              <ActiveFlowCard key={flow.id} flow={flow} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {dashboardData.recent_traces.length > 0 && (
+        <div className="mt-12">
+          <h2 className="text-2xl font-bold mb-6">Recent Activity</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {dashboardData.recent_traces.map((trace) => (
+              <RecentTraceCard key={trace.id} trace={trace} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-12">
+        <h2 className="text-2xl font-bold mb-6">Quick Actions</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <Button
+            className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+            onClick={() => (window.location.href = "/chat")}
+          >
+            <BotMessageSquare className="h-8 w-8" />
+            <span>Start Chat</span>
+          </Button>
+          <Button
+            className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+            onClick={() => (window.location.href = "/kickoff")}
+          >
+            <Zap className="h-8 w-8" />
+            <span>Kickoff Crew</span>
+          </Button>
+          <Button
+            className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+            onClick={() => (window.location.href = "/flow")}
+          >
+            <Network className="h-8 w-8" />
+            <span>Run Flow</span>
+          </Button>
+          <Button
+            className="h-auto py-6 flex flex-col items-center justify-center gap-2"
+            onClick={() => (window.location.href = "/tools")}
+          >
+            <Wrench className="h-8 w-8" />
+            <span>Explore Tools</span>
+          </Button>
+        </div>
+      </div>
+    </Layout>
   );
 }
