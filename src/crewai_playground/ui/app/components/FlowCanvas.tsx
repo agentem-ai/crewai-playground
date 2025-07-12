@@ -21,6 +21,7 @@ import { Badge } from "~/components/ui/badge";
 import ReactMarkdown from "react-markdown";
 import { Button } from "~/components/ui/button";
 import "./flow-node.css";
+import { Card } from "./ui/card";
 
 // Initial empty arrays with proper types
 const initialNodes: Node[] = [];
@@ -1191,8 +1192,8 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
   };
 
   return (
-    <div className="w-full h-full border rounded-lg overflow-hidden bg-background flex flex-col">
-      <div className="p-4 border-b flex justify-between items-center flex-shrink-0">
+    <Card className="p-6 mb-6 overflow-hidden">
+      <div className="p-4 flex justify-between items-center flex-shrink-0">
         <h3 className="font-semibold text-lg">Flow Visualization</h3>
         <Button
           variant="outline"
@@ -1398,7 +1399,7 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
             </div>
           </div>
         )}
-    </div>
+    </Card>
   );
 };
 
