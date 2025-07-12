@@ -1,20 +1,52 @@
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router";
-import { Button } from "~/components/ui/button";
+import React, { useState, useEffect, useMemo } from "react";
+import { useSearchParams, useNavigate } from "react-router";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "../components/ui/card";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
+import { Badge } from "../components/ui/badge";
+import {
+  Loader2,
+  ChevronRight,
+  ChevronDown,
+  ArrowLeft,
+  Moon,
+  Sun,
+  Clock,
+  List,
+  BarChart2,
+  Info,
+} from "lucide-react";
+import { Button } from "../components/ui/button";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "../components/ui/accordion";
+import { useChatStore } from "../lib/store";
+import { TraceTimeline } from "../components/TraceTimeline";
+import { TraceSpanView } from "../components/TraceSpanView";
+import { TraceSpanDetail } from "../components/TraceSpanDetail";
+import { Separator } from "../components/ui/separator";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "~/components/ui/select";
-import { useChatStore } from "~/lib/store";
-import { ArrowLeft, Loader2, Moon, Sun } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { ScrollArea } from "~/components/ui/scroll-area";
-import { Badge } from "~/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+} from "../components/ui/select";
 
 export function meta() {
   return [
@@ -26,6 +58,36 @@ export function meta() {
   ];
 }
 
+// Define trace data types
+interface TraceEvent {
+  type: string;
+  timestamp: string;
+  data: Record<string, any>;
+}
+
+interface TraceMethod {
+  id: string;
+  name: string;
+  status: string;
+  start_time: string;
+  end_time?: string;
+  output?: string;
+  events: TraceEvent[];
+}
+
+interface Trace {
+  id: string;
+  flow_id: string;
+  flow_name: string;
+  start_time: string;
+  end_time?: string;
+  status: string;
+  output?: string;
+  events: TraceEvent[];
+  methods: Record<string, TraceMethod>;
+}
+
+// Original trace types for backward compatibility
 interface TraceSpan {
   id: string;
   name: string;
@@ -34,15 +96,13 @@ interface TraceSpan {
   status: "running" | "completed" | "failed" | "initializing";
   parent_id?: string;
   attributes?: Record<string, any>;
-  events?: TraceEvent[];
+  events?: {
+    name: string;
+    timestamp: number;
+    attributes?: Record<string, any>;
+  }[];
   children?: TraceSpan[];
   level?: number; // For flattened view
-}
-
-interface TraceEvent {
-  name: string;
-  timestamp: number;
-  attributes?: Record<string, any>;
 }
 
 interface FlowTrace {
@@ -52,7 +112,22 @@ interface FlowTrace {
   start_time: number;
   end_time?: number;
   status: "running" | "completed" | "failed" | "initializing";
-  spans?: TraceSpan[];
+  spans: TraceSpan[];
+}
+
+// Visualization data types
+interface TimelineSpan {
+  id: string;
+  name: string;
+  startTime: Date;
+  endTime: Date | null;
+  status: string;
+  parentId?: string;
+  children: TimelineSpan[];
+  depth: number;
+  duration: number;
+  serviceName?: string;
+  operation?: string;
 }
 
 // ============================================================================
@@ -79,108 +154,141 @@ const flattenSpans = (
 };
 
 // Helper function to format timestamp
-const formatTime = (timestamp: number) => {
-  if (!timestamp) return "Unknown";
-  return new Date(timestamp * 1000).toLocaleTimeString();
-};
-
-// Helper function to format duration
-const formatDuration = (start: number, end?: number) => {
-  if (!start || !end) return "In progress";
-  const duration = end - start;
-  if (duration < 1) return `${(duration * 1000).toFixed(0)}ms`;
-  return `${duration.toFixed(2)}s`;
-};
-
-// Helper function to get status color
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case "running":
-      return "bg-blue-500";
-    case "completed":
-      return "bg-green-500";
-    case "failed":
-      return "bg-red-500";
-    case "initializing":
-      return "bg-yellow-500";
-    default:
-      return "bg-gray-500";
+function formatTime(timestamp: string | number) {
+  try {
+    const date = typeof timestamp === 'number' 
+      ? new Date(timestamp / 1000) 
+      : new Date(timestamp);
+    return date.toLocaleString();
+  } catch (e) {
+    return "Invalid time";
   }
+}
+
+// Helper function to calculate duration between two timestamps
+function calculateDuration(startTime: string | number, endTime?: string | number) {
+  try {
+    const start = typeof startTime === 'number' 
+      ? new Date(startTime / 1000) 
+      : new Date(startTime);
+    
+    if (!endTime) {
+      return "In progress";
+    }
+    
+    const end = typeof endTime === 'number' 
+      ? new Date(endTime / 1000) 
+      : new Date(endTime);
+    
+    const durationMs = end.getTime() - start.getTime();
+    const seconds = Math.floor((durationMs / 1000) % 60);
+    const minutes = Math.floor((durationMs / (1000 * 60)) % 60);
+    const hours = Math.floor(durationMs / (1000 * 60 * 60));
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${seconds}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    } else {
+      return `${seconds}s`;
+    }
+  } catch (e) {
+    return "Invalid time";
+  }
+}
+
+// Get status color based on status
+function getStatusColor(status: string) {
+  switch (status.toLowerCase()) {
+    case "running":
+    case "initializing":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300 border-blue-200 dark:border-blue-800";
+    case "completed":
+      return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300 border-green-200 dark:border-green-800";
+    case "failed":
+      return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300 border-red-200 dark:border-red-800";
+    case "pending":
+      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800";
+    default:
+      return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300 border-gray-200 dark:border-gray-800";
+  }
+}
+
+// ============================================================================
+// Main Component
+// ============================================================================
+
+// Convert TraceSpan to TimelineSpan for visualization
+const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
+  if (!spans || !Array.isArray(spans)) return [];
+  
+  return spans.map(span => {
+    // Convert timestamp strings or numbers to Date objects
+    const startTime = typeof span.start_time === 'number' 
+      ? new Date(span.start_time) 
+      : new Date(span.start_time);
+    
+    const endTime = span.end_time 
+      ? typeof span.end_time === 'number'
+        ? new Date(span.end_time)
+        : new Date(span.end_time)
+      : null;
+    
+    // Calculate duration in milliseconds
+    const duration = endTime && startTime 
+      ? endTime.getTime() - startTime.getTime() 
+      : 0;
+    
+    return {
+      id: span.id,
+      name: span.name,
+      startTime,
+      endTime,
+      status: span.status,
+      parentId: span.parent_id,
+      children: span.children ? convertToTimelineSpans(span.children) : [],
+      depth: 0, // Will be calculated by TraceTimeline
+      duration,
+      serviceName: span.attributes?.service_name,
+      operation: span.attributes?.operation,
+    };
+  });
 };
 
-// ============================================================================
-// SpanHierarchy Component for Hierarchical View
-// ============================================================================
-
-interface SpanHierarchyProps {
-  spans: TraceSpan[];
-  selectedSpanId: string;
-  onSpanClick: (id: string) => void;
-  level?: number;
-}
-
-function SpanHierarchy({ spans, selectedSpanId, onSpanClick, level = 0 }: SpanHierarchyProps) {
-  return (
-    <div className="space-y-1">
-      {spans.map((span) => (
-        <div key={span.id}>
-          <div
-            className={`p-2 border rounded-md cursor-pointer hover:bg-muted/50 ${
-              span.id === selectedSpanId ? 'bg-amber-400/20 border-amber-500' : ''
-            }`}
-            style={{
-              marginLeft: `${level * 24}px`,
-              borderLeftWidth: '4px',
-              borderLeftColor:
-                span.id === selectedSpanId
-                  ? '#fbbf24'
-                  : span.status === 'completed'
-                  ? '#4caf50'
-                  : span.status === 'failed'
-                  ? '#f44336'
-                  : '#2196f3',
-            }}
-            onClick={() => onSpanClick(span.id)}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div
-                  className={`w-2 h-2 rounded-full mr-2 ${getStatusColor(
-                    span.status
-                  )}`}
-                ></div>
-                <span className="font-medium text-sm">{span.name}</span>
-              </div>
-              <Badge
-                variant={
-                  span.status === 'running'
-                    ? 'secondary'
-                    : span.status === 'completed'
-                    ? 'default'
-                    : span.status === 'failed'
-                    ? 'destructive'
-                    : 'outline'
-                }
-                className="text-xs"
-              >
-                {span.status}
-              </Badge>
-            </div>
-          </div>
-          {span.children && span.children.length > 0 && (
-            <SpanHierarchy
-              spans={span.children}
-              selectedSpanId={selectedSpanId}
-              onSpanClick={onSpanClick}
-              level={level + 1}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
+// Convert TraceSpan to SpanData for detail view
+const convertToSpanData = (span: TraceSpan) => {
+  const startTime = typeof span.start_time === 'number' 
+    ? new Date(span.start_time) 
+    : new Date(span.start_time);
+  
+  const endTime = span.end_time 
+    ? typeof span.end_time === 'number'
+      ? new Date(span.end_time)
+      : new Date(span.end_time)
+    : null;
+  
+  const duration = endTime && startTime 
+    ? endTime.getTime() - startTime.getTime() 
+    : 0;
+  
+  return {
+    id: span.id,
+    name: span.name,
+    startTime,
+    endTime,
+    status: span.status,
+    duration,
+    parentId: span.parent_id,
+    depth: 0,
+    tags: span.attributes || {},
+    logs: span.events ? span.events.map(event => ({
+      timestamp: typeof event.timestamp === 'number' 
+        ? new Date(event.timestamp) 
+        : new Date(event.timestamp),
+      fields: event.attributes || {}
+    })) : []
+  };
+};
 
 export default function FlowTraces() {
   const navigate = useNavigate();
@@ -191,7 +299,7 @@ export default function FlowTraces() {
   const [traces, setTraces] = useState<FlowTrace[]>([]);
   const [selectedTraceId, setSelectedTraceId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("timeline");
+  const [activeTab, setActiveTab] = useState<string>("overview");
   const [selectedSpanId, setSelectedSpanId] = useState<string>("");
 
   // Get selected trace from traces array with safety checks
@@ -332,7 +440,7 @@ export default function FlowTraces() {
   }, [selectedFlowId]);
 
   // Get selected span from timeline
-  const selectedSpan = useMemo(() => {
+  const rawSelectedSpan = useMemo(() => {
     if (!selectedSpanId || !selectedTrace) return null;
 
     const findSpan = (spans: TraceSpan[] | undefined): TraceSpan | null => {
@@ -356,6 +464,11 @@ export default function FlowTraces() {
     const spans = selectedTrace.spans || [];
     return Array.isArray(spans) ? findSpan(spans) : null;
   }, [selectedSpanId, selectedTrace]);
+  
+  // Convert raw span to SpanData format for detail component
+  const selectedSpan = useMemo(() => {
+    return rawSelectedSpan ? convertToSpanData(rawSelectedSpan) : null;
+  }, [rawSelectedSpan]);
 
   // Process trace data for timeline view with safety checks
   const timelineSpans = useMemo(() => {
@@ -363,13 +476,18 @@ export default function FlowTraces() {
 
     // Handle case where spans might be undefined or not an array
     const spans = selectedTrace.spans || [];
-    return Array.isArray(spans) ? flattenSpans(spans) : [];
-  }, [selectedTrace, flattenSpans]);
+    return Array.isArray(spans) ? convertToTimelineSpans(spans) : [];
+  }, [selectedTrace]);
 
   // Process trace data for hierarchical view with safety checks
   const hierarchicalSpans = useMemo(() => {
     if (!selectedTrace || !selectedTrace.spans) return [];
-    return Array.isArray(selectedTrace.spans) ? selectedTrace.spans : [];
+
+    // Create a hierarchical structure from flat spans
+    const rootSpans = selectedTrace.spans.filter(
+      (span) => !span.parent_id || span.parent_id === selectedTrace.id
+    );
+    return convertToTimelineSpans(rootSpans);
   }, [selectedTrace]);
 
   // Handle back button click
@@ -466,7 +584,7 @@ export default function FlowTraces() {
                   <div className="flex items-center justify-between">
                     <span className="font-medium">Duration</span>
                     <span>
-                      {formatDuration(
+                      {calculateDuration(
                         selectedTrace.start_time,
                         selectedTrace.end_time
                       )}
@@ -508,132 +626,190 @@ export default function FlowTraces() {
 
         {selectedTrace && (
           <div className="space-y-4">
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList>
-                <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
+            <Tabs
+              defaultValue="overview"
+              value={activeTab}
+              onValueChange={setActiveTab}
+              className="w-full"
+            >
+              <TabsList className="grid grid-cols-3 mb-4">
+                <TabsTrigger
+                  value="overview"
+                  className="flex items-center gap-1"
+                >
+                  <Info className="h-4 w-4" />
+                  <span>Overview</span>
+                </TabsTrigger>
+                <TabsTrigger value="methods">Methods</TabsTrigger>
+                <TabsTrigger value="events">Events</TabsTrigger>
               </TabsList>
-              <TabsContent value="timeline" className="mt-4">
-                <ScrollArea className="h-[calc(100vh-200px)]">
-                  <div className="space-y-2">
-                    {timelineSpans.map((span) => (
-                      <div
-                        key={span.id}
-                        className="p-3 border rounded-md cursor-pointer hover:bg-muted/50"
-                        onClick={() => setSelectedSpanId(span.id)}
-                        style={{
-                          marginLeft: `${span.level * 24}px`,
-                          borderLeftWidth: "4px",
-                          borderLeftColor:
-                            span.id === selectedSpanId
-                              ? "#fbbf24"
-                              : span.status === "completed"
-                              ? "#4caf50"
-                              : span.status === "failed"
-                              ? "#f44336"
-                              : "#2196f3",
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center">
-                            <div
-                              className={`w-3 h-3 rounded-full mr-2 ${getStatusColor(
-                                span.status
-                              )}`}
-                            ></div>
-                            <span className="font-medium">{span.name}</span>
+              <TabsContent value="overview">
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-lg">Timeline</CardTitle>
+                      <CardDescription>
+                        Visualization of execution spans over time
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <TraceTimeline
+                        spans={timelineSpans}
+                        onSpanClick={(span) => setSelectedSpanId(span.id)}
+                      />
+                    </CardContent>
+                  </Card>
+
+                  {selectedSpan && (
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">Span Details</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {selectedSpan && <TraceSpanDetail span={selectedSpan} />}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-lg">Flow Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Methods</div>
+                          <div className="flex items-center gap-2">
+                            <Badge className="text-lg" variant="outline">
+                              {selectedTrace.spans?.filter(s => s.parent_id === selectedTrace.id).length || 0}
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">
+                              Total methods
+                            </span>
                           </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Status</div>
                           <Badge
-                            variant={
-                              span.status === "running"
-                                ? "secondary"
-                                : span.status === "completed"
-                                ? "default"
-                                : span.status === "failed"
-                                ? "destructive"
-                                : "outline"
-                            }
+                            className={getStatusColor(selectedTrace.status)}
+                            variant="outline"
                           >
-                            {span.status}
+                            {selectedTrace.status}
                           </Badge>
                         </div>
 
-                        <div className="mt-2 text-xs text-muted-foreground">
-                          <div>Start: {formatTime(span.start_time)}</div>
-                          {span.end_time && (
-                            <div>End: {formatTime(span.end_time)}</div>
-                          )}
-                          <div>
-                            Duration:{" "}
-                            {formatDuration(span.start_time, span.end_time)}
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Duration</div>
+                          <div className="text-sm">
+                            {calculateDuration(
+                              selectedTrace.start_time,
+                              selectedTrace.end_time
+                            )}
                           </div>
                         </div>
-
-                        {span.id === selectedSpanId && selectedSpan && (
-                          <div className="mt-2">
-                            {selectedSpan.attributes &&
-                              Object.keys(selectedSpan.attributes).length >
-                                0 && (
-                                <details className="text-xs" open>
-                                  <summary className="font-medium cursor-pointer">
-                                    Attributes
-                                  </summary>
-                                  <pre className="mt-1 p-2 bg-muted rounded-md overflow-auto max-h-[200px] whitespace-pre-wrap">
-                                    {JSON.stringify(
-                                      selectedSpan.attributes,
-                                      null,
-                                      2
-                                    )}
-                                  </pre>
-                                </details>
-                              )}
-                            {selectedSpan.events &&
-                              selectedSpan.events.length > 0 && (
-                                <details className="text-xs mt-2" open>
-                                  <summary className="font-medium cursor-pointer">
-                                    Events
-                                  </summary>
-                                  <div className="mt-1 space-y-1">
-                                    {selectedSpan.events.map((event, i) => (
-                                      <div
-                                        key={i}
-                                        className="p-2 bg-muted/50 rounded-md"
-                                      >
-                                        <p className="font-medium">
-                                          {event.name}
-                                        </p>
-                                        <p className="text-muted-foreground text-xs">
-                                          {formatTime(event.timestamp)}
-                                        </p>
-                                        {event.attributes && (
-                                          <pre className="mt-1 p-1 bg-background rounded text-xs whitespace-pre-wrap">
-                                            {JSON.stringify(
-                                              event.attributes,
-                                              null,
-                                              2
-                                            )}
-                                          </pre>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </details>
-                              )}
-                          </div>
-                        )}
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
+                    </CardContent>
+                  </Card>
+                </div>
               </TabsContent>
-              <TabsContent value="hierarchy" className="mt-4">
-                <ScrollArea className="h-[calc(100vh-200px)]">
-                  <SpanHierarchy
-                    spans={hierarchicalSpans}
-                    selectedSpanId={selectedSpanId}
-                    onSpanClick={setSelectedSpanId}
-                  />
-                </ScrollArea>
+              
+              <TabsContent value="methods">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Methods</CardTitle>
+                    <CardDescription>
+                      Flow execution methods and their details
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <Accordion type="single" collapsible className="w-full">
+                        {selectedTrace.spans
+                          ?.filter(method => method.parent_id === selectedTrace.id)
+                          .map((method) => (
+                            <AccordionItem key={method.id} value={method.id}>
+                              <AccordionTrigger className="hover:bg-muted px-4">
+                                <div className="flex items-center justify-between w-full">
+                                  <div className="flex items-center">
+                                    <Badge
+                                      className={getStatusColor(method.status)}
+                                      variant="outline"
+                                    >
+                                      {method.status}
+                                    </Badge>
+                                    <span className="ml-2 font-medium">{method.name}</span>
+                                  </div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {calculateDuration(method.start_time, method.end_time)}
+                                  </div>
+                                </div>
+                              </AccordionTrigger>
+                              <AccordionContent className="px-4 py-2 space-y-4">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="text-sm text-muted-foreground">Method ID</div>
+                                  <div className="text-sm font-mono">{method.id}</div>
+
+                                  <div className="text-sm text-muted-foreground">Start Time</div>
+                                  <div>{formatTime(method.start_time)}</div>
+
+                                  {method.end_time && (
+                                    <>
+                                      <div className="text-sm text-muted-foreground">End Time</div>
+                                      <div>{formatTime(method.end_time)}</div>
+                                    </>
+                                  )}
+                                </div>
+
+                                {method.attributes && Object.keys(method.attributes).length > 0 && (
+                                  <div className="mt-4">
+                                    <div className="text-sm font-medium mb-2">Attributes</div>
+                                    <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
+                                      {JSON.stringify(method.attributes, null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                              </AccordionContent>
+                            </AccordionItem>
+                          ))}
+                      </Accordion>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              
+              <TabsContent value="events">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Events</CardTitle>
+                    <CardDescription>
+                      Flow execution events and their details
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="border rounded-md divide-y">
+                        {selectedTrace.spans
+                          ?.flatMap(span => span.events || [])
+                          .map((event, idx) => (
+                            <div key={idx} className="p-3 hover:bg-muted">
+                              <div className="flex justify-between items-center">
+                                <Badge variant="outline">{event.name}</Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {formatTime(event.timestamp)}
+                                </span>
+                              </div>
+                              {event.attributes && Object.keys(event.attributes).length > 0 && (
+                                <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
+                                  {JSON.stringify(event.attributes, null, 2)}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </TabsContent>
             </Tabs>
           </div>
