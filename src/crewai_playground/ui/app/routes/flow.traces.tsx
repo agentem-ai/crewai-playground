@@ -31,17 +31,18 @@ interface TraceSpan {
   name: string;
   start_time: number;
   end_time?: number;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "initializing";
   parent_id?: string;
-  attributes: Record<string, any>;
-  events: TraceEvent[];
-  children: TraceSpan[];
+  attributes?: Record<string, any>;
+  events?: TraceEvent[];
+  children?: TraceSpan[];
+  level?: number; // For flattened view
 }
 
 interface TraceEvent {
   name: string;
   timestamp: number;
-  attributes: Record<string, any>;
+  attributes?: Record<string, any>;
 }
 
 interface FlowTrace {
@@ -50,9 +51,136 @@ interface FlowTrace {
   flow_name: string;
   start_time: number;
   end_time?: number;
-  status: "running" | "completed" | "failed";
-  spans: TraceSpan[];
+  status: "running" | "completed" | "failed" | "initializing";
+  spans?: TraceSpan[];
 }
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Helper function to flatten spans into a single array with level information
+const flattenSpans = (
+  spans: TraceSpan[],
+  level = 0,
+  result: Array<TraceSpan & { level: number }> = []
+) => {
+  if (!spans || !Array.isArray(spans)) return result;
+
+  spans.forEach((span) => {
+    if (span) {
+      result.push({ ...span, level });
+      if (span.children && Array.isArray(span.children) && span.children.length > 0) {
+        flattenSpans(span.children, level + 1, result);
+      }
+    }
+  });
+  return result;
+};
+
+// Helper function to format timestamp
+const formatTime = (timestamp: number) => {
+  if (!timestamp) return "Unknown";
+  return new Date(timestamp * 1000).toLocaleTimeString();
+};
+
+// Helper function to format duration
+const formatDuration = (start: number, end?: number) => {
+  if (!start || !end) return "In progress";
+  const duration = end - start;
+  if (duration < 1) return `${(duration * 1000).toFixed(0)}ms`;
+  return `${duration.toFixed(2)}s`;
+};
+
+// Helper function to get status color
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case "running":
+      return "bg-blue-500";
+    case "completed":
+      return "bg-green-500";
+    case "failed":
+      return "bg-red-500";
+    case "initializing":
+      return "bg-yellow-500";
+    default:
+      return "bg-gray-500";
+  }
+};
+
+// ============================================================================
+// SpanHierarchy Component for Hierarchical View
+// ============================================================================
+
+interface SpanHierarchyProps {
+  spans: TraceSpan[];
+  selectedSpanId: string;
+  onSpanClick: (id: string) => void;
+  level?: number;
+}
+
+function SpanHierarchy({ spans, selectedSpanId, onSpanClick, level = 0 }: SpanHierarchyProps) {
+  return (
+    <div className="space-y-1">
+      {spans.map((span) => (
+        <div key={span.id}>
+          <div
+            className={`p-2 border rounded-md cursor-pointer hover:bg-muted/50 ${
+              span.id === selectedSpanId ? 'bg-amber-400/20 border-amber-500' : ''
+            }`}
+            style={{
+              marginLeft: `${level * 24}px`,
+              borderLeftWidth: '4px',
+              borderLeftColor:
+                span.id === selectedSpanId
+                  ? '#fbbf24'
+                  : span.status === 'completed'
+                  ? '#4caf50'
+                  : span.status === 'failed'
+                  ? '#f44336'
+                  : '#2196f3',
+            }}
+            onClick={() => onSpanClick(span.id)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div
+                  className={`w-2 h-2 rounded-full mr-2 ${getStatusColor(
+                    span.status
+                  )}`}
+                ></div>
+                <span className="font-medium text-sm">{span.name}</span>
+              </div>
+              <Badge
+                variant={
+                  span.status === 'running'
+                    ? 'secondary'
+                    : span.status === 'completed'
+                    ? 'default'
+                    : span.status === 'failed'
+                    ? 'destructive'
+                    : 'outline'
+                }
+                className="text-xs"
+              >
+                {span.status}
+              </Badge>
+            </div>
+          </div>
+          {span.children && span.children.length > 0 && (
+            <SpanHierarchy
+              spans={span.children}
+              selectedSpanId={selectedSpanId}
+              onSpanClick={onSpanClick}
+              level={level + 1}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 export default function FlowTraces() {
   const navigate = useNavigate();
@@ -64,12 +192,15 @@ export default function FlowTraces() {
   const [selectedTraceId, setSelectedTraceId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("timeline");
+  const [selectedSpanId, setSelectedSpanId] = useState<string>("");
 
-  // Get selected trace from traces array
-  const selectedTrace = useMemo(
-    () => traces.find((trace) => trace.id === selectedTraceId),
-    [traces, selectedTraceId]
-  );
+  // Get selected trace from traces array with safety checks
+  const selectedTrace = useMemo(() => {
+    if (!selectedTraceId || !Array.isArray(traces)) return null;
+    return (
+      traces.find((trace) => trace && trace.id === selectedTraceId) || null
+    );
+  }, [traces, selectedTraceId]);
 
   // Initialize from URL params
   useEffect(() => {
@@ -128,6 +259,14 @@ export default function FlowTraces() {
     }
   }, [flows, setFlows, selectedFlowId]);
 
+  // Check for flowId in URL query params on initial load
+  useEffect(() => {
+    const flowIdFromUrl = searchParams.get("flowId");
+    if (flowIdFromUrl && !selectedFlowId) {
+      setSelectedFlowId(flowIdFromUrl);
+    }
+  }, [searchParams, selectedFlowId]);
+
   // Fetch traces when a flow is selected
   useEffect(() => {
     const fetchTraces = async () => {
@@ -140,16 +279,38 @@ export default function FlowTraces() {
       try {
         setLoading(true);
         setError(null);
+
+        // Update URL with the selected flow ID
+        if (searchParams.get("flowId") !== selectedFlowId) {
+          setSearchParams({ flowId: selectedFlowId });
+        }
+
         const response = await fetch(`/api/flows/${selectedFlowId}/traces`);
         const data = await response.json();
 
-        if (data.status === "success" && data.traces) {
-          setTraces(data.traces);
+        if (data.status === "success" && Array.isArray(data.traces)) {
+          console.log("Received traces:", data.traces);
+
+          // Filter out incomplete trace entries (those without proper data)
+          const validTraces = data.traces.filter(
+            (trace: any) =>
+              trace &&
+              typeof trace === "object" &&
+              trace.id &&
+              trace.start_time !== undefined &&
+              (trace.status === "completed" ||
+                trace.status === "failed" ||
+                trace.status === "running" ||
+                trace.status === "initializing")
+          );
+
+          console.log("Valid traces after filtering:", validTraces);
+          setTraces(validTraces);
 
           // Select the first trace if none is selected
-          if (data.traces.length > 0 && !selectedTraceId) {
-            setSelectedTraceId(data.traces[0].id);
-          } else if (data.traces.length === 0) {
+          if (validTraces.length > 0 && !selectedTraceId) {
+            setSelectedTraceId(validTraces[0].id);
+          } else if (validTraces.length === 0) {
             setSelectedTraceId("");
           }
         } else {
@@ -170,425 +331,314 @@ export default function FlowTraces() {
     fetchTraces();
   }, [selectedFlowId]);
 
-  // Process trace data for timeline view
+  // Get selected span from timeline
+  const selectedSpan = useMemo(() => {
+    if (!selectedSpanId || !selectedTrace) return null;
+
+    const findSpan = (spans: TraceSpan[] | undefined): TraceSpan | null => {
+      if (!spans || !Array.isArray(spans)) return null;
+
+      for (const span of spans) {
+        if (!span) continue;
+        if (span.id === selectedSpanId) return span;
+        if (
+          span.children &&
+          Array.isArray(span.children) &&
+          span.children.length > 0
+        ) {
+          const found = findSpan(span.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const spans = selectedTrace.spans || [];
+    return Array.isArray(spans) ? findSpan(spans) : null;
+  }, [selectedSpanId, selectedTrace]);
+
+  // Process trace data for timeline view with safety checks
   const timelineSpans = useMemo(() => {
     if (!selectedTrace) return [];
 
-    // Function to flatten spans into a single array with level information
-    const flattenSpans = (
-      spans: TraceSpan[],
-      level = 0,
-      result: Array<TraceSpan & { level: number }> = []
-    ) => {
-      spans.forEach((span) => {
-        result.push({ ...span, level });
-        if (span.children && span.children.length > 0) {
-          flattenSpans(span.children, level + 1, result);
-        }
-      });
-      return result;
-    };
+    // Handle case where spans might be undefined or not an array
+    const spans = selectedTrace.spans || [];
+    return Array.isArray(spans) ? flattenSpans(spans) : [];
+  }, [selectedTrace, flattenSpans]);
 
-    return flattenSpans(selectedTrace.spans);
-  }, [selectedTrace]);
-
-  // Process trace data for hierarchical view
+  // Process trace data for hierarchical view with safety checks
   const hierarchicalSpans = useMemo(() => {
-    if (!selectedTrace) return [];
-    return selectedTrace.spans;
+    if (!selectedTrace || !selectedTrace.spans) return [];
+    return Array.isArray(selectedTrace.spans) ? selectedTrace.spans : [];
   }, [selectedTrace]);
 
-  // Helper function to format timestamp
-  const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString();
-  };
-
-  // Helper function to format duration
-  const formatDuration = (start: number, end?: number) => {
-    if (!end) return "In progress";
-    const duration = end - start;
-    if (duration < 1000) return `${duration}ms`;
-    return `${(duration / 1000).toFixed(2)}s`;
-  };
-
-  // Helper function to get status color
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "running":
-        return "bg-blue-500";
-      case "completed":
-        return "bg-green-500";
-      case "failed":
-        return "bg-red-500";
-      default:
-        return "bg-gray-500";
-    }
-  };
-
+  // Handle back button click
   const handleBack = () => {
     navigate("/flow");
   };
 
-  // Recursive component for hierarchical span view
-  const SpanTree = ({
-    spans,
-    level = 0,
-  }: {
-    spans: TraceSpan[];
-    level?: number;
-  }) => {
-    return (
-      <div className="space-y-2">
-        {spans.map((span) => (
-          <div key={span.id} className="space-y-2">
-            <div
-              className={`p-3 border rounded-md ${level > 0 ? "ml-6" : ""}`}
-              style={{
-                borderLeftWidth: "4px",
-                borderLeftColor:
-                  span.status === "completed"
-                    ? "#4caf50"
-                    : span.status === "failed"
-                    ? "#f44336"
-                    : "#2196f3",
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div
-                    className={`w-3 h-3 rounded-full mr-2 ${getStatusColor(
-                      span.status
-                    )}`}
-                  ></div>
-                  <span className="font-medium">{span.name}</span>
-                </div>
-                <Badge
-                  variant={
-                    span.status === "running"
-                      ? "secondary"
-                      : span.status === "completed"
-                      ? "default"
-                      : span.status === "failed"
-                      ? "destructive"
-                      : "outline"
-                  }
-                >
-                  {span.status}
-                </Badge>
-              </div>
-
-              <div className="mt-2 text-xs text-muted-foreground">
-                <div>Start: {formatTime(span.start_time)}</div>
-                {span.end_time && <div>End: {formatTime(span.end_time)}</div>}
-                <div>
-                  Duration: {formatDuration(span.start_time, span.end_time)}
-                </div>
-              </div>
-
-              {span.attributes && Object.keys(span.attributes).length > 0 && (
-                <div className="mt-2">
-                  <details className="text-xs">
-                    <summary className="font-medium cursor-pointer">
-                      Attributes
-                    </summary>
-                    <pre className="mt-1 p-2 bg-muted rounded-md overflow-auto max-h-[200px] whitespace-pre-wrap">
-                      {JSON.stringify(span.attributes, null, 2)}
-                    </pre>
-                  </details>
-                </div>
-              )}
-
-              {span.events && span.events.length > 0 && (
-                <div className="mt-2">
-                  <details className="text-xs">
-                    <summary className="font-medium cursor-pointer">
-                      Events ({span.events.length})
-                    </summary>
-                    <div className="mt-1 space-y-2">
-                      {span.events.map((event, idx) => (
-                        <div key={idx} className="p-2 bg-muted rounded-md">
-                          <div className="font-medium">{event.name}</div>
-                          <div className="text-muted-foreground">
-                            {formatTime(event.timestamp)}
-                          </div>
-                          {event.attributes &&
-                            Object.keys(event.attributes).length > 0 && (
-                              <pre className="mt-1 overflow-auto max-h-[100px] whitespace-pre-wrap">
-                                {JSON.stringify(event.attributes, null, 2)}
-                              </pre>
-                            )}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              )}
-            </div>
-
-            {span.children && span.children.length > 0 && (
-              <SpanTree spans={span.children} level={level + 1} />
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="py-4 px-6 border-b bg-background">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBack}
-              className="mr-4"
-            >
+    <div className="flex h-screen bg-secondary/40">
+      {/* Sidebar */}
+      <aside className="w-80 flex flex-col border-r bg-background">
+        <div className="p-4 border-b">
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" size="icon" onClick={handleBack}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <h1 className="text-2xl font-bold">Flow Traces</h1>
+            <h1 className="text-xl font-bold">Flow Traces</h1>
+            <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
+              {isDarkMode ? (
+                <Sun className="h-5 w-5" />
+              ) : (
+                <Moon className="h-5 w-5" />
+              )}
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleDarkMode}
-            className="h-8 w-8"
-          >
-            {isDarkMode ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
-          </Button>
         </div>
-      </header>
 
-      {/* Main Layout with Sidebar and Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-80 border-r flex-shrink-0 overflow-y-auto p-4 bg-background">
-          <div className="sticky top-0 space-y-6">
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold">Select a Flow</h3>
-              <Select
-                value={selectedFlowId}
-                onValueChange={setSelectedFlowId}
-                disabled={loading}
-              >
-                <SelectTrigger id="flow-select" className="w-full">
-                  <SelectValue placeholder="Select a flow" />
-                </SelectTrigger>
-                <SelectContent>
-                  {flows.map((flow) => (
-                    <SelectItem key={flow.id} value={flow.id}>
-                      {flow.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+        <div className="p-4 space-y-4">
+          <Select onValueChange={setSelectedFlowId} value={selectedFlowId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a flow" />
+            </SelectTrigger>
+            <SelectContent>
+              {flows.map((flow) => (
+                <SelectItem key={flow.id} value={flow.id}>
+                  {flow.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-            {traces.length > 0 && (
-              <div className="space-y-2">
-                <h3 className="text-lg font-semibold">Select a Trace</h3>
-                <Select
-                  value={selectedTraceId}
-                  onValueChange={setSelectedTraceId}
-                  disabled={loading}
-                >
-                  <SelectTrigger id="trace-select" className="w-full">
-                    <SelectValue placeholder="Select a trace" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {traces.map((trace) => (
-                      <SelectItem key={trace.id} value={trace.id}>
-                        {new Date(trace.start_time).toLocaleString()} -{" "}
-                        {trace.status}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+          <Select
+            onValueChange={setSelectedTraceId}
+            value={selectedTraceId}
+            disabled={!selectedFlowId || traces.length === 0}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select a trace" />
+            </SelectTrigger>
+            <SelectContent>
+              {traces.map((trace) => (
+                <SelectItem key={trace.id} value={trace.id}>
+                  {`Trace ${trace.id.slice(0, 7)} - ${new Date(
+                    trace.start_time * 1000
+                  ).toLocaleString()}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-            {selectedTrace && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Trace Details</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Flow:</span>
-                      <span>{selectedTrace.flow_name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Status:</span>
-                      <Badge
-                        variant={
-                          selectedTrace.status === "running"
-                            ? "secondary"
-                            : selectedTrace.status === "completed"
-                            ? "default"
-                            : selectedTrace.status === "failed"
-                            ? "destructive"
-                            : "outline"
-                        }
-                      >
-                        {selectedTrace.status}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Started:</span>
-                      <span>
-                        {new Date(selectedTrace.start_time).toLocaleString()}
-                      </span>
-                    </div>
-                    {selectedTrace.end_time && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Ended:</span>
-                        <span>
-                          {new Date(selectedTrace.end_time).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Duration:</span>
-                      <span>
-                        {formatDuration(
-                          selectedTrace.start_time,
-                          selectedTrace.end_time
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Spans:</span>
-                      <span>{timelineSpans.length}</span>
-                    </div>
+        {selectedTrace && (
+          <div className="flex-1 overflow-y-auto p-4 border-t">
+            <Card>
+              <CardHeader>
+                <CardTitle>Trace Details</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">Status</span>
+                    <Badge
+                      variant={
+                        selectedTrace.status === "completed"
+                          ? "default"
+                          : selectedTrace.status === "failed"
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {selectedTrace.status}
+                    </Badge>
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">Start Time</span>
+                    <span>{formatTime(selectedTrace.start_time)}</span>
+                  </div>
+                  {selectedTrace.end_time && (
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">End Time</span>
+                      <span>{formatTime(selectedTrace.end_time)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">Duration</span>
+                    <span>
+                      {formatDuration(
+                        selectedTrace.start_time,
+                        selectedTrace.end_time
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </aside>
+        )}
+      </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-6 bg-background">
-          {error && (
-            <Alert variant="destructive" className="mb-6">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto p-6 bg-background">
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          {loading && (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        {loading && (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        )}
+
+        {!loading && !error && !selectedTrace && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center max-w-md">
+              <h2 className="text-2xl font-bold mb-2">Flow Traces</h2>
+              <p className="text-muted-foreground mb-4">
+                Select a flow and a trace from the sidebar to view execution
+                details.
+              </p>
             </div>
-          )}
+          </div>
+        )}
 
-          {!loading && !error && !selectedTrace && (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center max-w-md">
-                <h2 className="text-2xl font-bold mb-2">Flow Traces</h2>
-                <p className="text-muted-foreground mb-4">
-                  Select a flow and a trace from the sidebar to view execution
-                  details.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {selectedTrace && (
-            <div className="space-y-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
-                  <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                  <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
-                </TabsList>
-                <TabsContent value="timeline" className="mt-4">
-                  <ScrollArea className="h-[calc(100vh-200px)]">
-                    <div className="space-y-2">
-                      {timelineSpans.map((span) => (
-                        <div
-                          key={span.id}
-                          className="p-3 border rounded-md"
-                          style={{
-                            marginLeft: `${span.level * 24}px`,
-                            borderLeftWidth: "4px",
-                            borderLeftColor:
-                              span.status === "completed"
-                                ? "#4caf50"
+        {selectedTrace && (
+          <div className="space-y-4">
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList>
+                <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
+              </TabsList>
+              <TabsContent value="timeline" className="mt-4">
+                <ScrollArea className="h-[calc(100vh-200px)]">
+                  <div className="space-y-2">
+                    {timelineSpans.map((span) => (
+                      <div
+                        key={span.id}
+                        className="p-3 border rounded-md cursor-pointer hover:bg-muted/50"
+                        onClick={() => setSelectedSpanId(span.id)}
+                        style={{
+                          marginLeft: `${span.level * 24}px`,
+                          borderLeftWidth: "4px",
+                          borderLeftColor:
+                            span.id === selectedSpanId
+                              ? "#fbbf24"
+                              : span.status === "completed"
+                              ? "#4caf50"
+                              : span.status === "failed"
+                              ? "#f44336"
+                              : "#2196f3",
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center">
+                            <div
+                              className={`w-3 h-3 rounded-full mr-2 ${getStatusColor(
+                                span.status
+                              )}`}
+                            ></div>
+                            <span className="font-medium">{span.name}</span>
+                          </div>
+                          <Badge
+                            variant={
+                              span.status === "running"
+                                ? "secondary"
+                                : span.status === "completed"
+                                ? "default"
                                 : span.status === "failed"
-                                ? "#f44336"
-                                : "#2196f3",
-                          }}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center">
-                              <div
-                                className={`w-3 h-3 rounded-full mr-2 ${getStatusColor(
-                                  span.status
-                                )}`}
-                              ></div>
-                              <span className="font-medium">{span.name}</span>
-                            </div>
-                            <Badge
-                              variant={
-                                span.status === "running"
-                                  ? "secondary"
-                                  : span.status === "completed"
-                                  ? "default"
-                                  : span.status === "failed"
-                                  ? "destructive"
-                                  : "outline"
-                              }
-                            >
-                              {span.status}
-                            </Badge>
-                          </div>
+                                ? "destructive"
+                                : "outline"
+                            }
+                          >
+                            {span.status}
+                          </Badge>
+                        </div>
 
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            <div>Start: {formatTime(span.start_time)}</div>
-                            {span.end_time && (
-                              <div>End: {formatTime(span.end_time)}</div>
-                            )}
-                            <div>
-                              Duration:{" "}
-                              {formatDuration(span.start_time, span.end_time)}
-                            </div>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          <div>Start: {formatTime(span.start_time)}</div>
+                          {span.end_time && (
+                            <div>End: {formatTime(span.end_time)}</div>
+                          )}
+                          <div>
+                            Duration:{" "}
+                            {formatDuration(span.start_time, span.end_time)}
                           </div>
+                        </div>
 
-                          {span.attributes &&
-                            Object.keys(span.attributes).length > 0 && (
-                              <div className="mt-2">
-                                <details className="text-xs">
+                        {span.id === selectedSpanId && selectedSpan && (
+                          <div className="mt-2">
+                            {selectedSpan.attributes &&
+                              Object.keys(selectedSpan.attributes).length >
+                                0 && (
+                                <details className="text-xs" open>
                                   <summary className="font-medium cursor-pointer">
                                     Attributes
                                   </summary>
                                   <pre className="mt-1 p-2 bg-muted rounded-md overflow-auto max-h-[200px] whitespace-pre-wrap">
-                                    {JSON.stringify(span.attributes, null, 2)}
+                                    {JSON.stringify(
+                                      selectedSpan.attributes,
+                                      null,
+                                      2
+                                    )}
                                   </pre>
                                 </details>
-                              </div>
-                            )}
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-                <TabsContent value="hierarchy" className="mt-4">
-                  <ScrollArea className="h-[calc(100vh-200px)]">
-                    <SpanTree spans={hierarchicalSpans} />
-                  </ScrollArea>
-                </TabsContent>
-              </Tabs>
-            </div>
-          )}
-        </main>
-      </div>
+                              )}
+                            {selectedSpan.events &&
+                              selectedSpan.events.length > 0 && (
+                                <details className="text-xs mt-2" open>
+                                  <summary className="font-medium cursor-pointer">
+                                    Events
+                                  </summary>
+                                  <div className="mt-1 space-y-1">
+                                    {selectedSpan.events.map((event, i) => (
+                                      <div
+                                        key={i}
+                                        className="p-2 bg-muted/50 rounded-md"
+                                      >
+                                        <p className="font-medium">
+                                          {event.name}
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                          {formatTime(event.timestamp)}
+                                        </p>
+                                        {event.attributes && (
+                                          <pre className="mt-1 p-1 bg-background rounded text-xs whitespace-pre-wrap">
+                                            {JSON.stringify(
+                                              event.attributes,
+                                              null,
+                                              2
+                                            )}
+                                          </pre>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+              <TabsContent value="hierarchy" className="mt-4">
+                <ScrollArea className="h-[calc(100vh-200px)]">
+                  <SpanHierarchy
+                    spans={hierarchicalSpans}
+                    selectedSpanId={selectedSpanId}
+                    onSpanClick={setSelectedSpanId}
+                  />
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

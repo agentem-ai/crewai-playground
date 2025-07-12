@@ -555,9 +555,31 @@ async def get_flow_traces(flow_id: str):
     Returns:
         List of trace objects
     """
+    logger.info(f"Fetching traces for flow_id: {flow_id}")
+    
+    # Check if flow exists in flows_cache
+    if flow_id not in flows_cache:
+        logger.warning(f"Flow ID {flow_id} not found in flows_cache")
+    
+    # Check if flow has any traces
     if flow_id not in flow_traces:
-        return {"status": "success", "traces": []}
-
+        logger.info(f"No traces found for flow_id: {flow_id}")
+        # Create an initializing trace if none exists
+        flow_name = flows_cache.get(flow_id, FlowInfo(id=flow_id, name="Unknown", description="", file_path="", class_name="", flow_class=None)).name
+        initial_trace = {
+            "id": f"trace_{uuid.uuid4()}",
+            "flow_id": flow_id,
+            "flow_name": flow_name,
+            "status": "initializing",
+            "start_time": datetime.now().timestamp(),
+            "nodes": {},
+            "edges": [],
+            "events": []
+        }
+        flow_traces[flow_id] = [initial_trace]
+        return {"status": "success", "traces": [initial_trace]}
+    
+    logger.info(f"Found {len(flow_traces[flow_id])} traces for flow_id: {flow_id}")
     return {"status": "success", "traces": flow_traces[flow_id]}
 
 
