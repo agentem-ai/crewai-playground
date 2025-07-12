@@ -56,7 +56,9 @@ from crewai_playground.chat_handler import ChatHandler
 from crewai_playground.event_listener import crew_visualization_listener
 from crewai_playground.tool_loader import discover_available_tools as discover_tools
 from crewai_playground.telemetry import telemetry_service
-from crewai_playground.flow_api import router as flow_router, get_active_execution, FlowInfo, flows_cache, active_flows, register_websocket_queue, unregister_websocket_queue, get_flow_state, is_execution_active
+from crewai_playground.flow_api import router as flow_router, get_active_execution, FlowInfo, flows_cache, active_flows, is_execution_active
+from crewai_playground.websocket_utils import register_websocket_queue, unregister_websocket_queue
+from crewai_playground.flow_event_listener import flow_websocket_listener
 
 # Create FastAPI app
 app = FastAPI()
@@ -758,7 +760,7 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
 
         try:
             # Send initial state
-            initial_state = get_flow_state(flow_id)
+            initial_state = flow_websocket_listener.get_flow_state(flow_id)
             if initial_state:
                 await websocket.send_json(
                     {"type": "flow_state", "payload": initial_state}
@@ -774,7 +776,7 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
                     # Check if the flow execution is still active
                     if not is_execution_active(flow_id):
                         # Send final state before closing
-                        final_state = get_flow_state(flow_id)
+                        final_state = flow_websocket_listener.get_flow_state(flow_id)
                         if final_state:
                             await websocket.send_json(
                                 {"type": "flow_state", "payload": final_state}
