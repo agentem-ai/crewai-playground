@@ -253,16 +253,76 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
             # For flows with kickoff but no kickoff_async, we need to create a wrapper
             # that doesn't use asyncio.run() since we're already in an event loop
             try:
+                # Ensure we have step event handlers wrapped for kickoff-only flows
+                # These are needed for WebSocket updates during execution
+                
+                # Wrap step_started event handler if available
+                if hasattr(flow, "on_step_started") and not hasattr(flow, "_original_on_step_started"):
+                    flow._original_on_step_started = flow.on_step_started
+                    
+                    async def custom_on_step_started(step_id, **kwargs):
+                        # Call original method
+                        result = flow._original_on_step_started(step_id, **kwargs)
+                        
+                        # Update step status
+                        for step in flow_state["steps"]:
+                            if step["id"] == step_id:
+                                step["status"] = "running"
+                                break
+                        
+                        flow_state["timestamp"] = asyncio.get_event_loop().time()
+                        
+                        # Send step update via WebSocket
+                        await broadcast_flow_update(
+                            flow_id, {"type": "flow_state", "payload": flow_state}
+                        )
+                        
+                        return result
+                    
+                    flow.on_step_started = custom_on_step_started
+                
+                # Wrap step_completed event handler if available
+                if hasattr(flow, "on_step_completed") and not hasattr(flow, "_original_on_step_completed"):
+                    flow._original_on_step_completed = flow.on_step_completed
+                    
+                    async def custom_on_step_completed(step_id, outputs, **kwargs):
+                        # Call original method
+                        result = flow._original_on_step_completed(step_id, outputs, **kwargs)
+                        
+                        # Update step status and outputs
+                        for step in flow_state["steps"]:
+                            if step["id"] == step_id:
+                                step["status"] = "completed"
+                                step["outputs"] = outputs
+                                break
+                        
+                        flow_state["timestamp"] = asyncio.get_event_loop().time()
+                        
+                        # Send step update via WebSocket
+                        await broadcast_flow_update(
+                            flow_id, {"type": "flow_state", "payload": flow_state}
+                        )
+                        
+                        return result
+                    
+                    flow.on_step_completed = custom_on_step_completed
+                
                 # Create a custom async execution path that mimics kickoff but without asyncio.run()
                 # First, update state with any inputs (mimicking kickoff_async)
                 if hasattr(flow, "_start_methods") and flow._start_methods:
                     # Execute each start method
                     for start_method_name in flow._start_methods:
                         if start_method_name in flow._methods:
+                            # Send update that this method is starting
+                            logger.info(f"Executing start method: {start_method_name}")
+                            
+                            # Execute the method
                             await flow._execute_method(start_method_name, flow._methods[start_method_name])
+                            
                             # Execute listeners for this start method
                             if hasattr(flow, "_execute_listeners"):
                                 await flow._execute_listeners(start_method_name, None)
+                    
                     # Return the last method output if available
                     result = flow.method_outputs()[-1] if flow.method_outputs() else None
                 else:
@@ -548,13 +608,25 @@ async def broadcast_flow_update(flow_id: str, message: Dict[str, Any]):
         message: Message to broadcast
     """
     if flow_id not in flow_websocket_queues:
+        logger.warning(f"No WebSocket queues found for flow {flow_id}. Message not sent.")
         return
+    
+    connections_count = len(flow_websocket_queues[flow_id])
+    logger.info(f"Broadcasting message to {connections_count} WebSocket connection(s) for flow {flow_id}")
+    
+    # Log message type and basic content for debugging
+    msg_type = message.get("type", "unknown")
+    if msg_type == "flow_state" and "payload" in message:
+        payload = message["payload"]
+        status = payload.get("status", "unknown")
+        steps_count = len(payload.get("steps", []))
+        logger.info(f"Message type: {msg_type}, flow status: {status}, steps count: {steps_count}")
 
     for connection_id, queue in flow_websocket_queues[flow_id].items():
         try:
             await queue.put(message)
-            logger.debug(
-                f"Sent message to WebSocket connection {connection_id} for flow {flow_id}"
+            logger.info(
+                f"Sent {msg_type} message to WebSocket connection {connection_id} for flow {flow_id}"
             )
         except Exception as e:
             logger.error(

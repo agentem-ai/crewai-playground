@@ -56,7 +56,7 @@ from crewai_playground.chat_handler import ChatHandler
 from crewai_playground.event_listener import crew_visualization_listener
 from crewai_playground.tool_loader import discover_available_tools as discover_tools
 from crewai_playground.telemetry import telemetry_service
-from crewai_playground.flow_api import router as flow_router, get_active_execution, FlowInfo, flows_cache, active_flows
+from crewai_playground.flow_api import router as flow_router, get_active_execution, FlowInfo, flows_cache, active_flows, register_websocket_queue, unregister_websocket_queue, get_flow_state, is_execution_active
 
 # Create FastAPI app
 app = FastAPI()
@@ -717,6 +717,7 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
     """WebSocket endpoint for real-time flow execution visualization."""
     logging.info(f"New WebSocket connection request for flow {flow_id}")
     await websocket.accept()
+    logging.info(f"WebSocket connection accepted for flow {flow_id}")
 
     try:
         # Get the flow execution from the flow API's active flows cache
@@ -753,11 +754,11 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
 
         # Register this connection
         connection_id = str(uuid.uuid4())
-        flow_router.register_websocket_queue(flow_id, connection_id, queue)
+        register_websocket_queue(flow_id, connection_id, queue)
 
         try:
             # Send initial state
-            initial_state = flow_router.get_flow_state(flow_id)
+            initial_state = get_flow_state(flow_id)
             if initial_state:
                 await websocket.send_json(
                     {"type": "flow_state", "payload": initial_state}
@@ -771,9 +772,9 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
                     await websocket.send_json(message)
                 except asyncio.TimeoutError:
                     # Check if the flow execution is still active
-                    if not flow_router.is_execution_active(flow_id):
+                    if not is_execution_active(flow_id):
                         # Send final state before closing
-                        final_state = flow_router.get_flow_state(flow_id)
+                        final_state = get_flow_state(flow_id)
                         if final_state:
                             await websocket.send_json(
                                 {"type": "flow_state", "payload": final_state}
@@ -787,7 +788,7 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
             logging.error(f"Error in flow WebSocket: {str(e)}")
         finally:
             # Unregister this connection
-            flow_router.unregister_websocket_queue(flow_id, connection_id)
+            unregister_websocket_queue(flow_id, connection_id)
     except Exception as e:
         logging.error(f"Flow WebSocket error: {str(e)}", exc_info=True)
     finally:

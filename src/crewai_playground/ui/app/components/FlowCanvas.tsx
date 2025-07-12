@@ -13,6 +13,7 @@ import {
 } from "@xyflow/react";
 import type { Node, Edge, NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import "./flow-animations.css";
 import dagre from "@dagrejs/dagre";
 import { Loader2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
@@ -360,6 +361,10 @@ const StepNode = ({ data }: { data: any }) => {
         return "bg-green-500";
       case "failed":
         return "bg-red-500";
+      case "initializing":
+        return "bg-purple-500";
+      case "pending":
+        return "bg-gray-500";
       default:
         return "bg-gray-500";
     }
@@ -423,15 +428,32 @@ const StepNode = ({ data }: { data: any }) => {
                 ? "outline"
                 : data.status === "failed"
                 ? "destructive"
+                : data.status === "initializing"
+                ? "default"
                 : "outline"
             }
+            className={
+              `${data.status === "completed" ? "bg-green-100 text-green-800 border-green-500 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800" : ""} ${
+                data.status === "running" ? "animate-pulse" : ""
+              }`
+            }
           >
+            {data.status === "running" && (
+              <span className="mr-1">⚡</span>
+            )}
+            {data.status === "completed" && (
+              <span className="mr-1">✓</span>
+            )}
+            {data.status === "failed" && (
+              <span className="mr-1">✗</span>
+            )}
             {data.status}
           </Badge>
         </div>
         {data.error && (
-          <div className="mt-2 text-xs text-red-500 text-center truncate">
-            Error: {data.error}
+          <div className="mt-2 p-2 bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-500 dark:text-red-400 text-center max-h-16 overflow-y-auto">
+            <div className="font-semibold">Error:</div>
+            <div>{data.error}</div>
           </div>
         )}
         {data.dependencies &&
@@ -746,10 +768,54 @@ const FlowCanvas = ({
       newSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log("Flow WebSocket message:", data);
+          console.log("Flow WebSocket message received:", data);
 
           if (data.type === "flow_state") {
-            setState(data.payload);
+            console.log("Processing flow_state update", {
+              flowId,
+              status: data.payload?.status,
+              stepsCount: data.payload?.steps?.length || 0,
+              timestamp: new Date().toISOString()
+            });
+            
+            // Deep copy to avoid state mutation issues
+            setState((prevState) => {
+              // If no previous state, just use the new payload
+              if (!prevState) return data.payload;
+              
+              const newState = JSON.parse(JSON.stringify(prevState));
+              
+              // Update flow status
+              newState.status = data.payload.status;
+              
+              // Update outputs if available
+              if (data.payload.outputs) {
+                newState.outputs = { ...newState.outputs, ...data.payload.outputs };
+              }
+              
+              // Update steps using a Map for efficient merging
+              if (data.payload.steps && Array.isArray(data.payload.steps)) {
+                const stepMap = new Map(
+                  newState.steps.map((s: any) => [s.id, s])
+                );
+                
+                data.payload.steps.forEach((newStep: any) => {
+                  stepMap.set(newStep.id, {
+                    ...(stepMap.get(newStep.id) || {}),
+                    ...newStep,
+                  });
+                });
+                
+                newState.steps = Array.from(stepMap.values());
+              }
+              
+              // Update errors if any
+              if (data.payload.errors && Array.isArray(data.payload.errors)) {
+                newState.errors = [...(newState.errors || []), ...data.payload.errors];
+              }
+              
+              return newState;
+            });
           } else if (data.type === "error") {
             setError(data.message || "An error occurred during flow execution");
           }
@@ -855,31 +921,42 @@ const FlowCanvas = ({
         animated: step.status === "running",
         style: {
           stroke: getStatusColor(step.status),
-          strokeWidth: 2,
+          strokeWidth: step.status === "running" ? 3 : 2,
+          opacity: step.status === "pending" ? 0.6 : 1,
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: getStatusColor(step.status),
+          width: step.status === "running" ? 20 : 15,
+          height: step.status === "running" ? 20 : 15,
         },
       });
 
       // Create edges between steps based on dependencies
       if (step.dependencies && step.dependencies.length > 0) {
         step.dependencies.forEach((depId) => {
+          // Get the dependency step to check its status
+          const depStep = state.steps.find((s) => s.id === depId);
+          const isDependencyCompleted = depStep?.status === "completed";
+          const isStepRunning = step.status === "running";
+          
           newEdges.push({
             id: `step-${depId}-to-step-${step.id}`,
             source: `step-${depId}`,
             target: `step-${step.id}`,
             type: "smoothstep",
-            animated: step.status === "running",
+            animated: isStepRunning,
             style: {
-              stroke: "#ff9800",
-              strokeWidth: 2,
-              strokeDasharray: "5 5",
+              stroke: isDependencyCompleted ? "#4caf50" : (isStepRunning ? "#2196f3" : "#ff9800"),
+              strokeWidth: isStepRunning ? 3 : 2,
+              strokeDasharray: isDependencyCompleted ? "" : "5 5",
+              opacity: isDependencyCompleted ? 1 : 0.8,
             },
             markerEnd: {
               type: MarkerType.ArrowClosed,
-              color: "#ff9800",
+              color: isDependencyCompleted ? "#4caf50" : (isStepRunning ? "#2196f3" : "#ff9800"),
+              width: isStepRunning ? 20 : 15,
+              height: isStepRunning ? 20 : 15,
             },
           });
         });
@@ -962,13 +1039,29 @@ const FlowCanvas = ({
   const getStatusColor = (status: string) => {
     switch (status) {
       case "running":
-        return "#2196f3"; // Blue
+        return "#2196f3"; // Bright Blue
       case "completed":
-        return "#4caf50"; // Green
+        return "#4caf50"; // Bright Green
       case "failed":
-        return "#f44336"; // Red
+        return "#f44336"; // Bright Red
+      case "pending":
+        return "#9e9e9e"; // Gray
+      case "initializing":
+        return "#9c27b0"; // Purple
       default:
         return "#9e9e9e"; // Gray
+    }
+  };
+  
+  // Helper function to get animation class based on status
+  const getStatusAnimation = (status: string) => {
+    switch (status) {
+      case "running":
+        return "animate-pulse-subtle";
+      case "initializing":
+        return "animate-fade-in";
+      default:
+        return "";
     }
   };
 
