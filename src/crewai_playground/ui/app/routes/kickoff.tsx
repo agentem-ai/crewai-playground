@@ -12,7 +12,8 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { useChatStore } from "~/lib/store";
-import { ArrowLeft, Loader2, Moon, Sun } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { Layout } from "../components/Layout";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import ReactMarkdown from "react-markdown";
 import CrewAgentCanvas from "../components/CrewAgentCanvas";
@@ -42,7 +43,7 @@ interface CrewDetails {
 
 export default function Kickoff() {
   const navigate = useNavigate();
-  const { crews, setCrews, isDarkMode, toggleDarkMode } = useChatStore();
+  const { crews, setCrews } = useChatStore();
   const [loading, setLoading] = useState(false);
   const [selectedCrewId, setSelectedCrewId] = useState<string>("");
   const [crewDetails, setCrewDetails] = useState<CrewDetails | null>(null);
@@ -194,170 +195,134 @@ export default function Kickoff() {
     }
   };
 
-  const handleBack = () => {
-    navigate("/");
-  };
+  const rightSidebar = (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold">Select a Crew</h3>
+        <Select
+          value={selectedCrewId}
+          onValueChange={setSelectedCrewId}
+          disabled={loading}
+        >
+          <SelectTrigger id="crew-select" className="w-full">
+            <SelectValue placeholder="Select a crew" />
+          </SelectTrigger>
+          <SelectContent>
+            {crews.map((crew) => (
+              <SelectItem key={crew.id} value={crew.id}>
+                {crew.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {crewDetails && (
+        <div className="p-4 rounded-lg border bg-accent/50">
+          <h3 className="text-lg font-semibold mb-2">
+            {crewDetails.name}
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            {crewDetails.description}
+          </p>
+        </div>
+      )}
+
+      {inputFields.length > 0 && (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <h3 className="text-lg font-semibold">Required Inputs</h3>
+
+          {inputFields.map((field) => (
+            <div key={field.name} className="space-y-2">
+              <Label htmlFor={field.name} className="text-sm font-medium">
+                {field.name}
+                {field.description && (
+                  <span className="text-xs text-gray-500 dark:text-gray-400 block mt-1">
+                    {field.description}
+                  </span>
+                )}
+              </Label>
+              {field.description.toLowerCase().includes("longer") ? (
+                <Textarea
+                  id={field.name}
+                  value={field.value}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    handleInputChange(field.name, e.target.value)
+                  }
+                  disabled={loading}
+                  className="min-h-24 text-sm"
+                />
+              ) : (
+                <Input
+                  id={field.name}
+                  value={field.value}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleInputChange(field.name, e.target.value)
+                  }
+                  disabled={loading}
+                  className="text-sm"
+                />
+              )}
+            </div>
+          ))}
+
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={
+              loading || inputFields.some((field) => !field.value)
+            }
+          >
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Running Crew...
+              </>
+            ) : (
+              "Run Crew"
+            )}
+          </Button>
+        </form>
+      )}
+    </div>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="py-4 px-6 border-b bg-background">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBack}
-              className="mr-4"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <h1 className="text-2xl font-bold">Kickoff Mode</h1>
+    <Layout rightSidebar={rightSidebar}>
+      {error && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Crew Agent Visualization Canvas */}
+      {selectedCrewId && (
+        <CrewAgentCanvas 
+        crewId={selectedCrewId} 
+        isRunning={isRunningCrew} 
+        resetKey={resetKey}
+      />
+      )}
+
+      {!error && !selectedCrewId && (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center max-w-md">
+            <h2 className="text-2xl font-bold mb-2">Run a Crew Directly</h2>
+            <p className="text-muted-foreground mb-4">
+              Select a crew from the sidebar, provide the required inputs,
+              and run it to see results here.
+            </p>
+            {loading && (
+              <div className="flex justify-center mt-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleDarkMode}
-            className="h-8 w-8"
-          >
-            {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
         </div>
-      </header>
+      )}
 
-      {/* Main Layout with Sidebar and Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-80 border-r flex-shrink-0 overflow-y-auto p-4 bg-background">
-          <div className="sticky top-0 space-y-6">
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold">Select a Crew</h3>
-              <Select
-                value={selectedCrewId}
-                onValueChange={setSelectedCrewId}
-                disabled={loading}
-              >
-                <SelectTrigger id="crew-select" className="w-full">
-                  <SelectValue placeholder="Select a crew" />
-                </SelectTrigger>
-                <SelectContent>
-                  {crews.map((crew) => (
-                    <SelectItem key={crew.id} value={crew.id}>
-                      {crew.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {crewDetails && (
-              <div className="p-4 rounded-lg border bg-accent/50">
-                <h3 className="text-lg font-semibold mb-2">
-                  {crewDetails.name}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {crewDetails.description}
-                </p>
-              </div>
-            )}
-
-            {inputFields.length > 0 && (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <h3 className="text-lg font-semibold">Required Inputs</h3>
-
-                {inputFields.map((field) => (
-                  <div key={field.name} className="space-y-2">
-                    <Label htmlFor={field.name} className="text-sm font-medium">
-                      {field.name}
-                      {field.description && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400 block mt-1">
-                          {field.description}
-                        </span>
-                      )}
-                    </Label>
-                    {field.description.toLowerCase().includes("longer") ? (
-                      <Textarea
-                        id={field.name}
-                        value={field.value}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                          handleInputChange(field.name, e.target.value)
-                        }
-                        disabled={loading}
-                        className="min-h-24 text-sm"
-                      />
-                    ) : (
-                      <Input
-                        id={field.name}
-                        value={field.value}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          handleInputChange(field.name, e.target.value)
-                        }
-                        disabled={loading}
-                        className="text-sm"
-                      />
-                    )}
-                  </div>
-                ))}
-
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={
-                    loading || inputFields.some((field) => !field.value)
-                  }
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Running Crew...
-                    </>
-                  ) : (
-                    "Run Crew"
-                  )}
-                </Button>
-              </form>
-            )}
-          </div>
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-6 bg-background">
-          {error && (
-            <Alert variant="destructive" className="mb-6">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          {/* Crew Agent Visualization Canvas */}
-          {selectedCrewId && (
-            <CrewAgentCanvas 
-            crewId={selectedCrewId} 
-            isRunning={isRunningCrew} 
-            resetKey={resetKey}
-          />
-          )}
-
-          {!error && !selectedCrewId && (
-            <div className="h-full flex items-center justify-center">
-              <div className="text-center max-w-md">
-                <h2 className="text-2xl font-bold mb-2">Run a Crew Directly</h2>
-                <p className="text-muted-foreground mb-4">
-                  Select a crew from the sidebar, provide the required inputs,
-                  and run it to see results here.
-                </p>
-                {loading && (
-                  <div className="flex justify-center mt-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Results are now displayed in the CrewAgentCanvas component */}
-        </main>
-      </div>
-    </div>
+      {/* Results are now displayed in the CrewAgentCanvas component */}
+    </Layout>
   );
 }
