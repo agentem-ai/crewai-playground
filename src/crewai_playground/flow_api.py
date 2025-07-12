@@ -245,12 +245,35 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         # Execute flow
         if hasattr(flow, "run_async"):
             result = await flow.run_async()
+        elif hasattr(flow, "kickoff_async"):
+            result = await flow.kickoff_async()
         elif hasattr(flow, "run"):
             result = flow.run()
         elif hasattr(flow, "kickoff"):
-            result = flow.kickoff()
+            # For flows with kickoff but no kickoff_async, we need to create a wrapper
+            # that doesn't use asyncio.run() since we're already in an event loop
+            try:
+                # Create a custom async execution path that mimics kickoff but without asyncio.run()
+                # First, update state with any inputs (mimicking kickoff_async)
+                if hasattr(flow, "_start_methods") and flow._start_methods:
+                    # Execute each start method
+                    for start_method_name in flow._start_methods:
+                        if start_method_name in flow._methods:
+                            await flow._execute_method(start_method_name, flow._methods[start_method_name])
+                            # Execute listeners for this start method
+                            if hasattr(flow, "_execute_listeners"):
+                                await flow._execute_listeners(start_method_name, None)
+                    # Return the last method output if available
+                    result = flow.method_outputs()[-1] if flow.method_outputs() else None
+                else:
+                    # Fallback: this might still fail if kickoff uses asyncio.run internally
+                    logger.warning(f"Using potentially incompatible kickoff method for {flow.__class__.__name__}")
+                    result = flow.kickoff()
+            except Exception as e:
+                logger.error(f"Error executing flow {flow.__class__.__name__}: {str(e)}")
+                raise
         else:
-            raise AttributeError(f"'{flow.__class__.__name__}' object has no run, run_async, or kickoff method")
+            raise AttributeError(f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method")
 
         # Update flow state with results
         flow_state["status"] = "completed"
