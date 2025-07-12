@@ -74,10 +74,10 @@ export function Layout({ children, rightSidebar }: LayoutProps) {
             </Button>
           </div>
         </header>
-        <main className="flex-grow p-8 overflow-auto flex">
+        <main className="flex-grow p-8 overflow-auto flex gap-8">
           <div className="flex-1">{children}</div>
           {rightSidebar && (
-            <div className="w-72 border-l bg-background p-4">
+            <div className="w-96 border-l bg-background p-4">
               {rightSidebar}
             </div>
           )}
