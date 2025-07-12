@@ -56,7 +56,7 @@ from crewai_playground.chat_handler import ChatHandler
 from crewai_playground.event_listener import crew_visualization_listener
 from crewai_playground.tool_loader import discover_available_tools as discover_tools
 from crewai_playground.telemetry import telemetry_service
-from crewai_playground.flow_api import router as flow_router, get_active_execution
+from crewai_playground.flow_api import router as flow_router, get_active_execution, FlowInfo, flows_cache, active_flows
 
 # Create FastAPI app
 app = FastAPI()
@@ -72,6 +72,47 @@ app.add_middleware(
 
 # Include the flow API router
 app.include_router(flow_router)
+
+
+# Dashboard API endpoint
+@app.get("/api/dashboard")
+async def get_dashboard_data():
+    """Get dashboard data including counts of crews, tools, and flows."""
+    try:
+        # Get counts of available resources
+        crews_count = len(discovered_crews)
+        tools_count = len(discover_tools())
+        flows_count = len(flows_cache)
+        
+        # Get recent traces
+        recent_traces = telemetry_service.get_traces(limit=5)
+        
+        # Get active flows
+        active_flow_data = [
+            {
+                "id": flow_id,
+                "name": flows_cache.get(flow_id, FlowInfo(id=flow_id, name="Unknown", description="", file_path="", class_name="", flow_class=None)).name,
+                "status": state.get("status", "unknown"),
+                "start_time": state.get("timestamp", 0)
+            }
+            for flow_id, state in active_flows.items()
+        ]
+        
+        return {
+            "status": "success",
+            "data": {
+                "counts": {
+                    "crews": crews_count,
+                    "tools": tools_count,
+                    "flows": flows_count,
+                },
+                "recent_traces": recent_traces,
+                "active_flows": active_flow_data
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error fetching dashboard data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching dashboard data: {str(e)}")
 
 
 # Telemetry API endpoints
