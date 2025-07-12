@@ -136,6 +136,31 @@ async def initialize_flow(flow_id: str) -> Dict[str, Any]:
     }
 
 
+def _execute_flow_sync(flow_id: str, inputs: Dict[str, Any]):
+    """
+    Execute a flow synchronously in a thread
+
+    Args:
+        flow_id: ID of the flow to execute
+        inputs: Input parameters for the flow
+    """
+    logger.info(f"Starting threaded execution of flow: {flow_id}")
+    
+    # Create an event loop for this thread if needed
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    # Run the async function in this thread's event loop
+    try:
+        return loop.run_until_complete(_execute_flow_async(flow_id, inputs))
+    except Exception as e:
+        logger.error(f"Error in threaded flow execution: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
 async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
     """
     Execute a flow asynchronously
@@ -450,7 +475,7 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
 
 @router.post("/{flow_id}/execute")
 async def execute_flow(
-    flow_id: str, request: FlowExecuteRequest, background_tasks: BackgroundTasks
+    flow_id: str, request: FlowExecuteRequest
 ) -> Dict[str, Any]:
     """
     Execute a flow with the provided inputs
@@ -496,8 +521,11 @@ async def execute_flow(
             "timestamp": asyncio.get_event_loop().time(),
         }
 
-        # Start the flow execution in the background
-        background_tasks.add_task(_execute_flow_async, flow_id, request.inputs)
+        # Start the flow execution in a separate thread to not block the API
+        import threading
+        thread = threading.Thread(target=_execute_flow_sync, args=(flow_id, request.inputs))
+        thread.daemon = True
+        thread.start()
 
         return {
             "status": "success",
