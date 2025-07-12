@@ -24,15 +24,21 @@ async def broadcast_flow_update(flow_id: str, message: Dict[str, Any]):
         flow_id: ID of the flow
         message: Message to broadcast
     """
+    print(f"\n=== WEBSOCKET BROADCAST CALLED ===\nFlow ID: {flow_id}\nMessage: {message}\n=== WEBSOCKET BROADCAST CALLED ===\n")
+    
     if flow_id not in flow_websocket_queues:
+        print(f"=== NO WEBSOCKET CONNECTIONS ===\nFlow ID: {flow_id}\nAvailable flows: {list(flow_websocket_queues.keys())}\n=== NO WEBSOCKET CONNECTIONS ===\n")
         logger.debug(f"No WebSocket connections for flow {flow_id}")
         return
 
     connection_count = len(flow_websocket_queues[flow_id])
+    print(f"=== BROADCASTING TO CONNECTIONS ===\nFlow ID: {flow_id}\nConnection count: {connection_count}\n=== BROADCASTING TO CONNECTIONS ===\n")
     logger.debug(f"Broadcasting message to {connection_count} WebSocket connections for flow {flow_id}")
     
     for connection_id, queue in flow_websocket_queues[flow_id].items():
+        print(f"=== SENDING TO CONNECTION ===\nConnection ID: {connection_id}\n=== SENDING TO CONNECTION ===\n")
         await queue.put(message)
+        print(f"=== MESSAGE QUEUED ===\nConnection ID: {connection_id}\n=== MESSAGE QUEUED ===\n")
 
 
 def register_websocket_queue(flow_id: str, connection_id: str, queue: asyncio.Queue):

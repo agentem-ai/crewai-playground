@@ -32,8 +32,13 @@ router = APIRouter(prefix="/api/flows", tags=["flows"])
 
 # In-memory storage for flows and traces
 flows_cache: Dict[str, FlowInfo] = {}
+# Global state for active flows and traces
+active_flows: Dict[str, Dict[str, Any]] = {}
 flow_traces: Dict[str, List[Dict[str, Any]]] = {}
-active_flows: Dict[str, Any] = {}
+flow_states: Dict[str, Dict[str, Any]] = {}
+# Mapping between API flow IDs and internal CrewAI flow IDs
+flow_id_mapping: Dict[str, str] = {}  # api_flow_id -> internal_flow_id
+reverse_flow_id_mapping: Dict[str, str] = {}  # internal_flow_id -> api_flow_id
 
 # Import after defining the above to avoid circular imports
 from .websocket_utils import (
@@ -138,23 +143,46 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         flow_id: ID of the flow to execute
         inputs: Input parameters for the flow
     """
+    print(f"\n🚀 === _EXECUTE_FLOW_ASYNC CALLED ===")
+    print(f"Flow ID: {flow_id}")
+    print(f"Inputs: {inputs}")
+    print(f"=== _EXECUTE_FLOW_ASYNC CALLED ===\n")
+    logger.info(f"Starting async execution of flow: {flow_id}")
+    
     try:
+        # Create a test file to verify this function is being called
+        import os
+        test_file_path = f"/tmp/flow_execution_test_{flow_id}.txt"
+        with open(test_file_path, "w") as f:
+            f.write(f"Flow execution started at {asyncio.get_event_loop().time()}\n")
+        print(f"📋 CREATED TEST FILE: {test_file_path}")
+        
+        print(f"🔄 STARTING FLOW EXECUTION PROCESS for {flow_id}")
+        print(f"🔍 CHECKING FLOWS CACHE: flow_id={flow_id}, cache_keys={list(flows_cache.keys())}")
         # Get flow info from cache or discover it
         if flow_id in flows_cache:
             flow_info = flows_cache[flow_id]
+            print(f"✅ FOUND FLOW IN CACHE: {flow_info}")
         else:
+            print(f"⚠️ FLOW NOT IN CACHE, DISCOVERING...")
             # Discover available flows
             available_flows = discover_flows()
             flows_cache.update({flow.id: flow for flow in available_flows})
             flow_info = flows_cache.get(flow_id)
+            print(f"🔍 AFTER DISCOVERY: flow_info={flow_info}")
         
         if not flow_info:
+            print(f"❌ FLOW INFO NOT FOUND for {flow_id}")
             return {"status": "error", "message": f"Flow {flow_id} not found"}
             
+        print(f"📎 LOADING FLOW: {flow_info}")
         # Load flow using the FlowInfo object
         flow = load_flow(flow_info, inputs)
         if not flow:
+            print(f"❌ FLOW LOADING FAILED for {flow_id}")
             return {"status": "error", "message": f"Flow {flow_id} not found"}
+        
+        print(f"✅ FLOW LOADED SUCCESSFULLY: {flow}")
 
         # Initialize flow state through the event listener
         # The event listener will handle this when it receives the flow_started event
@@ -164,6 +192,7 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
             "status": "running",
             "timestamp": asyncio.get_event_loop().time(),
         }
+        print(f"📊 REGISTERED ACTIVE FLOW: {flow_id} in active_flows dictionary")
         
         # Initialize trace for this execution
         current_time = asyncio.get_event_loop().time()
@@ -205,17 +234,28 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
             
             # Register our listener with the global event bus
             # The listener will filter events by flow_id
+            print(f"\n=== SETTING UP EVENT LISTENERS ===")
+            print(f"Flow ID: {flow_id}")
+            print(f"Event bus: {crewai_event_bus}")
+            print(f"=== SETTING UP EVENT LISTENERS ===\n")
+            logger.info(f"Setting up event listeners for flow: {flow_id}")
             flow_websocket_listener.setup_listeners(crewai_event_bus)
             logger.info(f"Successfully registered event listener for flow: {flow_id}")
             
             # Emit flow started event using the global event bus
             from crewai.utilities.events import FlowStartedEvent
+            print(f"\n=== EMITTING FLOW STARTED EVENT ===")
+            print(f"Flow class: {flow.__class__.__name__}")
+            print(f"Flow ID: {flow_id}")
+            print(f"=== EMITTING FLOW STARTED EVENT ===\n")
+            logger.info(f"Creating FlowStartedEvent for {flow.__class__.__name__}")
             flow_started_event = FlowStartedEvent(
                 flow_name=flow.__class__.__name__,
                 inputs=inputs
             )
+            logger.info(f"Emitting FlowStartedEvent via crewai_event_bus")
             crewai_event_bus.emit(flow, flow_started_event)
-            logger.info(f"Emitted FlowStartedEvent for flow: {flow_id}")
+            logger.info(f"Successfully emitted FlowStartedEvent for flow: {flow_id}")
             
         except Exception as e:
             logger.error(f"Failed to set up flow event handling: {e}")
@@ -224,11 +264,18 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         # Wrap flow execution to emit method execution events using global event bus
         async def emit_method_events(method_name, method_func, *args, **kwargs):
             """Wrapper to emit method execution events."""
+            print(f"\n=== EMIT_METHOD_EVENTS CALLED ===")
+            print(f"Method name: {method_name}")
+            print(f"Method func: {method_func}")
+            print(f"=== EMIT_METHOD_EVENTS CALLED ===\n")
             try:
                 from crewai.utilities.events.crewai_event_bus import crewai_event_bus
                 from crewai.utilities.events import MethodExecutionStartedEvent
                 
                 # Emit method started event
+                print(f"\n=== EMITTING METHOD STARTED EVENT ===")
+                print(f"Method: {method_name}")
+                print(f"=== EMITTING METHOD STARTED EVENT ===\n")
                 start_event = MethodExecutionStartedEvent(
                     flow_name=flow.__class__.__name__,
                     method_name=method_name,
@@ -237,18 +284,32 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                 crewai_event_bus.emit(flow, start_event)
                 logger.debug(f"Emitted MethodExecutionStartedEvent for {method_name}")
             except Exception as e:
+                print(f"\n=== ERROR EMITTING METHOD STARTED EVENT ===")
+                print(f"Error: {e}")
+                print(f"=== ERROR EMITTING METHOD STARTED EVENT ===\n")
                 logger.error(f"Failed to emit MethodExecutionStartedEvent: {e}")
             
             try:
                 # Execute the method
+                print(f"\n=== EXECUTING METHOD ===")
+                print(f"Method: {method_name}")
+                print(f"Is coroutine: {asyncio.iscoroutinefunction(method_func)}")
+                print(f"=== EXECUTING METHOD ===\n")
                 if asyncio.iscoroutinefunction(method_func):
                     result = await method_func(*args, **kwargs)
                 else:
                     result = method_func(*args, **kwargs)
+                print(f"\n=== METHOD EXECUTION COMPLETED ===")
+                print(f"Method: {method_name}")
+                print(f"Result type: {type(result)}")
+                print(f"=== METHOD EXECUTION COMPLETED ===\n")
                 
                 # Emit method finished event
                 try:
                     from crewai.utilities.events import MethodExecutionFinishedEvent
+                    print(f"\n=== EMITTING METHOD FINISHED EVENT ===")
+                    print(f"Method: {method_name}")
+                    print(f"=== EMITTING METHOD FINISHED EVENT ===\n")
                     finish_event = MethodExecutionFinishedEvent(
                         flow_name=flow.__class__.__name__,
                         method_name=method_name,
@@ -258,17 +319,28 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                     crewai_event_bus.emit(flow, finish_event)
                     logger.debug(f"Emitted MethodExecutionFinishedEvent for {method_name}")
                 except Exception as e:
+                    print(f"\n=== ERROR EMITTING METHOD FINISHED EVENT ===")
+                    print(f"Error: {e}")
+                    print(f"=== ERROR EMITTING METHOD FINISHED EVENT ===\n")
                     logger.error(f"Failed to emit MethodExecutionFinishedEvent: {e}")
                 
                 return result
             except Exception as e:
                 # Emit method failed event
+                print(f"\n=== METHOD EXECUTION FAILED ===")
+                print(f"Method: {method_name}")
+                print(f"Error: {e}")
+                print(f"=== METHOD EXECUTION FAILED ===\n")
                 try:
                     from crewai.utilities.events import MethodExecutionFailedEvent
+                    print(f"\n=== EMITTING METHOD FAILED EVENT ===")
+                    print(f"Method: {method_name}")
+                    print(f"=== EMITTING METHOD FAILED EVENT ===\n")
                     failed_event = MethodExecutionFailedEvent(
                         flow_name=flow.__class__.__name__,
                         method_name=method_name,
-                        error=e
+                        error=e,
+                        state=getattr(flow, 'state', {})
                     )
                     crewai_event_bus.emit(flow, failed_event)
                     logger.debug(f"Emitted MethodExecutionFailedEvent for {method_name}")
@@ -277,29 +349,102 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                 raise
         
         # Execute flow with event emission
+        print(f"\n=== CHECKING FLOW EXECUTION METHODS ===")
+        print(f"Flow class: {flow.__class__.__name__}")
+        print(f"Has run_async: {hasattr(flow, 'run_async')}")
+        print(f"Has kickoff_async: {hasattr(flow, 'kickoff_async')}")
+        print(f"Has run: {hasattr(flow, 'run')}")
+        print(f"Has kickoff: {hasattr(flow, 'kickoff')}")
+        print(f"=== CHECKING FLOW EXECUTION METHODS ===\n")
+        logger.info(f"Checking flow execution methods for {flow.__class__.__name__}")
+        logger.info(f"Has run_async: {hasattr(flow, 'run_async')}")
+        logger.info(f"Has kickoff_async: {hasattr(flow, 'kickoff_async')}")
+        logger.info(f"Has run: {hasattr(flow, 'run')}")
+        logger.info(f"Has kickoff: {hasattr(flow, 'kickoff')}")
+        
         if hasattr(flow, "run_async"):
+            print(f"\n=== EXECUTING VIA RUN_ASYNC ===")
+            logger.info(f"Executing flow via run_async method")
+            
+            # Capture internal flow ID after execution starts
             result = await emit_method_events("run_async", flow.run_async)
+            
+            # Check if flow has an internal ID and create mapping
+            internal_flow_id = getattr(flow, 'id', None)
+            if internal_flow_id and internal_flow_id != flow_id:
+                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                flow_id_mapping[flow_id] = internal_flow_id
+                reverse_flow_id_mapping[internal_flow_id] = flow_id
+                print(f"📊 FLOW ID MAPPINGS CREATED:")
+                print(f"  API -> Internal: {flow_id_mapping}")
+                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         elif hasattr(flow, "kickoff_async"):
+            print(f"\n=== EXECUTING VIA KICKOFF_ASYNC ===")
+            logger.info(f"Executing flow via kickoff_async method")
             result = await emit_method_events("kickoff_async", flow.kickoff_async)
+            
+            # Check if flow has an internal ID and create mapping
+            internal_flow_id = getattr(flow, 'id', None)
+            if internal_flow_id and internal_flow_id != flow_id:
+                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                flow_id_mapping[flow_id] = internal_flow_id
+                reverse_flow_id_mapping[internal_flow_id] = flow_id
+                print(f"📊 FLOW ID MAPPINGS CREATED:")
+                print(f"  API -> Internal: {flow_id_mapping}")
+                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         elif hasattr(flow, "run"):
+            print(f"\n=== EXECUTING VIA RUN ===")
+            logger.info(f"Executing flow via run method")
             result = await emit_method_events("run", flow.run)
+            
+            # Check if flow has an internal ID and create mapping
+            internal_flow_id = getattr(flow, 'id', None)
+            if internal_flow_id and internal_flow_id != flow_id:
+                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                flow_id_mapping[flow_id] = internal_flow_id
+                reverse_flow_id_mapping[internal_flow_id] = flow_id
+                print(f"📊 FLOW ID MAPPINGS CREATED:")
+                print(f"  API -> Internal: {flow_id_mapping}")
+                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         elif hasattr(flow, "kickoff"):
-            # For flows with kickoff but no kickoff_async, wrap with events
+            print(f"\n=== EXECUTING VIA KICKOFF ===")
+            logger.info(f"Executing flow via kickoff method")
             result = await emit_method_events("kickoff", flow.kickoff)
+            
+            # Check if flow has an internal ID and create mapping
+            internal_flow_id = getattr(flow, 'id', None)
+            if internal_flow_id and internal_flow_id != flow_id:
+                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                flow_id_mapping[flow_id] = internal_flow_id
+                reverse_flow_id_mapping[internal_flow_id] = flow_id
+                print(f"📊 FLOW ID MAPPINGS CREATED:")
+                print(f"  API -> Internal: {flow_id_mapping}")
+                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         else:
             raise AttributeError(f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method")
+        
+        print(f"\n=== FLOW EXECUTION COMPLETED ===")
+        print(f"Result type: {type(result)}")
+        print(f"=== FLOW EXECUTION COMPLETED ===\n")
+        logger.info(f"Flow execution completed with result type: {type(result)}")
 
         # Emit flow finished event using global event bus
         try:
             from crewai.utilities.events.crewai_event_bus import crewai_event_bus
             from crewai.utilities.events import FlowFinishedEvent
             
+            print(f"\n=== EMITTING FLOW FINISHED EVENT ===")
+            print(f"Flow class: {flow.__class__.__name__}")
+            print(f"Flow ID: {flow_id}")
+            print(f"=== EMITTING FLOW FINISHED EVENT ===\n")
+            logger.info(f"Creating FlowFinishedEvent for {flow.__class__.__name__}")
             flow_finished_event = FlowFinishedEvent(
                 flow_name=flow.__class__.__name__,
                 result=result
             )
+            logger.info(f"Emitting FlowFinishedEvent via crewai_event_bus")
             crewai_event_bus.emit(flow, flow_finished_event)
-            logger.info(f"Emitted FlowFinishedEvent for flow: {flow_id}")
+            logger.info(f"Successfully emitted FlowFinishedEvent for flow: {flow_id}")
         except Exception as e:
             logger.error(f"Failed to emit FlowFinishedEvent: {e}")
         
@@ -328,7 +473,15 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         return result
 
     except Exception as e:
-        logger.error(f"Error executing flow {flow_id}: {str(e)}")
+        print(f"\n💥 === FLOW EXECUTION ERROR ===")
+        print(f"Flow ID: {flow_id}")
+        print(f"Error: {str(e)}")
+        print(f"Error Type: {type(e).__name__}")
+        print(f"=== FLOW EXECUTION ERROR ===\n")
+        print(f"💥 FULL TRACEBACK:")
+        import traceback
+        traceback.print_exc()
+        logger.error(f"Error executing flow {flow_id}: {str(e)}", exc_info=True)
 
         # The event listener will handle updating the flow state with error
         # when it receives the method_execution_failed event
@@ -371,6 +524,17 @@ async def execute_flow(
     Returns:
         Dict with execution status
     """
+    print("\n" + "="*60)
+    print(" FLOW EXECUTION API ENDPOINT CALLED ")
+    print(f"Flow ID: {flow_id}")
+    print(f"Inputs: {request.inputs}")
+    print("="*60 + "\n")
+    logger.info(f"Executing flow: {flow_id}")
+    print(f"\n=== FLOW EXECUTION API CALLED ===")
+    print(f"Flow ID: {flow_id}")
+    print(f"Inputs: {request.inputs}")
+    print(f"=== FLOW EXECUTION API CALLED ===\n")
+    
     if flow_id not in flows_cache:
         raise HTTPException(status_code=404, detail="Flow not found")
 
@@ -403,7 +567,10 @@ async def execute_flow(
             "timestamp": asyncio.get_event_loop().time(),
         }
 
-        # Start flow execution in background
+        # Start the flow execution in the background
+        print(f"\n=== STARTING BACKGROUND FLOW EXECUTION ===")
+        print(f"Flow ID: {flow_id}")
+        print(f"=== STARTING BACKGROUND FLOW EXECUTION ===\n")
         background_tasks.add_task(_execute_flow_async, flow_id, request.inputs)
 
         return {
@@ -414,7 +581,12 @@ async def execute_flow(
         }
 
     except Exception as e:
-        logger.error(f"Error starting flow execution: {str(e)}")
+        logger.error(f"Error starting flow execution: {str(e)}", exc_info=True)
+        print(f"💥 CRITICAL ERROR in execute_flow for {flow_id}: {str(e)}")
+        print(f"💥 ERROR TYPE: {type(e).__name__}")
+        print(f"💥 ERROR TRACEBACK:")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500, detail=f"Error starting flow execution: {str(e)}"
         )
@@ -531,7 +703,9 @@ def get_active_execution(flow_id: str):
     Returns:
         Active flow execution or None if not found
     """
-    return active_flows.get(flow_id)
+    result = active_flows.get(flow_id)
+    print(f"🔍 GET_ACTIVE_EXECUTION: flow_id={flow_id}, found={result is not None}, active_flows_keys={list(active_flows.keys())}")
+    return result
 
 
 def is_execution_active(flow_id: str) -> bool:

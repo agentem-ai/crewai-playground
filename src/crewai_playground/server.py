@@ -717,54 +717,82 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.websocket("/ws/flow/{flow_id}")
 async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
     """WebSocket endpoint for real-time flow execution visualization."""
+    print(f"🔌 NEW WEBSOCKET CONNECTION REQUEST for flow {flow_id}")
     logging.info(f"New WebSocket connection request for flow {flow_id}")
     await websocket.accept()
-    logging.info(f"WebSocket connection accepted for flow {flow_id}")
-
+    print(f"\n🔌 WEBSOCKET CONNECTION ATTEMPT")
+    print(f"Flow ID: {flow_id}")
+    print(f"WebSocket: {websocket}")
+    print(f"🔌 WEBSOCKET CONNECTION ATTEMPT\n")
+    
     try:
-        # Get the flow execution from the flow API's active flows cache
-        flow_execution = get_active_execution(flow_id)
+        # Check if this is an API flow ID that needs to be mapped to internal flow ID
+        from .flow_api import flow_id_mapping
+        internal_flow_id = flow_id_mapping.get(flow_id, flow_id)
+        
+        if internal_flow_id != flow_id:
+            print(f"🔗 USING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+        else:
+            print(f"📝 NO MAPPING FOUND, using original flow ID: {flow_id}")
+        
+        # Check if flow execution exists using the API flow ID (since active flows are stored with API flow ID)
+        execution = get_active_execution(flow_id)
+        print(f"\n📊 ACTIVE EXECUTION LOOKUP")
+        print(f"API Flow ID: {flow_id}")
+        print(f"Internal Flow ID: {internal_flow_id}")
+        print(f"Execution found: {execution is not None}")
+        if execution:
+            print(f"Execution details: {execution}")
+        print(f"📊 ACTIVE EXECUTION LOOKUP\n")
 
         # If no active execution is found, wait a short time for it to be created
         # This helps with race conditions where the WebSocket connects before the flow is fully initialized
-        if not flow_execution:
+        if not execution:
+            print(f"⏳ NO ACTIVE EXECUTION FOUND for API flow {flow_id}, waiting for initialization...")
             logging.info(
-                f"No active execution found for flow {flow_id}, waiting for initialization..."
+                f"No active execution found for API flow {flow_id}, waiting for initialization..."
             )
             # Wait up to 5 seconds for the flow execution to be created
-            for _ in range(10):
+            for i in range(10):
+                print(f"⏱️  WAITING ATTEMPT {i+1}/10 for API flow {flow_id}")
                 await asyncio.sleep(0.5)
-                flow_execution = get_active_execution(flow_id)
-                if flow_execution:
-                    logging.info(f"Flow execution for {flow_id} found after waiting")
+                execution = get_active_execution(flow_id)
+                if execution:
+                    print(f"🎉 FLOW EXECUTION FOUND after waiting for API flow {flow_id}: {execution}")
+                    logging.info(f"Flow execution for API flow {flow_id} found after waiting")
                     break
 
         # If still no execution found after waiting, send error
-        if not flow_execution:
-            logging.error(f"No active execution found for flow {flow_id} after waiting")
+        if not execution:
+            print(f"❌ STILL NO EXECUTION FOUND for API flow {flow_id} after waiting - CLOSING CONNECTION")
+            logging.error(f"No active execution found for API flow {flow_id} after waiting")
             await websocket.send_json(
                 {
                     "type": "error",
                     "message": f"No active execution found for flow {flow_id}. Please try running the flow again.",
                 }
             )
+            print(f"🚪 CLOSING WEBSOCKET for flow {flow_id} - no execution found")
             await websocket.close()
             return
 
         # Create a queue for this connection
         queue: asyncio.Queue = asyncio.Queue()
 
-        # Register this connection
+        # Register this connection with the API flow ID (for UI compatibility)
         connection_id = str(uuid.uuid4())
         register_websocket_queue(flow_id, connection_id, queue)
+        print(f"🔗 REGISTERED WEBSOCKET CONNECTION: {connection_id} for API flow {flow_id}")
 
         try:
-            # Send initial state
+            # Send initial state using the API flow ID (where states are now stored)
             initial_state = flow_websocket_listener.get_flow_state(flow_id)
+            print(f"📤 SENDING INITIAL STATE for flow {flow_id}: {initial_state is not None}")
             if initial_state:
                 await websocket.send_json(
                     {"type": "flow_state", "payload": initial_state}
                 )
+                print(f"✅ INITIAL STATE SENT for flow {flow_id}")
 
             # Listen for updates from the flow execution
             while True:
@@ -773,14 +801,15 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
                     message = await asyncio.wait_for(queue.get(), timeout=1.0)
                     await websocket.send_json(message)
                 except asyncio.TimeoutError:
-                    # Check if the flow execution is still active
+                    # Check if the flow execution is still active using API flow ID
                     if not is_execution_active(flow_id):
-                        # Send final state before closing
+                        # Send final state before closing using API flow ID
                         final_state = flow_websocket_listener.get_flow_state(flow_id)
                         if final_state:
                             await websocket.send_json(
                                 {"type": "flow_state", "payload": final_state}
                             )
+                        print(f"🏁 FLOW EXECUTION COMPLETED for {flow_id}, closing WebSocket")
                         break
                     # Otherwise continue waiting
                     continue
