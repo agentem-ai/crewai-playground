@@ -179,10 +179,10 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         # Load flow using the FlowInfo object
         flow = load_flow(flow_info, inputs)
         if not flow:
-            print(f"❌ FLOW LOADING FAILED for {flow_id}")
+            logger.error(f"Flow loading failed for {flow_id}")
             return {"status": "error", "message": f"Flow {flow_id} not found"}
         
-        print(f"✅ FLOW LOADED SUCCESSFULLY: {flow}")
+        logger.info(f"Flow loaded successfully: {flow_id}")
 
         # Initialize flow state through the event listener
         # The event listener will handle this when it receives the flow_started event
@@ -192,7 +192,7 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
             "status": "running",
             "timestamp": asyncio.get_event_loop().time(),
         }
-        print(f"📊 REGISTERED ACTIVE FLOW: {flow_id} in active_flows dictionary")
+        logger.info(f"Registered active flow: {flow_id}")
         
         # Initialize trace for this execution
         current_time = asyncio.get_event_loop().time()
@@ -363,7 +363,6 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         logger.info(f"Has kickoff: {hasattr(flow, 'kickoff')}")
         
         if hasattr(flow, "run_async"):
-            print(f"\n=== EXECUTING VIA RUN_ASYNC ===")
             logger.info(f"Executing flow via run_async method")
             
             # Capture internal flow ID after execution starts
@@ -372,72 +371,50 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
             # Check if flow has an internal ID and create mapping
             internal_flow_id = getattr(flow, 'id', None)
             if internal_flow_id and internal_flow_id != flow_id:
-                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                logger.info(f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}")
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
-                print(f"📊 FLOW ID MAPPINGS CREATED:")
-                print(f"  API -> Internal: {flow_id_mapping}")
-                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         elif hasattr(flow, "kickoff_async"):
-            print(f"\n=== EXECUTING VIA KICKOFF_ASYNC ===")
             logger.info(f"Executing flow via kickoff_async method")
             result = await emit_method_events("kickoff_async", flow.kickoff_async)
             
             # Check if flow has an internal ID and create mapping
             internal_flow_id = getattr(flow, 'id', None)
             if internal_flow_id and internal_flow_id != flow_id:
-                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                logger.info(f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}")
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
-                print(f"📊 FLOW ID MAPPINGS CREATED:")
-                print(f"  API -> Internal: {flow_id_mapping}")
-                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         elif hasattr(flow, "run"):
-            print(f"\n=== EXECUTING VIA RUN ===")
             logger.info(f"Executing flow via run method")
             result = await emit_method_events("run", flow.run)
             
             # Check if flow has an internal ID and create mapping
             internal_flow_id = getattr(flow, 'id', None)
             if internal_flow_id and internal_flow_id != flow_id:
-                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                logger.info(f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}")
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
-                print(f"📊 FLOW ID MAPPINGS CREATED:")
-                print(f"  API -> Internal: {flow_id_mapping}")
-                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         elif hasattr(flow, "kickoff"):
-            print(f"\n=== EXECUTING VIA KICKOFF ===")
             logger.info(f"Executing flow via kickoff method")
             result = await emit_method_events("kickoff", flow.kickoff)
             
             # Check if flow has an internal ID and create mapping
             internal_flow_id = getattr(flow, 'id', None)
             if internal_flow_id and internal_flow_id != flow_id:
-                print(f"🔗 CREATING FLOW ID MAPPING: API {flow_id} -> Internal {internal_flow_id}")
+                logger.info(f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}")
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
-                print(f"📊 FLOW ID MAPPINGS CREATED:")
-                print(f"  API -> Internal: {flow_id_mapping}")
-                print(f"  Internal -> API: {reverse_flow_id_mapping}")
         else:
             raise AttributeError(f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method")
         
-        print(f"\n=== FLOW EXECUTION COMPLETED ===")
-        print(f"Result type: {type(result)}")
-        print(f"=== FLOW EXECUTION COMPLETED ===\n")
-        logger.info(f"Flow execution completed with result type: {type(result)}")
+        logger.info(f"Flow execution completed: {flow_id} with result type: {type(result)}")
 
         # Emit flow finished event using global event bus
         try:
             from crewai.utilities.events.crewai_event_bus import crewai_event_bus
             from crewai.utilities.events import FlowFinishedEvent
             
-            print(f"\n=== EMITTING FLOW FINISHED EVENT ===")
-            print(f"Flow class: {flow.__class__.__name__}")
-            print(f"Flow ID: {flow_id}")
-            print(f"=== EMITTING FLOW FINISHED EVENT ===\n")
-            logger.info(f"Creating FlowFinishedEvent for {flow.__class__.__name__}")
+            logger.info(f"Emitting flow finished event for flow: {flow_id} ({flow.__class__.__name__})")
             flow_finished_event = FlowFinishedEvent(
                 flow_name=flow.__class__.__name__,
                 result=result
@@ -473,14 +450,9 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         return result
 
     except Exception as e:
-        print(f"\n💥 === FLOW EXECUTION ERROR ===")
-        print(f"Flow ID: {flow_id}")
-        print(f"Error: {str(e)}")
-        print(f"Error Type: {type(e).__name__}")
-        print(f"=== FLOW EXECUTION ERROR ===\n")
-        print(f"💥 FULL TRACEBACK:")
+        logger.error(f"Flow execution error in {flow_id}: {str(e)} ({type(e).__name__})")
         import traceback
-        traceback.print_exc()
+        logger.error(f"Traceback: {traceback.format_exc()}")
         logger.error(f"Error executing flow {flow_id}: {str(e)}", exc_info=True)
 
         # The event listener will handle updating the flow state with error
@@ -524,16 +496,7 @@ async def execute_flow(
     Returns:
         Dict with execution status
     """
-    print("\n" + "="*60)
-    print(" FLOW EXECUTION API ENDPOINT CALLED ")
-    print(f"Flow ID: {flow_id}")
-    print(f"Inputs: {request.inputs}")
-    print("="*60 + "\n")
-    logger.info(f"Executing flow: {flow_id}")
-    print(f"\n=== FLOW EXECUTION API CALLED ===")
-    print(f"Flow ID: {flow_id}")
-    print(f"Inputs: {request.inputs}")
-    print(f"=== FLOW EXECUTION API CALLED ===\n")
+    logger.info(f"Executing flow: {flow_id} with inputs: {request.inputs}")
     
     if flow_id not in flows_cache:
         raise HTTPException(status_code=404, detail="Flow not found")
