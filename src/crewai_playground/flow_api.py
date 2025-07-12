@@ -196,59 +196,114 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         # The event listener will handle sending the initial flow state via WebSocket
         # when it receives the flow_started event
 
-        # Register the flow WebSocket event listener
+        # Register the flow WebSocket event listener with the global CrewAI event bus
         # This will capture all flow events and broadcast them via WebSocket
         logger.info(f"Registering flow WebSocket event listener for flow: {flow_id}")
-        if hasattr(flow, "event_bus"):
-            flow.event_bus.register_listener(flow_websocket_listener)
+        
+        try:
+            from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+            
+            # Register our listener with the global event bus
+            # The listener will filter events by flow_id
+            flow_websocket_listener.setup_listeners(crewai_event_bus)
             logger.info(f"Successfully registered event listener for flow: {flow_id}")
-        else:
-            logger.warning(f"Flow {flow_id} does not have an event_bus attribute, events will not be captured")
+            
+            # Emit flow started event using the global event bus
+            from crewai.utilities.events import FlowStartedEvent
+            flow_started_event = FlowStartedEvent(
+                flow_name=flow.__class__.__name__,
+                inputs=inputs
+            )
+            crewai_event_bus.emit(flow, flow_started_event)
+            logger.info(f"Emitted FlowStartedEvent for flow: {flow_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to set up flow event handling: {e}")
+            # Continue without events - flow will still execute
 
-        # Execute flow
-        if hasattr(flow, "run_async"):
-            result = await flow.run_async()
-        elif hasattr(flow, "kickoff_async"):
-            result = await flow.kickoff_async()
-        elif hasattr(flow, "run"):
-            result = flow.run()
-        elif hasattr(flow, "kickoff"):
-            # For flows with kickoff but no kickoff_async, we need to create a wrapper
-            # that doesn't use asyncio.run() since we're already in an event loop
+        # Wrap flow execution to emit method execution events using global event bus
+        async def emit_method_events(method_name, method_func, *args, **kwargs):
+            """Wrapper to emit method execution events."""
             try:
-                # Custom async execution path for kickoff-only flows
+                from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+                from crewai.utilities.events import MethodExecutionStartedEvent
                 
-                # Create a custom async execution path that mimics kickoff but without asyncio.run()
-                # First, update state with any inputs (mimicking kickoff_async)
-                if hasattr(flow, "_start_methods") and flow._start_methods:
-                    # Execute each start method
-                    for start_method_name in flow._start_methods:
-                        if start_method_name in flow._methods:
-                            # Send update that this method is starting
-                            logger.info(f"Executing start method: {start_method_name}")
-                            
-                            # Execute the method
-                            await flow._execute_method(start_method_name, flow._methods[start_method_name])
-                            
-                            # Execute listeners for this start method
-                            if hasattr(flow, "_execute_listeners"):
-                                await flow._execute_listeners(start_method_name, None)
-                    
-                    # Return the last method output if available
-                    result = flow.method_outputs()[-1] if flow.method_outputs() else None
-                else:
-                    # Fallback: this might still fail if kickoff uses asyncio.run internally
-                    logger.warning(f"Using potentially incompatible kickoff method for {flow.__class__.__name__}")
-                    result = flow.kickoff()
+                # Emit method started event
+                start_event = MethodExecutionStartedEvent(
+                    flow_name=flow.__class__.__name__,
+                    method_name=method_name,
+                    state=getattr(flow, 'state', {})
+                )
+                crewai_event_bus.emit(flow, start_event)
+                logger.debug(f"Emitted MethodExecutionStartedEvent for {method_name}")
             except Exception as e:
-                logger.error(f"Error executing flow {flow.__class__.__name__}: {str(e)}")
+                logger.error(f"Failed to emit MethodExecutionStartedEvent: {e}")
+            
+            try:
+                # Execute the method
+                if asyncio.iscoroutinefunction(method_func):
+                    result = await method_func(*args, **kwargs)
+                else:
+                    result = method_func(*args, **kwargs)
+                
+                # Emit method finished event
+                try:
+                    from crewai.utilities.events import MethodExecutionFinishedEvent
+                    finish_event = MethodExecutionFinishedEvent(
+                        flow_name=flow.__class__.__name__,
+                        method_name=method_name,
+                        result=result,
+                        state=getattr(flow, 'state', {})
+                    )
+                    crewai_event_bus.emit(flow, finish_event)
+                    logger.debug(f"Emitted MethodExecutionFinishedEvent for {method_name}")
+                except Exception as e:
+                    logger.error(f"Failed to emit MethodExecutionFinishedEvent: {e}")
+                
+                return result
+            except Exception as e:
+                # Emit method failed event
+                try:
+                    from crewai.utilities.events import MethodExecutionFailedEvent
+                    failed_event = MethodExecutionFailedEvent(
+                        flow_name=flow.__class__.__name__,
+                        method_name=method_name,
+                        error=e
+                    )
+                    crewai_event_bus.emit(flow, failed_event)
+                    logger.debug(f"Emitted MethodExecutionFailedEvent for {method_name}")
+                except Exception as emit_e:
+                    logger.error(f"Failed to emit MethodExecutionFailedEvent: {emit_e}")
                 raise
+        
+        # Execute flow with event emission
+        if hasattr(flow, "run_async"):
+            result = await emit_method_events("run_async", flow.run_async)
+        elif hasattr(flow, "kickoff_async"):
+            result = await emit_method_events("kickoff_async", flow.kickoff_async)
+        elif hasattr(flow, "run"):
+            result = await emit_method_events("run", flow.run)
+        elif hasattr(flow, "kickoff"):
+            # For flows with kickoff but no kickoff_async, wrap with events
+            result = await emit_method_events("kickoff", flow.kickoff)
         else:
             raise AttributeError(f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method")
 
-        # The event listener will handle updating the flow state with results
-        # when it receives the flow_finished event
-        # We just need to update our reference in active_flows
+        # Emit flow finished event using global event bus
+        try:
+            from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+            from crewai.utilities.events import FlowFinishedEvent
+            
+            flow_finished_event = FlowFinishedEvent(
+                flow_name=flow.__class__.__name__,
+                result=result
+            )
+            crewai_event_bus.emit(flow, flow_finished_event)
+            logger.info(f"Emitted FlowFinishedEvent for flow: {flow_id}")
+        except Exception as e:
+            logger.error(f"Failed to emit FlowFinishedEvent: {e}")
+        
+        # Update our reference in active_flows
         if flow_id in active_flows:
             active_flows[flow_id]["status"] = "completed"
 
