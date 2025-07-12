@@ -221,35 +221,38 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
 
   return (
     <>
-      <aside className="flex h-full w-64 flex-col bg-background border-r">
-        <div className="p-4">
-          <h2 className="text-lg font-semibold">Chats</h2>
+      <aside className="flex h-full flex-col">
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Select a Crew</h3>
+            <Select
+              value={currentCrewId ?? ""}
+              onValueChange={handleCrewChange}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a crew">
+                  {crews.find((c) => c.id === currentCrewId)?.name ||
+                    "Select a crew"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {crews.map((crew) => (
+                  <SelectItem key={crew.id} value={crew.id}>
+                    {crew.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button onClick={handleNewChat} className="w-full">
+            <Plus className="mr-2 h-4 w-4" />
+            New Chat
+          </Button>
         </div>
 
-        <div className="p-4">
-          <Select value={currentCrewId ?? ""} onValueChange={handleCrewChange}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a crew">
-                {crews.find((c) => c.id === currentCrewId)?.name ||
-                  "Select a crew"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {crews.map((crew) => (
-                <SelectItem key={crew.id} value={crew.id}>
-                  {crew.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Button onClick={handleNewChat} className="mx-4 mb-4">
-          <Plus className="mr-2 h-4 w-4" />
-          New Chat
-        </Button>
-
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex-1 space-y-2 overflow-y-auto pt-6">
+          <h3 className="text-lg font-semibold">Chats</h3>
           {sortedChats.map((chat) => (
             <div
               key={chat.id}
@@ -260,7 +263,7 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
               onClick={() => handleChatSelect(chat.id)}
             >
               <div className="flex-1 truncate">
-                <p className="truncate text-sm">{chat.title}</p>
+                <p className="truncate text-sm font-medium">{chat.title}</p>
                 {chat.crewName && (
                   <p className="truncate text-xs text-muted-foreground">
                     {chat.crewName}
