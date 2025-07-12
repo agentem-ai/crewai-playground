@@ -243,7 +243,14 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                 flow.on_step_completed = wrapped_on_step_completed
 
         # Execute flow
-        result = await flow.run_async() if hasattr(flow, "run_async") else flow.run()
+        if hasattr(flow, "run_async"):
+            result = await flow.run_async()
+        elif hasattr(flow, "run"):
+            result = flow.run()
+        elif hasattr(flow, "kickoff"):
+            result = flow.kickoff()
+        else:
+            raise AttributeError(f"'{flow.__class__.__name__}' object has no run, run_async, or kickoff method")
 
         # Update flow state with results
         flow_state["status"] = "completed"
