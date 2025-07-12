@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Button } from "~/components/ui/button";
 import { useChatStore } from "~/lib/store";
 import {
@@ -14,6 +14,7 @@ import {
 
 function Sidebar() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -32,7 +33,7 @@ function Sidebar() {
         {navItems.map((item, index) => (
           <Button
             key={index}
-            variant="ghost"
+            variant={location.pathname === item.path ? "secondary" : "ghost"}
             className="justify-start"
             onClick={() => navigate(item.path)}
           >
