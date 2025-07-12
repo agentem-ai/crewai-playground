@@ -134,8 +134,8 @@ export default function Tools() {
   };
 
   const rightSidebar = (
-    <div className="p-4 space-y-2">
-      <h2 className="text-xl font-semibold mb-2">Available Tools</h2>
+    <div className="space-y-2">
+      <h2 className="text-lg font-semibold mb-2">Available Tools</h2>
       {loading && tools.length === 0 ? (
         <div className="flex justify-center p-4">
           <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
@@ -171,8 +171,7 @@ export default function Tools() {
 
             <div className="space-y-6 bg-muted/30 p-6 rounded-lg border">
               <h3 className="text-lg font-semibold">Parameters</h3>
-              {selectedTool.parameters &&
-              selectedTool.parameters.properties ? (
+              {selectedTool.parameters && selectedTool.parameters.properties ? (
                 <div className="space-y-4">
                   {Object.entries(selectedTool.parameters.properties).map(
                     ([paramName, paramDetails]) => (
@@ -204,9 +203,7 @@ export default function Tools() {
                           <Input
                             id={paramName}
                             type={
-                              paramDetails.type === "number"
-                                ? "number"
-                                : "text"
+                              paramDetails.type === "number" ? "number" : "text"
                             }
                             placeholder={paramDetails.description}
                             value={inputValues[paramName] || ""}
@@ -256,9 +253,7 @@ export default function Tools() {
                 <div className="mt-8 bg-muted/50 p-6 rounded-lg border">
                   <h3 className="text-lg font-semibold mb-4">Result</h3>
                   <div className="bg-background p-4 rounded-md overflow-auto max-h-96 border">
-                    <pre className="text-sm whitespace-pre-wrap">
-                      {result}
-                    </pre>
+                    <pre className="text-sm whitespace-pre-wrap">{result}</pre>
                   </div>
                 </div>
               )}
@@ -267,9 +262,7 @@ export default function Tools() {
         ) : (
           <div className="flex flex-col items-center justify-center h-64 max-w-3xl mx-auto bg-card rounded-lg shadow-sm p-6 border">
             <p className="text-muted-foreground text-lg">
-              {loading
-                ? "Loading tools..."
-                : "Select a tool from the sidebar"}
+              {loading ? "Loading tools..." : "Select a tool from the sidebar"}
             </p>
           </div>
         )}
