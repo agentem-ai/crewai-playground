@@ -50,7 +50,7 @@ export default function Flow() {
   const [flowDetails, setFlowDetails] = useState<FlowDetails | null>(null);
   const [inputFields, setInputFields] = useState<InputField[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"init" | "execution">("init");
+  // viewMode is no longer needed as FlowCanvas now handles both initialization and execution views
   const [result, setResult] = useState<string | null>(null);
   const [isRunningFlow, setIsRunningFlow] = useState(false);
   const [resetKey, setResetKey] = useState(0); // Key to trigger reset in FlowCanvas
@@ -187,7 +187,7 @@ export default function Flow() {
     setError(null);
     setResult(null);
     setIsRunningFlow(true);
-    setViewMode("execution"); // Switch to execution view when running the flow
+    // No longer need to switch viewMode as FlowCanvas now handles both initialization and execution views
     setResetKey((prev) => prev + 1); // Increment reset key to trigger state reset
 
     // Convert input fields to the expected format
@@ -232,7 +232,7 @@ export default function Flow() {
           onValueChange={(value) => {
             setSelectedFlowId(value);
             // Reset the view mode to init when selecting a new flow
-            setViewMode("init");
+            // No longer need to reset viewMode as FlowCanvas now handles both initialization and execution views
             setResetKey((prev) => prev + 1);
           }}
           disabled={loading}
@@ -326,7 +326,6 @@ export default function Flow() {
           flowId={selectedFlowId}
           isRunning={isRunningFlow}
           resetKey={resetKey}
-          viewMode={viewMode}
         />
       )}
 
