@@ -983,36 +983,49 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
     });
   }, [state]);
 
+  // Track if initial layout has been applied
+  const [initialLayoutApplied, setInitialLayoutApplied] = useState(false);
+  
   // Update layout when nodes, edges, or layout direction changes
   useEffect(() => {
-    if (nodes.length > 0) {
-      // Check if nodes have measured dimensions
-      const hasMeasuredNodes = nodes.some(
-        (node) =>
-          node.data?.measured &&
-          typeof node.data.measured === "object" &&
-          "width" in node.data.measured &&
-          "height" in node.data.measured
-      );
-
-      // Apply layout with current measurements
-      const { nodes: layoutedNodes, edges: layoutedEdges } =
-        getLayoutedElements(nodes, edges, layoutDirection);
-      setNodes(layoutedNodes);
-      setEdges(layoutedEdges);
-
-      // If nodes have been measured, schedule another layout update to use the measurements
-      if (hasMeasuredNodes) {
-        // Use a longer timeout to ensure measurements are stable
-        setTimeout(() => {
-          const { nodes: refinedNodes, edges: refinedEdges } =
-            getLayoutedElements(layoutedNodes, layoutedEdges, layoutDirection);
-          setNodes(refinedNodes);
-          setEdges(refinedEdges);
-        }, 150);
-      }
+    // Skip layout if we have no nodes
+    if (nodes.length === 0) return;
+    
+    // Skip layout recalculation if we've already applied the initial layout
+    // and the node/edge count hasn't changed (just status updates)
+    if (initialLayoutApplied && state?.status !== "pending") {
+      return;
     }
-  }, [nodes.length, edges.length, layoutDirection]); // Reduced dependencies to avoid infinite loops
+    
+    // Check if nodes have measured dimensions
+    const hasMeasuredNodes = nodes.some(
+      (node) =>
+        node.data?.measured &&
+        typeof node.data.measured === "object" &&
+        "width" in node.data.measured &&
+        "height" in node.data.measured
+    );
+
+    // Apply layout with current measurements
+    const { nodes: layoutedNodes, edges: layoutedEdges } =
+      getLayoutedElements(nodes, edges, layoutDirection);
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+
+    // If nodes have been measured, schedule another layout update to use the measurements
+    if (hasMeasuredNodes) {
+      // Use a longer timeout to ensure measurements are stable
+      setTimeout(() => {
+        const { nodes: refinedNodes, edges: refinedEdges } =
+          getLayoutedElements(layoutedNodes, layoutedEdges, layoutDirection);
+        setNodes(refinedNodes);
+        setEdges(refinedEdges);
+        setInitialLayoutApplied(true);
+      }, 150);
+    } else {
+      setInitialLayoutApplied(true);
+    }
+  }, [nodes.length, edges.length, layoutDirection, state?.status]); // Added state?.status to detect status changes
 
   // Helper function to get color based on status
   const getStatusColor = (status: string) => {
