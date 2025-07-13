@@ -181,19 +181,22 @@ class FlowWebSocketEventListener:
         @crewai_event_bus.on(AgentExecutionStartedEvent)
         def handle_agent_execution_started(source, event: AgentExecutionStartedEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
-            logger.info(f"Agent execution started event received for flow: {flow_id}, agent: {event.agent_name}")
+            agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
+            logger.info(f"Agent execution started event received for flow: {flow_id}, agent role: {agent_role}")
             asyncio.create_task(listener_self._handle_agent_execution_started(flow_id, event))
             
         @crewai_event_bus.on(AgentExecutionCompletedEvent)
         def handle_agent_execution_completed(source, event: AgentExecutionCompletedEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
-            logger.info(f"Agent execution completed event received for flow: {flow_id}, agent: {event.agent_name}")
+            agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
+            logger.info(f"Agent execution completed event received for flow: {flow_id}, agent role: {agent_role}")
             asyncio.create_task(listener_self._handle_agent_execution_completed(flow_id, event))
             
         @crewai_event_bus.on(AgentExecutionErrorEvent)
         def handle_agent_execution_error(source, event: AgentExecutionErrorEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
-            logger.info(f"Agent execution error event received for flow: {flow_id}, agent: {event.agent_name}")
+            agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
+            logger.info(f"Agent execution error event received for flow: {flow_id}, agent role: {agent_role}")
             asyncio.create_task(listener_self._handle_agent_execution_error(flow_id, event))
             
         # Tool Events
