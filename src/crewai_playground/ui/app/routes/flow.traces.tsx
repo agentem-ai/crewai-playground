@@ -224,13 +224,13 @@ const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
   
   return spans.map(span => {
     // Convert timestamp strings or numbers to Date objects
-    const startTime = typeof span.start_time === 'number' 
-      ? new Date(span.start_time) 
+    const startTime = typeof span.start_time === 'number'
+      ? new Date(span.start_time * 1000) // convert seconds to ms
       : new Date(span.start_time);
-    
-    const endTime = span.end_time 
+
+    const endTime = span.end_time
       ? typeof span.end_time === 'number'
-        ? new Date(span.end_time)
+        ? new Date(span.end_time * 1000) // convert seconds to ms
         : new Date(span.end_time)
       : null;
     
