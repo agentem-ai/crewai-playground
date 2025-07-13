@@ -599,21 +599,48 @@ class FlowWebSocketEventListener:
         return flow_states.get(flow_id)
         
     # Crew Event Handlers
-    async def _handle_crew_kickoff_started(self, flow_id: str, event):
-        """Handle crew kickoff started event asynchronously."""
-        logging.info(f"Crew kickoff started event handler for flow: {flow_id}, crew: {event.crew_name}")
+    async def _ensure_flow_state_exists(self, flow_id: str, event_name: str, crew_name: str = None):
+        """Ensure flow state exists for the given flow ID.
         
+        Args:
+            flow_id: The internal flow ID
+            event_name: The name of the event for logging
+            crew_name: Optional crew name for flow state initialization
+            
+        Returns:
+            tuple: (broadcast_flow_id, flow_state)
+        """
         # Check if this is an internal flow ID that needs to be mapped to an API flow ID
         from .flow_api import reverse_flow_id_mapping
         api_flow_id = reverse_flow_id_mapping.get(flow_id)
         broadcast_flow_id = api_flow_id if api_flow_id else flow_id
         
-        # Get current flow state
+        # Get or create flow state
         if broadcast_flow_id not in flow_states:
-            logger.warning(f"No flow state found for crew kickoff started: {broadcast_flow_id}")
-            return
+            logger.info(f"Initializing flow state for {event_name}: {broadcast_flow_id}")
+            flow_name = crew_name if crew_name else f"Flow-{broadcast_flow_id[:8]}"
+            flow_state = {
+                "id": broadcast_flow_id,
+                "name": flow_name,
+                "status": "running",
+                "steps": [],
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+            flow_states[broadcast_flow_id] = flow_state
+            await broadcast_flow_update(broadcast_flow_id, {"type": "flow_state", "payload": flow_state})
+        else:
+            flow_state = flow_states[broadcast_flow_id]
             
-        flow_state = flow_states[broadcast_flow_id]
+        return broadcast_flow_id, flow_state
+
+    async def _handle_crew_kickoff_started(self, flow_id: str, event):
+        """Handle crew kickoff started event asynchronously."""
+        logging.info(f"Crew kickoff started event handler for flow: {flow_id}, crew: {event.crew_name}")
+        
+        # Ensure flow state exists
+        broadcast_flow_id, flow_state = await self._ensure_flow_state_exists(
+            flow_id, "crew kickoff started", event.crew_name
+        )
         
         # Add step for crew kickoff
         step_id = f"crew_kickoff_{event.crew_name}"
@@ -644,17 +671,10 @@ class FlowWebSocketEventListener:
         """Handle crew kickoff completed event asynchronously."""
         logging.info(f"Crew kickoff completed event handler for flow: {flow_id}, crew: {event.crew_name}")
         
-        # Check if this is an internal flow ID that needs to be mapped to an API flow ID
-        from .flow_api import reverse_flow_id_mapping
-        api_flow_id = reverse_flow_id_mapping.get(flow_id)
-        broadcast_flow_id = api_flow_id if api_flow_id else flow_id
-        
-        # Get current flow state
-        if broadcast_flow_id not in flow_states:
-            logger.warning(f"No flow state found for crew kickoff completed: {broadcast_flow_id}")
-            return
-            
-        flow_state = flow_states[broadcast_flow_id]
+        # Ensure flow state exists
+        broadcast_flow_id, flow_state = await self._ensure_flow_state_exists(
+            flow_id, "crew kickoff completed", event.crew_name
+        )
         
         # Update step for crew kickoff
         step_id = f"crew_kickoff_{event.crew_name}"
@@ -1083,17 +1103,10 @@ class FlowWebSocketEventListener:
         agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
         logging.info(f"Agent execution started event handler for flow: {flow_id}, agent role: {agent_role}")
         
-        # Check if this is an internal flow ID that needs to be mapped to an API flow ID
-        from .flow_api import reverse_flow_id_mapping
-        api_flow_id = reverse_flow_id_mapping.get(flow_id)
-        broadcast_flow_id = api_flow_id if api_flow_id else flow_id
-        
-        # Get current flow state
-        if broadcast_flow_id not in flow_states:
-            logger.warning(f"No flow state found for agent execution started: {broadcast_flow_id}")
-            return
-            
-        flow_state = flow_states[broadcast_flow_id]
+        # Ensure flow state exists
+        broadcast_flow_id, flow_state = await self._ensure_flow_state_exists(
+            flow_id, "agent execution started"
+        )
         
         # Add step for agent execution
         task_id = id(event)
@@ -1133,17 +1146,10 @@ class FlowWebSocketEventListener:
         agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
         logging.info(f"Agent execution completed event handler for flow: {flow_id}, agent role: {agent_role}")
         
-        # Check if this is an internal flow ID that needs to be mapped to an API flow ID
-        from .flow_api import reverse_flow_id_mapping
-        api_flow_id = reverse_flow_id_mapping.get(flow_id)
-        broadcast_flow_id = api_flow_id if api_flow_id else flow_id
-        
-        # Get current flow state
-        if broadcast_flow_id not in flow_states:
-            logger.warning(f"No flow state found for agent execution completed: {broadcast_flow_id}")
-            return
-            
-        flow_state = flow_states[broadcast_flow_id]
+        # Ensure flow state exists
+        broadcast_flow_id, flow_state = await self._ensure_flow_state_exists(
+            flow_id, "agent execution completed"
+        )
         
         # Update step for agent execution
         task_id = id(event)
@@ -1198,17 +1204,10 @@ class FlowWebSocketEventListener:
         agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
         logging.info(f"Agent execution error event handler for flow: {flow_id}, agent role: {agent_role}")
         
-        # Check if this is an internal flow ID that needs to be mapped to an API flow ID
-        from .flow_api import reverse_flow_id_mapping
-        api_flow_id = reverse_flow_id_mapping.get(flow_id)
-        broadcast_flow_id = api_flow_id if api_flow_id else flow_id
-        
-        # Get current flow state
-        if broadcast_flow_id not in flow_states:
-            logger.warning(f"No flow state found for agent execution error: {broadcast_flow_id}")
-            return
-            
-        flow_state = flow_states[broadcast_flow_id]
+        # Ensure flow state exists
+        broadcast_flow_id, flow_state = await self._ensure_flow_state_exists(
+            flow_id, "agent execution error"
+        )
         
         # Update step for agent execution
         task_id = id(event)
