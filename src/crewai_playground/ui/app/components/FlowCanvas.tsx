@@ -726,10 +726,6 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = `${protocol}//${window.location.host}/ws/flow/${flowId}`;
 
-      console.log(
-        `Connecting to WebSocket (attempt ${connectionAttempts + 1}): ${wsUrl}`
-      );
-
       const newSocket = new WebSocket(wsUrl);
 
       // Set a timeout for connection establishment
@@ -741,9 +737,6 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
           // Try to reconnect if we haven't exceeded max attempts
           if (connectionAttempts < maxConnectionAttempts) {
             connectionAttempts++;
-            console.log(
-              `Retrying connection (${connectionAttempts}/${maxConnectionAttempts})`
-            );
             connectionTimer = setTimeout(connectWebSocket, 1000); // Wait 1 second before retry
           } else {
             setError(
@@ -755,7 +748,6 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
       }, 5000); // 5 second timeout
 
       newSocket.onopen = () => {
-        console.log("WebSocket connected for flow:", flowId);
         clearTimeout(connectionTimeout);
         setLoading(false);
       };
@@ -763,16 +755,8 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
       newSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log("Flow WebSocket message received:", data);
 
           if (data.type === "flow_state") {
-            console.log("Processing flow_state update", {
-              flowId,
-              status: data.payload?.status,
-              stepsCount: data.payload?.steps?.length || 0,
-              timestamp: new Date().toISOString(),
-            });
-
             // Deep copy to avoid state mutation issues
             setState((prevState) => {
               // If no previous state, just use the new payload
@@ -834,7 +818,6 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
       };
 
       newSocket.onclose = (event) => {
-        console.log("WebSocket connection closed", event);
         clearTimeout(connectionTimeout);
 
         // If this wasn't a normal closure and we haven't exceeded retries, try to reconnect
@@ -844,9 +827,6 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
           connectionAttempts < maxConnectionAttempts
         ) {
           connectionAttempts++;
-          console.log(
-            `Connection closed unexpectedly. Retrying (${connectionAttempts}/${maxConnectionAttempts})`
-          );
           connectionTimer = setTimeout(connectWebSocket, 1000);
         }
       };
@@ -985,18 +965,18 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
 
   // Track if initial layout has been applied
   const [initialLayoutApplied, setInitialLayoutApplied] = useState(false);
-  
+
   // Update layout when nodes, edges, or layout direction changes
   useEffect(() => {
     // Skip layout if we have no nodes
     if (nodes.length === 0) return;
-    
+
     // Skip layout recalculation if we've already applied the initial layout
     // and the node/edge count hasn't changed (just status updates)
     if (initialLayoutApplied && state?.status !== "pending") {
       return;
     }
-    
+
     // Check if nodes have measured dimensions
     const hasMeasuredNodes = nodes.some(
       (node) =>
@@ -1007,8 +987,11 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
     );
 
     // Apply layout with current measurements
-    const { nodes: layoutedNodes, edges: layoutedEdges } =
-      getLayoutedElements(nodes, edges, layoutDirection);
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      nodes,
+      edges,
+      layoutDirection
+    );
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
 
