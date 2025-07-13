@@ -145,7 +145,11 @@ const flattenSpans = (
   spans.forEach((span) => {
     if (span) {
       result.push({ ...span, level });
-      if (span.children && Array.isArray(span.children) && span.children.length > 0) {
+      if (
+        span.children &&
+        Array.isArray(span.children) &&
+        span.children.length > 0
+      ) {
         flattenSpans(span.children, level + 1, result);
       }
     }
@@ -156,9 +160,10 @@ const flattenSpans = (
 // Helper function to format timestamp
 function formatTime(timestamp: string | number) {
   try {
-    const date = typeof timestamp === 'number' 
-      ? new Date(timestamp * 1000) 
-      : new Date(timestamp);
+    const date =
+      typeof timestamp === "number"
+        ? new Date(timestamp * 1000)
+        : new Date(timestamp);
     return date.toLocaleString();
   } catch (e) {
     return "Invalid time";
@@ -166,20 +171,25 @@ function formatTime(timestamp: string | number) {
 }
 
 // Helper function to calculate duration between two timestamps
-function calculateDuration(startTime: string | number, endTime?: string | number) {
+function calculateDuration(
+  startTime: string | number,
+  endTime?: string | number
+) {
   try {
-    const start = typeof startTime === 'number' 
-      ? new Date(startTime * 1000) 
-      : new Date(startTime);
-    
+    const start =
+      typeof startTime === "number"
+        ? new Date(startTime * 1000)
+        : new Date(startTime);
+
     if (!endTime) {
       return "In progress";
     }
-    
-    const end = typeof endTime === 'number' 
-      ? new Date(endTime * 1000) 
-      : new Date(endTime);
-    
+
+    const end =
+      typeof endTime === "number"
+        ? new Date(endTime * 1000)
+        : new Date(endTime);
+
     const durationMs = end.getTime() - start.getTime();
     const seconds = Math.floor((durationMs / 1000) % 60);
     const minutes = Math.floor((durationMs / (1000 * 60)) % 60);
@@ -221,24 +231,24 @@ function getStatusColor(status: string) {
 // Convert TraceSpan to TimelineSpan for visualization
 const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
   if (!spans || !Array.isArray(spans)) return [];
-  
-  return spans.map(span => {
+
+  return spans.map((span) => {
     // Convert timestamp strings or numbers to Date objects
-    const startTime = typeof span.start_time === 'number'
-      ? new Date(span.start_time * 1000) // convert seconds to ms
-      : new Date(span.start_time);
+    const startTime =
+      typeof span.start_time === "number"
+        ? new Date(span.start_time * 1000) // convert seconds to ms
+        : new Date(span.start_time);
 
     const endTime = span.end_time
-      ? typeof span.end_time === 'number'
+      ? typeof span.end_time === "number"
         ? new Date(span.end_time * 1000) // convert seconds to ms
         : new Date(span.end_time)
       : null;
-    
+
     // Calculate duration in milliseconds
-    const duration = endTime && startTime 
-      ? endTime.getTime() - startTime.getTime() 
-      : 0;
-    
+    const duration =
+      endTime && startTime ? endTime.getTime() - startTime.getTime() : 0;
+
     return {
       id: span.id,
       name: span.name,
@@ -257,16 +267,17 @@ const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
 
 // Convert raw span to TimelineSpan format
 const convertToTimelineSpan = (span: TraceSpan): TimelineSpan => {
-  const startTime = typeof span.start_time === 'number' 
-    ? new Date(span.start_time * 1000) 
-    : new Date(span.start_time);
-  
-  const endTime = span.end_time 
-    ? typeof span.end_time === 'number'
+  const startTime =
+    typeof span.start_time === "number"
+      ? new Date(span.start_time * 1000)
+      : new Date(span.start_time);
+
+  const endTime = span.end_time
+    ? typeof span.end_time === "number"
       ? new Date(span.end_time * 1000)
       : new Date(span.end_time)
     : null;
-  
+
   return {
     id: span.id,
     name: span.name,
@@ -276,9 +287,8 @@ const convertToTimelineSpan = (span: TraceSpan): TimelineSpan => {
     parentId: span.parent_id,
     children: span.children ? convertToTimelineSpans(span.children) : [],
     depth: 0, // Will be calculated by TraceTimeline
-    duration: endTime && startTime 
-      ? endTime.getTime() - startTime.getTime() 
-      : 0,
+    duration:
+      endTime && startTime ? endTime.getTime() - startTime.getTime() : 0,
     serviceName: span.attributes?.service_name,
     operation: span.attributes?.operation,
   };
@@ -286,20 +296,20 @@ const convertToTimelineSpan = (span: TraceSpan): TimelineSpan => {
 
 // Convert TraceSpan to SpanData for detail view
 const convertToSpanData = (span: TraceSpan) => {
-  const startTime = typeof span.start_time === 'number' 
-    ? new Date(span.start_time * 1000) 
-    : new Date(span.start_time);
-  
-  const endTime = span.end_time 
-    ? typeof span.end_time === 'number'
+  const startTime =
+    typeof span.start_time === "number"
+      ? new Date(span.start_time * 1000)
+      : new Date(span.start_time);
+
+  const endTime = span.end_time
+    ? typeof span.end_time === "number"
       ? new Date(span.end_time * 1000)
       : new Date(span.end_time)
     : null;
-  
-  const duration = endTime && startTime 
-    ? endTime.getTime() - startTime.getTime() 
-    : 0;
-  
+
+  const duration =
+    endTime && startTime ? endTime.getTime() - startTime.getTime() : 0;
+
   return {
     id: span.id,
     name: span.name,
@@ -310,12 +320,15 @@ const convertToSpanData = (span: TraceSpan) => {
     parentId: span.parent_id,
     depth: 0,
     tags: span.attributes || {},
-    logs: span.events ? span.events.map(event => ({
-      timestamp: typeof event.timestamp === 'number' 
-        ? new Date(event.timestamp) 
-        : new Date(event.timestamp),
-      fields: event.attributes || {}
-    })) : []
+    logs: span.events
+      ? span.events.map((event) => ({
+          timestamp:
+            typeof event.timestamp === "number"
+              ? new Date(event.timestamp)
+              : new Date(event.timestamp),
+          fields: event.attributes || {},
+        }))
+      : [],
   };
 };
 
@@ -324,12 +337,12 @@ export default function FlowTraces() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { flows, setFlows, isDarkMode, toggleDarkMode } = useChatStore();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedFlowId, setSelectedFlowId] = useState<string>("");
   const [traces, setTraces] = useState<FlowTrace[]>([]);
-  const [selectedTraceId, setSelectedTraceId] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("overview");
-  const [selectedSpanId, setSelectedSpanId] = useState<string>("");
 
   // Get selected trace from traces array with safety checks
   const selectedTrace = useMemo(() => {
@@ -338,6 +351,8 @@ export default function FlowTraces() {
       traces.find((trace) => trace && trace.id === selectedTraceId) || null
     );
   }, [traces, selectedTraceId]);
+
+  // We'll use the rawSelectedSpan defined below instead of defining rawSelectedSpan here
 
   // Initialize from URL params
   useEffect(() => {
@@ -440,11 +455,11 @@ export default function FlowTraces() {
                 trace.status === "running" ||
                 trace.status === "initializing")
           );
-          
+
           // Sort traces by start_time (newest first)
           validTraces.sort((a: any, b: any) => {
-            const timeA = typeof a.start_time === 'number' ? a.start_time : 0;
-            const timeB = typeof b.start_time === 'number' ? b.start_time : 0;
+            const timeA = typeof a.start_time === "number" ? a.start_time : 0;
+            const timeB = typeof b.start_time === "number" ? b.start_time : 0;
             return timeB - timeA;
           });
 
@@ -476,7 +491,7 @@ export default function FlowTraces() {
   }, [selectedFlowId]);
 
   // Get selected span from timeline
-  const rawSelectedSpan = useMemo(() => {
+  const rawSpan = useMemo(() => {
     if (!selectedSpanId || !selectedTrace) return null;
 
     const findSpan = (spans: TraceSpan[] | undefined): TraceSpan | null => {
@@ -500,11 +515,11 @@ export default function FlowTraces() {
     const spans = selectedTrace.spans || [];
     return Array.isArray(spans) ? findSpan(spans) : null;
   }, [selectedSpanId, selectedTrace]);
-  
+
   // Convert raw span to SpanData format for detail component
-  const selectedSpan = useMemo(() => {
-    return rawSelectedSpan ? convertToSpanData(rawSelectedSpan) : null;
-  }, [rawSelectedSpan]);
+  const selectedSpanData = useMemo(() => {
+    return rawSpan ? convertToSpanData(rawSpan) : null;
+  }, [rawSpan, convertToSpanData]);
 
   // Process trace data for timeline view with safety checks
   const timelineSpans = useMemo(() => {
@@ -531,6 +546,73 @@ export default function FlowTraces() {
     navigate("/flow");
   };
 
+  // Render the list of traces
+  const renderTraceList = () => {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center p-4">
+          <Loader2 className="h-6 w-6 animate-spin mr-2" />
+          <span>Loading traces...</span>
+        </div>
+      );
+    }
+
+    if (error) {
+      return <div className="p-4 text-red-500">{error}</div>;
+    }
+
+    if (traces.length === 0) {
+      return (
+        <div className="p-4 text-gray-500 dark:text-gray-400">
+          No traces found.
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2">
+        {traces.map((trace) => (
+          <div
+            key={trace.id}
+            className={`p-3 border rounded-md cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${
+              selectedTrace?.id === trace.id
+                ? "border-primary bg-gray-50 dark:bg-gray-800"
+                : ""
+            }`}
+            onClick={() => {
+              setSelectedTraceId(trace.id);
+              setSelectedSpanId(null); // Reset selected span when changing traces
+            }}
+          >
+            <div className="flex justify-between items-center">
+              <div className="font-medium">Trace {trace.id.slice(0, 7)}</div>
+              <Badge
+                variant={
+                  trace.status === "completed"
+                    ? "outline"
+                    : trace.status === "running"
+                    ? "default"
+                    : "destructive"
+                }
+                className={
+                  trace.status === "completed"
+                    ? "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300"
+                    : ""
+                }
+              >
+                {trace.status}
+              </Badge>
+            </div>
+            <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mt-1">
+              <div>{formatTime(trace.start_time)}</div>
+              <div>{calculateDuration(trace.start_time, trace.end_time)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-secondary/40">
       {/* Sidebar */}
@@ -551,7 +633,8 @@ export default function FlowTraces() {
           </div>
         </div>
 
-        <div className="p-4 space-y-4">
+        {/* Flow selection */}
+        <div className="p-4 border-b">
           <Select onValueChange={setSelectedFlowId} value={selectedFlowId}>
             <SelectTrigger>
               <SelectValue placeholder="Select a flow" />
@@ -564,73 +647,10 @@ export default function FlowTraces() {
               ))}
             </SelectContent>
           </Select>
-
-          <Select
-            onValueChange={setSelectedTraceId}
-            value={selectedTraceId}
-            disabled={!selectedFlowId || traces.length === 0}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a trace" />
-            </SelectTrigger>
-            <SelectContent>
-              {traces.map((trace) => (
-                <SelectItem key={trace.id} value={trace.id}>
-                  {`Trace ${trace.id.slice(0, 7)} - ${new Date(
-                    trace.start_time * 1000
-                  ).toLocaleString()}`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
-        {selectedTrace && (
-          <div className="flex-1 overflow-y-auto p-4 border-t">
-            <Card>
-              <CardHeader>
-                <CardTitle>Trace Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">Status</span>
-                    <Badge
-                      variant={
-                        selectedTrace.status === "completed"
-                          ? "default"
-                          : selectedTrace.status === "failed"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                    >
-                      {selectedTrace.status}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">Start Time</span>
-                    <span>{formatTime(selectedTrace.start_time)}</span>
-                  </div>
-                  {selectedTrace.end_time && (
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">End Time</span>
-                      <span>{formatTime(selectedTrace.end_time)}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">Duration</span>
-                    <span>
-                      {calculateDuration(
-                        selectedTrace.start_time,
-                        selectedTrace.end_time
-                      )}
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+        {/* Trace list */}
+        <div className="flex-1 overflow-y-auto p-4">{renderTraceList()}</div>
       </aside>
 
       {/* Main Content */}
@@ -696,13 +716,15 @@ export default function FlowTraces() {
                     </CardContent>
                   </Card>
 
-                  {selectedSpan && (
+                  {selectedSpanData && (
                     <Card>
                       <CardHeader className="pb-2">
                         <CardTitle className="text-lg">Span Details</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        {selectedSpan && <TraceSpanDetail span={selectedSpan} />}
+                        {selectedSpanData && (
+                          <TraceSpanDetail span={selectedSpanData} />
+                        )}
                       </CardContent>
                     </Card>
                   )}
@@ -717,7 +739,9 @@ export default function FlowTraces() {
                           <div className="text-sm font-medium">Methods</div>
                           <div className="flex items-center gap-2">
                             <Badge className="text-lg" variant="outline">
-                              {selectedTrace.spans?.filter(s => s.parent_id === selectedTrace.id).length || 0}
+                              {selectedTrace.spans?.filter(
+                                (s) => s.parent_id === selectedTrace.id
+                              ).length || 0}
                             </Badge>
                             <span className="text-sm text-muted-foreground">
                               Total methods
@@ -749,7 +773,7 @@ export default function FlowTraces() {
                   </Card>
                 </div>
               </TabsContent>
-              
+
               <TabsContent value="methods">
                 <Card>
                   <CardHeader className="pb-2">
@@ -762,7 +786,9 @@ export default function FlowTraces() {
                     <div className="space-y-4">
                       <Accordion type="single" collapsible className="w-full">
                         {selectedTrace.spans
-                          ?.filter(method => method.parent_id === selectedTrace.id)
+                          ?.filter(
+                            (method) => method.parent_id === selectedTrace.id
+                          )
                           .map((method) => (
                             <AccordionItem key={method.id} value={method.id}>
                               <AccordionTrigger className="hover:bg-muted px-4">
@@ -774,37 +800,57 @@ export default function FlowTraces() {
                                     >
                                       {method.status}
                                     </Badge>
-                                    <span className="ml-2 font-medium">{method.name}</span>
+                                    <span className="ml-2 font-medium">
+                                      {method.name}
+                                    </span>
                                   </div>
                                   <div className="text-sm text-muted-foreground">
-                                    {calculateDuration(method.start_time, method.end_time)}
+                                    {calculateDuration(
+                                      method.start_time,
+                                      method.end_time
+                                    )}
                                   </div>
                                 </div>
                               </AccordionTrigger>
                               <AccordionContent className="px-4 py-2 space-y-4">
                                 <div className="grid grid-cols-2 gap-2">
-                                  <div className="text-sm text-muted-foreground">Method ID</div>
-                                  <div className="text-sm font-mono">{method.id}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    Method ID
+                                  </div>
+                                  <div className="text-sm font-mono">
+                                    {method.id}
+                                  </div>
 
-                                  <div className="text-sm text-muted-foreground">Start Time</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    Start Time
+                                  </div>
                                   <div>{formatTime(method.start_time)}</div>
 
                                   {method.end_time && (
                                     <>
-                                      <div className="text-sm text-muted-foreground">End Time</div>
+                                      <div className="text-sm text-muted-foreground">
+                                        End Time
+                                      </div>
                                       <div>{formatTime(method.end_time)}</div>
                                     </>
                                   )}
                                 </div>
 
-                                {method.attributes && Object.keys(method.attributes).length > 0 && (
-                                  <div className="mt-4">
-                                    <div className="text-sm font-medium mb-2">Attributes</div>
-                                    <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
-                                      {JSON.stringify(method.attributes, null, 2)}
-                                    </pre>
-                                  </div>
-                                )}
+                                {method.attributes &&
+                                  Object.keys(method.attributes).length > 0 && (
+                                    <div className="mt-4">
+                                      <div className="text-sm font-medium mb-2">
+                                        Attributes
+                                      </div>
+                                      <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
+                                        {JSON.stringify(
+                                          method.attributes,
+                                          null,
+                                          2
+                                        )}
+                                      </pre>
+                                    </div>
+                                  )}
                               </AccordionContent>
                             </AccordionItem>
                           ))}
@@ -813,7 +859,7 @@ export default function FlowTraces() {
                   </CardContent>
                 </Card>
               </TabsContent>
-              
+
               <TabsContent value="events">
                 <Card>
                   <CardHeader className="pb-2">
@@ -826,7 +872,7 @@ export default function FlowTraces() {
                     <div className="space-y-4">
                       <div className="border rounded-md divide-y">
                         {selectedTrace.spans
-                          ?.flatMap(span => span.events || [])
+                          ?.flatMap((span) => span.events || [])
                           .map((event, idx) => (
                             <div key={idx} className="p-3 hover:bg-muted">
                               <div className="flex justify-between items-center">
@@ -835,11 +881,12 @@ export default function FlowTraces() {
                                   {formatTime(event.timestamp)}
                                 </span>
                               </div>
-                              {event.attributes && Object.keys(event.attributes).length > 0 && (
-                                <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
-                                  {JSON.stringify(event.attributes, null, 2)}
-                                </div>
-                              )}
+                              {event.attributes &&
+                                Object.keys(event.attributes).length > 0 && (
+                                  <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
+                                    {JSON.stringify(event.attributes, null, 2)}
+                                  </div>
+                                )}
                             </div>
                           ))}
                       </div>
