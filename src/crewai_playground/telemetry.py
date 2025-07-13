@@ -34,10 +34,14 @@ class CrewAITelemetry:
 
     def __init__(self):
         """Initialize the telemetry service."""
-        # Set up the tracer provider
-        resource = Resource.create({"service.name": "crewai-playground"})
-        trace.set_tracer_provider(TracerProvider(resource=resource))
-
+        # Set up the tracer provider only if not already set
+        if not trace.get_tracer_provider().__class__.__module__.startswith('opentelemetry.sdk'):
+            logger.info("Initializing OpenTelemetry TracerProvider")
+            resource = Resource.create({"service.name": "crewai-playground"})
+            trace.set_tracer_provider(TracerProvider(resource=resource))
+        else:
+            logger.info("Using existing OpenTelemetry TracerProvider")
+            
         # Add console exporter for debugging
         console_exporter = ConsoleSpanExporter()
         trace.get_tracer_provider().add_span_processor(
