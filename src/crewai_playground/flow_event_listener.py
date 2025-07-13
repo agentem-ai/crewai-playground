@@ -308,12 +308,14 @@ class FlowWebSocketEventListener:
             return
 
         flow_state = flow_states[broadcast_flow_id]
+        current_time = asyncio.get_event_loop().time()
 
         # Check if step already exists
         step_exists = False
         for step in flow_state.get("steps", []):
             if step["id"] == step_id:
                 step["status"] = "running"
+                step["start_time"] = current_time
                 step_exists = True
                 break
 
@@ -323,12 +325,13 @@ class FlowWebSocketEventListener:
                 "id": step_id,
                 "name": method_name,
                 "status": "running",
+                "start_time": current_time,
                 "outputs": None,
             }
             flow_state["steps"].append(new_step)
             logging.info(f"New step added to flow {broadcast_flow_id}: {method_name}")
 
-        flow_state["timestamp"] = asyncio.get_event_loop().time()
+        flow_state["timestamp"] = current_time
 
         # Broadcast flow state update
         await broadcast_flow_update(
@@ -358,6 +361,7 @@ class FlowWebSocketEventListener:
             return
 
         flow_state = flow_states[broadcast_flow_id]
+        current_time = asyncio.get_event_loop().time()
 
         # Update step status
         step_exists = False
@@ -365,6 +369,7 @@ class FlowWebSocketEventListener:
             if step["id"] == step_id:
                 step["status"] = "completed"
                 step["outputs"] = outputs
+                step["end_time"] = current_time
                 step_exists = True
                 logging.info(
                     f"Step updated to completed: {broadcast_flow_id}.{step_id}"
@@ -377,6 +382,8 @@ class FlowWebSocketEventListener:
                 "id": step_id,
                 "name": method_name,
                 "status": "completed",
+                "start_time": current_time - 0.001,  # Assume a very short duration
+                "end_time": current_time,
                 "outputs": outputs,
             }
             flow_state["steps"].append(new_step)
@@ -384,7 +391,7 @@ class FlowWebSocketEventListener:
                 f"New completed step added to flow {broadcast_flow_id}: {method_name}"
             )
 
-        flow_state["timestamp"] = asyncio.get_event_loop().time()
+        flow_state["timestamp"] = current_time
 
         # Broadcast flow state update
         await broadcast_flow_update(
@@ -401,14 +408,21 @@ class FlowWebSocketEventListener:
 
         logger.error(f"Method execution failed: {flow_id}.{method_name}: {error}")
 
+        # Check if this is an internal flow ID that needs to be mapped to an API flow ID
+        from .flow_api import reverse_flow_id_mapping
+
+        api_flow_id = reverse_flow_id_mapping.get(flow_id)
+        broadcast_flow_id = api_flow_id if api_flow_id else flow_id
+
         # Get current flow state
-        if flow_id not in flow_states:
+        if broadcast_flow_id not in flow_states:
             logger.warning(
-                f"No flow state found for method failure: {flow_id}.{method_name}"
+                f"No flow state found for method failure: {broadcast_flow_id}.{method_name}"
             )
             return
 
-        flow_state = flow_states[flow_id]
+        flow_state = flow_states[broadcast_flow_id]
+        current_time = asyncio.get_event_loop().time()
 
         # Update step status
         step_exists = False
@@ -416,6 +430,7 @@ class FlowWebSocketEventListener:
             if step["id"] == step_id:
                 step["status"] = "failed"
                 step["error"] = str(error)
+                step["end_time"] = current_time
                 step_exists = True
                 break
 
@@ -425,15 +440,17 @@ class FlowWebSocketEventListener:
                 "id": step_id,
                 "name": method_name,
                 "status": "failed",
+                "start_time": current_time - 0.001,  # Assume a very short duration
+                "end_time": current_time,
                 "error": str(error),
             }
             flow_state["steps"].append(new_step)
 
-        flow_state["timestamp"] = asyncio.get_event_loop().time()
+        flow_state["timestamp"] = current_time
 
         # Broadcast flow state update
         await broadcast_flow_update(
-            flow_id, {"type": "flow_state", "payload": flow_state}
+            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
         )
 
     def get_flow_state(self, flow_id):
