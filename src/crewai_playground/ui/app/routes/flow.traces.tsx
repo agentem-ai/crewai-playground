@@ -614,24 +614,40 @@ export default function FlowTraces() {
   };
 
   return (
-    <div className="flex h-screen bg-secondary/40">
-      {/* Sidebar */}
-      <aside className="w-80 flex flex-col border-r bg-background">
-        <div className="p-4 border-b">
-          <div className="flex items-center justify-between">
-            <Button variant="ghost" size="icon" onClick={handleBack}>
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
+      {/* Header */}
+      <header className="py-4 px-6 border-b bg-background">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleBack}
+              className="mr-4"
+            >
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <h1 className="text-xl font-bold">Flow Traces</h1>
-            <Button variant="ghost" size="icon" onClick={toggleDarkMode}>
-              {isDarkMode ? (
-                <Sun className="h-5 w-5" />
-              ) : (
-                <Moon className="h-5 w-5" />
-              )}
-            </Button>
+            <h1 className="text-2xl font-bold">Flow Traces</h1>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleDarkMode}
+            className="h-8 w-8"
+          >
+            {isDarkMode ? (
+              <Sun className="h-4 w-4" />
+            ) : (
+              <Moon className="h-4 w-4" />
+            )}
+          </Button>
         </div>
+      </header>
+      
+      {/* Main Layout with Sidebar and Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <aside className="w-80 border-r flex-shrink-0 overflow-y-auto p-4 bg-background">
 
         {/* Flow selection */}
         <div className="p-4 border-b">
@@ -898,6 +914,7 @@ export default function FlowTraces() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }
