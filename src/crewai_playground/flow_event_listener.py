@@ -1079,7 +1079,9 @@ class FlowWebSocketEventListener:
     # Agent Event Handlers
     async def _handle_agent_execution_started(self, flow_id: str, event):
         """Handle agent execution started event asynchronously."""
-        logging.info(f"Agent execution started event handler for flow: {flow_id}, agent: {event.agent_name}")
+        # Extract agent role from the agent object
+        agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
+        logging.info(f"Agent execution started event handler for flow: {flow_id}, agent role: {agent_role}")
         
         # Check if this is an internal flow ID that needs to be mapped to an API flow ID
         from .flow_api import reverse_flow_id_mapping
@@ -1094,10 +1096,13 @@ class FlowWebSocketEventListener:
         flow_state = flow_states[broadcast_flow_id]
         
         # Add step for agent execution
-        step_id = f"agent_execution_{event.agent_name}_{event.task_id if hasattr(event, 'task_id') else id(event)}"
+        task_id = id(event)
+        if hasattr(event, "task") and hasattr(event.task, "id"):
+            task_id = event.task.id
+        step_id = f"agent_execution_{agent_role}_{task_id}"
         step = {
             "id": step_id,
-            "name": f"Agent: {event.agent_name}",
+            "name": f"Agent: {agent_role}",
             "status": "running",
             "timestamp": asyncio.get_event_loop().time(),
         }
@@ -1124,7 +1129,9 @@ class FlowWebSocketEventListener:
 
     async def _handle_agent_execution_completed(self, flow_id: str, event):
         """Handle agent execution completed event asynchronously."""
-        logging.info(f"Agent execution completed event handler for flow: {flow_id}, agent: {event.agent_name}")
+        # Extract agent role from the agent object
+        agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
+        logging.info(f"Agent execution completed event handler for flow: {flow_id}, agent role: {agent_role}")
         
         # Check if this is an internal flow ID that needs to be mapped to an API flow ID
         from .flow_api import reverse_flow_id_mapping
@@ -1139,7 +1146,10 @@ class FlowWebSocketEventListener:
         flow_state = flow_states[broadcast_flow_id]
         
         # Update step for agent execution
-        step_id = f"agent_execution_{event.agent_name}_{event.task_id if hasattr(event, 'task_id') else id(event)}"
+        task_id = id(event)
+        if hasattr(event, "task") and hasattr(event.task, "id"):
+            task_id = event.task.id
+        step_id = f"agent_execution_{agent_role}_{task_id}"
         step_updated = False
         
         for i, step in enumerate(flow_state["steps"]):
@@ -1162,7 +1172,7 @@ class FlowWebSocketEventListener:
             # Step not found, create a new completed step
             step = {
                 "id": step_id,
-                "name": f"Agent: {event.agent_name}",
+                "name": f"Agent: {agent_role}",
                 "status": "completed",
                 "timestamp": asyncio.get_event_loop().time(),
             }
@@ -1184,7 +1194,9 @@ class FlowWebSocketEventListener:
 
     async def _handle_agent_execution_error(self, flow_id: str, event):
         """Handle agent execution error event asynchronously."""
-        logging.info(f"Agent execution error event handler for flow: {flow_id}, agent: {event.agent_name}")
+        # Extract agent role from the agent object
+        agent_role = getattr(event.agent, "role", "unknown") if hasattr(event, "agent") else "unknown"
+        logging.info(f"Agent execution error event handler for flow: {flow_id}, agent role: {agent_role}")
         
         # Check if this is an internal flow ID that needs to be mapped to an API flow ID
         from .flow_api import reverse_flow_id_mapping
@@ -1199,7 +1211,10 @@ class FlowWebSocketEventListener:
         flow_state = flow_states[broadcast_flow_id]
         
         # Update step for agent execution
-        step_id = f"agent_execution_{event.agent_name}_{event.task_id if hasattr(event, 'task_id') else id(event)}"
+        task_id = id(event)
+        if hasattr(event, "task") and hasattr(event.task, "id"):
+            task_id = event.task.id
+        step_id = f"agent_execution_{agent_role}_{task_id}"
         step_updated = False
         
         for i, step in enumerate(flow_state["steps"]):
@@ -1222,7 +1237,7 @@ class FlowWebSocketEventListener:
             # Step not found, create a new failed step
             step = {
                 "id": step_id,
-                "name": f"Agent: {event.agent_name}",
+                "name": f"Agent: {agent_role}",
                 "status": "failed",
                 "timestamp": asyncio.get_event_loop().time(),
             }
