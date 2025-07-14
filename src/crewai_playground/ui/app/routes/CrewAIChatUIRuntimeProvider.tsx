@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import React, { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -9,7 +9,6 @@ import {
   type TextContentPart,
 } from "@assistant-ui/react";
 import { useChatStore } from "~/lib/store";
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
 function generateUUID() {
@@ -51,8 +50,10 @@ const convertMessage = (message: ThreadMessageLike) => {
 
 export function CrewAIChatUIRuntimeProvider({
   children,
+  selectedCrewId,
 }: Readonly<{
   children: ReactNode;
+  selectedCrewId: string | null;
 }>) {
   const navigate = useNavigate();
   const [isRunning, setIsRunning] = useState(false);
@@ -214,10 +215,109 @@ export function CrewAIChatUIRuntimeProvider({
       localStorage.setItem('crewai_chat_id', currentChatId);
     }
     
-    if (currentCrewId) {
+    if (selectedCrewId) {
+      localStorage.setItem('crewai_crew_id', selectedCrewId);
+    } else if (currentCrewId) {
       localStorage.setItem('crewai_crew_id', currentCrewId);
     }
-  }, [currentChatId, currentCrewId]);
+  }, [currentChatId, currentCrewId, selectedCrewId]);
+  
+  // Ref to track previous crew ID to detect changes
+  const prevCrewIdRef = useRef<string | null>(null);
+  
+  // Effect to reinitialize chat when crew ID changes
+  useEffect(() => {
+    console.log('Crew change effect triggered:', { 
+      currentChatId, 
+      selectedCrewId, 
+      storeCrewId: currentCrewId, 
+      prevCrewId: prevCrewIdRef.current 
+    });
+    
+    // Skip the initial render or if we don't have both IDs
+    if (!currentChatId || !selectedCrewId) {
+      console.log('Skipping crew change - missing IDs');
+      return;
+    }
+    
+    // Only proceed if the crew ID has actually changed
+    if (prevCrewIdRef.current === selectedCrewId) {
+      console.log('Skipping crew change - crew ID unchanged');
+      return;
+    }
+    
+    console.log('Crew changed from', prevCrewIdRef.current, 'to', selectedCrewId);
+    
+    // Update the ref
+    prevCrewIdRef.current = selectedCrewId;
+    
+    const initializeWithNewCrew = async () => {
+      console.log('Starting crew initialization API call', { chatId: currentChatId, crewId: selectedCrewId });
+      setIsRunning(true);
+      try {
+        // Call the API to reinitialize with the new crew
+        const payload = {
+          chat_id: currentChatId,
+          crew_id: selectedCrewId,
+        };
+        console.log('Calling /api/initialize with payload:', payload);
+        
+        const response = await fetch(`/api/initialize`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === "success") {
+          // Update the chat thread with the new crew
+          const { updateChatThread, addMessage } = useChatStore.getState();
+          
+          // Find the crew name
+          const crews = useChatStore.getState().crews;
+          const crew = crews.find(c => c.id === selectedCrewId);
+          
+          // Update the chat thread with the new crew
+          updateChatThread(currentChatId, {
+            crewId: selectedCrewId,
+            crewName: crew?.name || 'Unknown Crew',
+          });
+          
+          // Add system message indicating crew change
+          addMessage(currentChatId, {
+            role: 'system',
+            content: `Switched to ${crew?.name || 'new crew'}.`,
+            timestamp: Date.now(),
+          });
+          
+          // Also update the store's currentCrewId to match
+          useChatStore.getState().setCurrentCrew(selectedCrewId);
+          
+          // Add welcome message from the assistant if provided
+          if (data.message) {
+            addMessage(currentChatId, {
+              role: 'assistant',
+              content: data.message,
+              timestamp: Date.now(),
+            });
+          }
+        } else {
+          console.error("Failed to initialize chat with new crew", data);
+        }
+      } catch (error) {
+        console.error("Error initializing chat with new crew", error);
+      } finally {
+        setIsRunning(false);
+      }
+    };
+    
+    // Initialize with the new crew
+    initializeWithNewCrew();
+    
+  }, [currentChatId, selectedCrewId]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
