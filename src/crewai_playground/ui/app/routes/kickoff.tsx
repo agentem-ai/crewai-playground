@@ -62,10 +62,11 @@ export default function Kickoff() {
     setResetKey(1); // Set to 1 on initial load to trigger reset
   }, []);
 
-  // Fetch available crews on component mount
+  // Fetch available crews on component mount - always fetch fresh data
   useEffect(() => {
     const fetchCrews = async () => {
       try {
+        setLoading(true);
         const response = await fetch("/api/crews");
         const data = await response.json();
         if (data.crews) {
@@ -83,17 +84,9 @@ export default function Kickoff() {
       }
     };
 
-    if (!crews.length) {
-      setLoading(true);
-      fetchCrews();
-    } else {
-      // If crews are already loaded but no crew is selected, select the first one
-      if (crews.length > 0 && !selectedCrewId) {
-        setSelectedCrewId(crews[0].id);
-      }
-      setLoading(false);
-    }
-  }, [crews.length, setCrews, selectedCrewId]);
+    // Always fetch crews when component mounts
+    fetchCrews();
+  }, [setCrews, selectedCrewId]);
 
   // Fetch crew details and required inputs when a crew is selected
   useEffect(() => {
