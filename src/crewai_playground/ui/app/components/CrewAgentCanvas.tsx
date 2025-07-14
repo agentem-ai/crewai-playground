@@ -62,41 +62,32 @@ interface Crew {
 }
 
 // Define custom node data types
-interface BaseNodeData {
-  [key: string]: unknown;
+interface AgentNodeData extends Agent {
+  associatedTasks?: Task[];
   isFirst?: boolean;
   isLast?: boolean;
+  uniformWidth?: number;
+  uniformHeight?: number;
+  hasIncomingEdge?: boolean;
+  hasOutgoingEdge?: boolean;
+  [key: string]: unknown;
 }
 
-interface AgentNodeData extends BaseNodeData {
-  id: string;
-  role: string;
-  name: string;
-  status: "initializing" | "waiting" | "running" | "completed";
-  description: string;
-  associatedTasks?: Task[];
-}
-
-interface TaskNodeData extends BaseNodeData {
-  id: string;
-  description: string;
-  status: "pending" | "running" | "completed";
-  agent_id: string | null;
-  output?: string | Record<string, unknown>;
+interface TaskNodeData extends Task {
   assignedAgentName?: string;
-  next_tasks?: string[];
-  depends_on?: string[];
+  uniformWidth?: number;
+  uniformHeight?: number;
+  hasIncomingEdge?: boolean;
+  hasOutgoingEdge?: boolean;
+  [key: string]: unknown;
 }
 
-interface CrewNodeData extends BaseNodeData {
-  id: string;
-  name: string;
-  status: "initializing" | "running" | "completed";
-  started_at?: string;
-  completed_at?: string;
-  output?: string;
-  type?: "sequential" | "hierarchical";
-  execution_order?: string[];
+interface CrewNodeData extends Crew {
+  uniformWidth?: number;
+  uniformHeight?: number;
+  hasIncomingEdge?: boolean;
+  hasOutgoingEdge?: boolean;
+  [key: string]: unknown;
 }
 
 interface VisualizationState {
@@ -210,9 +201,13 @@ const getLayoutedElements = (
 };
 
 // Custom node components
-const AgentNode: React.FC<NodeProps> = ({ data }) => {
-  const typedData = data as AgentNodeData;
+const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
+  const typedData = data as unknown as AgentNodeData;
   const statusColor = getStatusColor(typedData.status);
+  
+  // Check if this node has incoming or outgoing connections
+  const hasIncomingEdge = typedData.hasIncomingEdge ?? false;
+  const hasOutgoingEdge = typedData.hasOutgoingEdge ?? false;
 
   return (
     <div
@@ -284,25 +279,36 @@ const AgentNode: React.FC<NodeProps> = ({ data }) => {
         </div>
       )}
       
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="w-2 h-2 bg-blue-500"
-        isConnectable={false}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="w-2 h-2 bg-blue-500"
-        isConnectable={false}
-      />
+      {/* Only render target handle if this node has incoming connections */}
+      {hasIncomingEdge && (
+        <Handle
+          type="target"
+          position={Position.Top}
+          className="w-2 h-2 bg-blue-500"
+          isConnectable={false}
+        />
+      )}
+      
+      {/* Only render source handle if this node has outgoing connections */}
+      {hasOutgoingEdge && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          className="w-2 h-2 bg-blue-500"
+          isConnectable={false}
+        />
+      )}
     </div>
   );
 };
 
 const TaskNode: React.FC<NodeProps> = ({ data }) => {
-  const typedData = data as TaskNodeData;
+  const typedData = data as unknown as TaskNodeData;
   const statusColor = getStatusColor(typedData.status);
+  
+  // Check if this node has incoming or outgoing connections
+  const hasIncomingEdge = typedData.hasIncomingEdge ?? false;
+  const hasOutgoingEdge = typedData.hasOutgoingEdge ?? false;
 
   return (
     <div
@@ -326,25 +332,36 @@ const TaskNode: React.FC<NodeProps> = ({ data }) => {
           ? `${typedData.description.substring(0, 100)}...`
           : typedData.description}
       </div>
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="w-2 h-2 bg-blue-500"
-        isConnectable={false}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="w-2 h-2 bg-blue-500"
-        isConnectable={false}
-      />
+      
+      {/* Only render target handle if this node has incoming connections */}
+      {hasIncomingEdge && (
+        <Handle
+          type="target"
+          position={Position.Top}
+          className="w-2 h-2 bg-blue-500"
+          isConnectable={false}
+        />
+      )}
+      
+      {/* Only render source handle if this node has outgoing connections */}
+      {hasOutgoingEdge && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          className="w-2 h-2 bg-blue-500"
+          isConnectable={false}
+        />
+      )}
     </div>
   );
 };
 
 const CrewNode: React.FC<NodeProps> = ({ data }) => {
-  const typedData = data as CrewNodeData;
+  const typedData = data as unknown as CrewNodeData;
   const statusColor = getStatusColor(typedData.status);
+  
+  // Check if this node has outgoing connections
+  const hasOutgoingEdge = typedData.hasOutgoingEdge ?? false;
 
   return (
     <div
@@ -360,12 +377,16 @@ const CrewNode: React.FC<NodeProps> = ({ data }) => {
       </div>
       <div className="text-xs text-gray-500 mt-1">{typedData.name}</div>
       <div className="mt-2 text-xs">Status: {typedData.status}</div>
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="w-2 h-2 bg-blue-500"
-        isConnectable={false}
-      />
+      
+      {/* Only render source handle if this node has outgoing connections */}
+      {hasOutgoingEdge && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          className="w-2 h-2 bg-blue-500"
+          isConnectable={false}
+        />
+      )}
     </div>
   );
 };
@@ -706,14 +727,17 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
 
     // 1. Create crew node if available
     if (state.crew) {
-      const crewNode: Node<CrewNodeData> = {
+      const crewNode = {
         id: `crew-${state.crew.id}`,
         type: "crew",
         position: { x: 0, y: 0 }, // Position will be set by dagre layout
         data: {
           ...state.crew,
+          // Crew node has outgoing edges if there are agents
+          hasOutgoingEdge: state.agents.length > 0,
+          hasIncomingEdge: false, // Crew node never has incoming edges
         },
-      };
+      } as Node;
 
       newNodes.push(crewNode);
     }
@@ -737,17 +761,26 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
         (task) => task.agent_id === agent.id
       );
 
-      const agentNode: Node<AgentNodeData> = {
+      // Determine if this agent has incoming or outgoing edges
+      const isFirstAgent = index === 0;
+      const isLastAgent = index === sortedAgents.length - 1;
+      const hasIncomingEdge = isFirstAgent || 
+        (state.crew?.type === "sequential" && index > 0);
+      const hasOutgoingEdge = state.crew?.type === "sequential" && !isLastAgent;
+      
+      const agentNode = {
         id: `agent-${agent.id}`,
         type: "agent",
         position: { x: 0, y: 0 }, // Position will be set by dagre layout
         data: {
           ...agent,
           associatedTasks: agentTasks,
-          isFirst: index === 0,
-          isLast: index === sortedAgents.length - 1,
+          isFirst: isFirstAgent,
+          isLast: isLastAgent,
+          hasIncomingEdge: hasIncomingEdge,
+          hasOutgoingEdge: hasOutgoingEdge,
         },
-      };
+      } as Node;
 
       newNodes.push(agentNode);
 
