@@ -71,7 +71,7 @@ export default function ChatLayout() {
   const rightSidebar = <ChatSidebar />;
 
   return (
-    <CrewAIChatUIRuntimeProvider>
+    <CrewAIChatUIRuntimeProvider selectedCrewId={crewId}>
       <Layout rightSidebar={rightSidebar}>
         <Thread />
       </Layout>

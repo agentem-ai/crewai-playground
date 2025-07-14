@@ -52,6 +52,7 @@ interface ChatState {
   deleteChat: (chatId: string) => void
   toggleDarkMode: () => void
   updateChatTitle: (chatId: string, title: string) => void
+  updateChatThread: (chatId: string, updates: Partial<Omit<ChatThread, 'id' | 'messages' | 'lastUpdated'>>) => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -138,6 +139,23 @@ export const useChatStore = create<ChatState>()(
               [chatId]: {
                 ...chat,
                 title,
+              },
+            },
+          }
+        }),
+        
+      updateChatThread: (chatId, updates) =>
+        set((state) => {
+          const chat = state.chatHistory[chatId]
+          if (!chat) return state
+
+          return {
+            chatHistory: {
+              ...state.chatHistory,
+              [chatId]: {
+                ...chat,
+                ...updates,
+                lastUpdated: Date.now(),
               },
             },
           }
