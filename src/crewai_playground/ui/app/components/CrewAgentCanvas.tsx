@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react";
 import type { NodeTypes, Node, Edge, NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import dagre from "@dagrejs/dagre";
 
 // Define domain models
 interface Agent {
@@ -116,6 +117,85 @@ const getStatusColor = (status: string): string => {
     default:
       return "#64748b"; // slate-500
   }
+}
+
+// Initialize dagre graph
+const dagreGraph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
+
+// Calculate maximum dimensions for all nodes to ensure uniform sizing
+const calculateMaxNodeDimensions = (nodes: Node[]): { width: number; height: number } => {
+  // Default minimum dimensions
+  const defaultWidth = 280;
+  const defaultHeight = 150;
+  
+  return { width: defaultWidth, height: defaultHeight };
+}
+
+// Layout the nodes and edges using dagre
+const getLayoutedElements = (
+  nodes: Node[],
+  edges: Edge[],
+  direction: 'TB' | 'LR' = 'TB'
+): { nodes: Node[]; edges: Edge[]; fullWidth: number; fullHeight: number } => {
+  if (!nodes.length) return { nodes, edges, fullWidth: 0, fullHeight: 0 };
+
+  // Get max dimensions to ensure uniform sizing
+  const { width: maxWidth, height: maxHeight } = calculateMaxNodeDimensions(nodes);
+  const nodeWidth = Math.max(maxWidth, 320); // Increased minimum width for task details
+  const nodeHeight = Math.max(maxHeight, 200); // Increased minimum height for task details
+
+  // Create a new directed graph
+  dagreGraph.setGraph({ rankdir: direction, nodesep: 100, ranksep: 150 }); // Increased spacing
+
+  // Add nodes to the graph with uniform dimensions
+  nodes.forEach((node) => {
+    // Add uniform dimensions to node data for rendering
+    if (node.data) {
+      node.data.uniformWidth = nodeWidth;
+      node.data.uniformHeight = nodeHeight;
+    }
+
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  // Add edges to the graph
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  // Run the layout algorithm
+  dagre.layout(dagreGraph);
+
+  // Get graph dimensions for viewport adjustments
+  const graphData = dagreGraph.graph();
+  const fullWidth = graphData && graphData.width ? graphData.width / 2 : 0;
+  const fullHeight = graphData && graphData.height ? graphData.height / 2 : 0;
+
+  // Update node positions based on the dagre layout results
+  const layoutedNodes = nodes.map((node) => {
+    const dagreNode = dagreGraph.node(node.id);
+
+    if (!dagreNode) {
+      console.warn(`No dagre node found for id: ${node.id}`);
+      return node;
+    }
+
+    return {
+      ...node,
+      position: {
+        x: dagreNode.x - nodeWidth / 2,
+        y: dagreNode.y - nodeHeight / 2,
+      },
+      // Store uniform dimensions in the node data for CSS styling
+      data: {
+        ...node.data,
+        uniformWidth: nodeWidth,
+        uniformHeight: nodeHeight,
+      },
+    };
+  });
+
+  return { nodes: layoutedNodes, edges, fullWidth, fullHeight };
 };
 
 // Custom node components
@@ -125,8 +205,12 @@ const AgentNode: React.FC<NodeProps> = ({ data }) => {
 
   return (
     <div
-      className="px-4 py-2 shadow-md rounded-md bg-white border-2 w-[280px]"
-      style={{ borderColor: statusColor }}
+      className="px-4 py-3 shadow-md rounded-md bg-white border-2"
+      style={{ 
+        borderColor: statusColor,
+        width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : '320px',
+        minHeight: typedData.uniformHeight ? `${typedData.uniformHeight}px` : '180px'
+      }}
     >
       <div className="flex justify-between items-center">
         <div className="font-bold text-sm">{typedData.role}</div>
@@ -137,10 +221,58 @@ const AgentNode: React.FC<NodeProps> = ({ data }) => {
       </div>
       <div className="text-xs text-gray-500 mt-1">{typedData.name}</div>
       <div className="mt-2 text-xs">
-        {typedData.description && typedData.description.length > 100
-          ? `${typedData.description.substring(0, 100)}...`
+        {typedData.description && typedData.description.length > 80
+          ? `${typedData.description.substring(0, 80)}...`
           : typedData.description}
       </div>
+      
+      {/* Tasks Section - Always Visible */}
+      {typedData.associatedTasks && typedData.associatedTasks.length > 0 && (
+        <div className="mt-3 border-t pt-2">
+          <div className="text-xs font-semibold mb-1">Tasks:</div>
+          <div className="space-y-2">
+            {typedData.associatedTasks.map((task) => (
+              <div 
+                key={task.id}
+                className="text-xs p-2 rounded bg-gray-50 border border-gray-100"
+                style={{
+                  borderLeft: `3px solid ${getStatusColor(task.status)}`
+                }}
+              >
+                {/* Task Header with Description and Status */}
+                <div className="flex justify-between items-center">
+                  <div className="font-medium">
+                    {task.description.length > 50
+                      ? `${task.description.substring(0, 50)}...`
+                      : task.description}
+                  </div>
+                  <div className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium" 
+                    style={{ 
+                      backgroundColor: getStatusColor(task.status),
+                      color: 'white',
+                      opacity: 0.9
+                    }}>
+                    {task.status}
+                  </div>
+                </div>
+                
+                {/* Task Output - Always Visible */}
+                {task.output && (
+                  <div className="mt-1.5">
+                    <div className="text-[10px] text-gray-500 font-medium">Output:</div>
+                    <div className="whitespace-pre-wrap overflow-hidden max-h-16 overflow-y-auto text-[10px] mt-0.5">
+                      {typeof task.output === 'string' 
+                        ? task.output.substring(0, 120) + (task.output.length > 120 ? '...' : '')
+                        : JSON.stringify(task.output, null, 2).substring(0, 120) + '...'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
       <Handle
         type="target"
         position={Position.Top}
@@ -549,7 +681,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
       const crewNode: Node<CrewNodeData> = {
         id: `crew-${state.crew.id}`,
         type: "crew",
-        position: { x: 400, y: 50 },
+        position: { x: 0, y: 0 }, // Position will be set by dagre layout
         data: {
           ...state.crew,
         },
@@ -580,10 +712,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
       const agentNode: Node<AgentNodeData> = {
         id: `agent-${agent.id}`,
         type: "agent",
-        position: {
-          x: 200 + (index % 3) * 300,
-          y: 200 + Math.floor(index / 3) * 150,
-        },
+        position: { x: 0, y: 0 }, // Position will be set by dagre layout
         data: {
           ...agent,
           associatedTasks: agentTasks,
@@ -613,86 +742,63 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
 
         newEdges.push(crewToAgentEdge);
       }
-
-      // Create task nodes for this agent
-      agentTasks.forEach((task, taskIndex) => {
-        const taskNode: Node<TaskNodeData> = {
-          id: `task-${task.id}`,
-          type: "task",
-          position: {
-            x: 200 + (index % 3) * 300,
-            y: 300 + Math.floor(index / 3) * 150 + taskIndex * 100,
-          },
-          data: {
-            ...task,
-            assignedAgentName: agent.name,
-          },
-        };
-
-        newNodes.push(taskNode);
-
-        // Connect agent to task
-        const agentToTaskEdge: Edge = {
-          id: `agent-${agent.id}-to-task-${task.id}`,
-          source: `agent-${agent.id}`,
-          target: `task-${task.id}`,
-          type: "default",
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: getStatusColor(task.status),
-          },
-          style: {
-            strokeWidth: 2,
-            stroke: getStatusColor(task.status),
-          },
-          animated: task.status === "running",
-        };
-
-        newEdges.push(agentToTaskEdge);
-      });
     });
 
-    // 3. Create edges between agents in sequence
-    for (let i = 0; i < sortedAgents.length - 1; i++) {
-      const currentAgent = sortedAgents[i];
-      const nextAgent = sortedAgents[i + 1];
+    // 3. Create edges between agents in sequence if crew type is sequential
+    if (state.crew?.type === "sequential" && state.crew.execution_order) {
+      for (let i = 0; i < state.crew.execution_order.length - 1; i++) {
+        const currentAgentId = state.crew.execution_order[i];
+        const nextAgentId = state.crew.execution_order[i + 1];
+        
+        const currentAgent = sortedAgents.find(a => a.id === currentAgentId);
+        const nextAgent = sortedAgents.find(a => a.id === nextAgentId);
+        
+        if (currentAgent && nextAgent) {
+          const sourceId = `agent-${currentAgent.id}`;
+          const targetId = `agent-${nextAgent.id}`;
 
-      const sourceId = `agent-${currentAgent.id}`;
-      const targetId = `agent-${nextAgent.id}`;
+          // Determine edge color based on current agent status
+          let edgeColor = "#64748b"; // default slate-500
+          let animated = false;
 
-      // Determine edge color based on current agent status
-      let edgeColor = "#64748b"; // default slate-500
-      let animated = false;
+          if (currentAgent.status === "completed") {
+            edgeColor = "#6366f1"; // indigo-500 for completed
+          } else if (currentAgent.status === "running") {
+            edgeColor = "#10b981"; // emerald-500 for running
+            animated = true;
+          }
 
-      if (currentAgent.status === "completed") {
-        edgeColor = "#6366f1"; // indigo-500 for completed
-      } else if (currentAgent.status === "running") {
-        edgeColor = "#10b981"; // emerald-500 for running
-        animated = true;
+          const agentEdge: Edge = {
+            id: `agent-${currentAgent.id}-to-${nextAgent.id}`,
+            source: sourceId,
+            target: targetId,
+            type: "default",
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: edgeColor,
+            },
+            style: {
+              strokeWidth: 2,
+              stroke: edgeColor,
+            },
+            animated: animated,
+          };
+
+          newEdges.push(agentEdge);
+        }
       }
-
-      const agentEdge: Edge = {
-        id: `agent-${currentAgent.id}-to-${nextAgent.id}`,
-        source: sourceId,
-        target: targetId,
-        type: "default",
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: edgeColor,
-        },
-        style: {
-          strokeWidth: 2,
-          stroke: edgeColor,
-        },
-        animated: animated,
-      };
-
-      newEdges.push(agentEdge);
     }
+    
+    // Apply dagre layout to position nodes automatically
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      newNodes,
+      newEdges,
+      'TB' // Top to bottom layout direction
+    );
 
-    // Update nodes and edges
-    setNodes(newNodes as Node[]);
-    setEdges(newEdges as Edge[]);
+    // Update nodes and edges with the layouted positions
+    setNodes(layoutedNodes as Node[]);
+    setEdges(layoutedEdges as Edge[]);
   }, [state, setNodes, setEdges]);
 
   return (
