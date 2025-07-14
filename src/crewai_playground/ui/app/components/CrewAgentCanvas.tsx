@@ -16,7 +16,7 @@ import {
   ConnectionLineType,
   Handle,
 } from "@xyflow/react";
-import type { Node, Edge, NodeTypes, NodeProps } from "@xyflow/react";
+import type { NodeTypes, Node, Edge, NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 // Define domain models
@@ -33,7 +33,7 @@ interface Task {
   description: string;
   status: "pending" | "running" | "completed";
   agent_id: string | null;
-  output?: any;
+  output?: string | Record<string, unknown>;
   next_tasks?: string[];
   depends_on?: string[];
 }
@@ -50,29 +50,33 @@ interface Crew {
 }
 
 // Define custom node data types
-interface AgentNodeData extends Record<string, unknown> {
+interface BaseNodeData {
+  [key: string]: unknown;
+  isFirst?: boolean;
+  isLast?: boolean;
+}
+
+interface AgentNodeData extends BaseNodeData {
   id: string;
   role: string;
   name: string;
   status: "initializing" | "waiting" | "running" | "completed";
   description: string;
   associatedTasks?: Task[];
-  isFirst?: boolean;
-  isLast?: boolean;
 }
 
-interface TaskNodeData extends Record<string, unknown> {
+interface TaskNodeData extends BaseNodeData {
   id: string;
   description: string;
   status: "pending" | "running" | "completed";
   agent_id: string | null;
-  output?: any;
+  output?: string | Record<string, unknown>;
   assignedAgentName?: string;
   next_tasks?: string[];
   depends_on?: string[];
 }
 
-interface CrewNodeData extends Record<string, unknown> {
+interface CrewNodeData extends BaseNodeData {
   id: string;
   name: string;
   status: "initializing" | "running" | "completed";
@@ -87,6 +91,7 @@ interface VisualizationState {
   crew: Crew | null;
   agents: Agent[];
   tasks: Task[];
+  timestamp?: string;
 }
 
 interface CrewAgentCanvasProps {
@@ -98,243 +103,128 @@ interface CrewAgentCanvasProps {
 // Helper function for status colors
 const getStatusColor = (status: string): string => {
   switch (status) {
-    case "running":
-      return "bg-emerald-500 animate-pulse";
     case "completed":
-      return "bg-indigo-500";
-    case "initializing":
-      return "bg-amber-500 animate-pulse";
+      return "#6366f1"; // indigo-500
+    case "running":
+      return "#10b981"; // emerald-500
     case "waiting":
-      return "bg-amber-500";
+      return "#f59e0b"; // amber-500
+    case "initializing":
+      return "#3b82f6"; // blue-500
     case "pending":
-      return "bg-slate-400";
+      return "#64748b"; // slate-500
     default:
-      return "bg-slate-400";
+      return "#64748b"; // slate-500
   }
 };
 
 // Custom node components
-const AgentNode = ({ data }: NodeProps) => {
+const AgentNode: React.FC<NodeProps> = ({ data }) => {
   const typedData = data as AgentNodeData;
-  const [showTasks, setShowTasks] = useState(false);
-  const [associatedTasks, setAssociatedTasks] = useState<Task[]>([]);
-
-  // Access tasks from the data property that we'll pass in
-  useEffect(() => {
-    // Get tasks from the data property
-    if (typedData.associatedTasks) {
-      setAssociatedTasks(typedData.associatedTasks);
-    } else {
-      setAssociatedTasks([]);
-    }
-  }, [typedData.associatedTasks]);
+  const statusColor = getStatusColor(typedData.status);
 
   return (
     <div
-      className={`
-        border rounded-md p-2 bg-card shadow-md w-52
-        ${typedData.status === "running" ? "border-emerald-500 border-2" : ""}
-        ${typedData.status === "completed" ? "border-indigo-500" : ""}
-      `}
+      className="px-4 py-2 shadow-md rounded-md bg-white border-2 w-[280px]"
+      style={{ borderColor: statusColor }}
     >
-      {!typedData.isFirst && <Handle type="target" position={Position.Top} />}
-      {/* Agent Header - Name and Status */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center">
-          <div
-            className={`w-2.5 h-2.5 rounded-full mr-1.5 ${getStatusColor(
-              typedData.status
-            )}`}
-          ></div>
-          <h5 className="font-bold text-sm truncate max-w-[120px]">
-            {typedData.name}
-          </h5>
-        </div>
-        {typedData.status === "running" && (
-          <span className="text-xs text-emerald-500 flex items-center">
-            <Loader2 className="h-2.5 w-2.5 animate-spin mr-0.5" />
-            Active
-          </span>
-        )}
+      <div className="flex justify-between items-center">
+        <div className="font-bold text-sm">{typedData.role}</div>
+        <div
+          className="rounded-full w-3 h-3"
+          style={{ backgroundColor: statusColor }}
+        ></div>
       </div>
-
-      {/* Role - Critical Info */}
-      <div className="text-xs text-muted-foreground truncate">
-        {typedData.role}
+      <div className="text-xs text-gray-500 mt-1">{typedData.name}</div>
+      <div className="mt-2 text-xs">
+        {typedData.description && typedData.description.length > 100
+          ? `${typedData.description.substring(0, 100)}...`
+          : typedData.description}
       </div>
-
-      {/* Tasks Button */}
-      <div className="mt-1.5 pt-1.5 border-t border-dashed border-slate-200 dark:border-slate-700">
-        <button
-          className="w-full text-xs py-0.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded flex items-center justify-center transition-colors"
-          onMouseEnter={() => setShowTasks(true)}
-          onMouseLeave={() => setShowTasks(false)}
-        >
-          <span className="mr-1">Tasks</span>
-          <span className="bg-slate-200 dark:bg-slate-700 rounded-full w-4 h-4 flex items-center justify-center text-xs">
-            {associatedTasks.length}
-          </span>
-        </button>
-
-        {/* Task Popup */}
-        {showTasks && (
-          <div className="absolute z-10 mt-1 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg w-64">
-            <h6 className="text-xs font-semibold mb-1.5">Associated Tasks:</h6>
-            <div className="max-h-40 overflow-y-auto">
-              {associatedTasks.length > 0 ? (
-                associatedTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={`text-xs p-1.5 mb-1 rounded ${
-                      task.status === "running"
-                        ? "bg-emerald-50 dark:bg-emerald-900/20"
-                        : task.status === "completed"
-                        ? "bg-indigo-50 dark:bg-indigo-900/20"
-                        : "bg-slate-50 dark:bg-slate-800/50"
-                    }`}
-                  >
-                    <div className="flex items-center">
-                      <div
-                        className={`w-2 h-2 rounded-full mr-1.5 ${getStatusColor(
-                          task.status
-                        )}`}
-                      ></div>
-                      <span className="truncate">{task.description}</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  No tasks assigned
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-      {!typedData.isLast && <Handle type="source" position={Position.Bottom} />}
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="w-2 h-2 bg-blue-500"
+        isConnectable={false}
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="w-2 h-2 bg-blue-500"
+        isConnectable={false}
+      />
     </div>
   );
 };
 
-const TaskNode = ({ data }: NodeProps) => {
+const TaskNode: React.FC<NodeProps> = ({ data }) => {
   const typedData = data as TaskNodeData;
+  const statusColor = getStatusColor(typedData.status);
+
   return (
     <div
-      className={`
-        text-xs p-3 rounded border shadow-md
-        ${
-          typedData.status === "running"
-            ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800"
-            : ""
-        }
-        ${
-          typedData.status === "completed"
-            ? "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800"
-            : ""
-        }
-      `}
+      className="px-4 py-2 shadow-md rounded-md bg-white border-2 w-[280px]"
+      style={{ borderColor: statusColor }}
     >
-      <div className="flex items-center">
+      <div className="flex justify-between items-center">
+        <div className="font-bold text-sm">Task</div>
         <div
-          className={`w-3 h-3 rounded-full mr-2 ${getStatusColor(
-            typedData.status
-          )}`}
+          className="rounded-full w-3 h-3"
+          style={{ backgroundColor: statusColor }}
         ></div>
-        {typedData.status === "running" && (
-          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-        )}
-        <span className="font-medium">{typedData.description}</span>
       </div>
       {typedData.assignedAgentName && (
-        <div
-          className={`text-xs mt-2 ${
-            typedData.status === "running"
-              ? "text-emerald-600 dark:text-emerald-400 font-medium"
-              : "text-muted-foreground"
-          }`}
-        >
-          Agent: {typedData.assignedAgentName}
+        <div className="text-xs text-gray-500 mt-1">
+          Assigned to: {typedData.assignedAgentName}
         </div>
       )}
-      {(typedData.next_tasks?.length || typedData.depends_on?.length) && (
-        <div className="mt-2 pt-2 border-t border-dashed border-slate-200 dark:border-slate-700 text-muted-foreground">
-          {typedData.depends_on?.length && (
-            <div className="text-xs">
-              <span className="font-medium">Depends on:</span>{" "}
-              {typedData.depends_on?.length}
-            </div>
-          )}
-          {typedData.next_tasks?.length && (
-            <div className="text-xs">
-              <span className="font-medium">Next tasks:</span>{" "}
-              {typedData.next_tasks?.length}
-            </div>
-          )}
-        </div>
-      )}
+      <div className="mt-2 text-xs">
+        {typedData.description && typedData.description.length > 100
+          ? `${typedData.description.substring(0, 100)}...`
+          : typedData.description}
+      </div>
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="w-2 h-2 bg-blue-500"
+        isConnectable={false}
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="w-2 h-2 bg-blue-500"
+        isConnectable={false}
+      />
     </div>
   );
 };
 
-const CrewNode = ({ data }: NodeProps) => {
+const CrewNode: React.FC<NodeProps> = ({ data }) => {
   const typedData = data as CrewNodeData;
+  const statusColor = getStatusColor(typedData.status);
+
   return (
-    <div className="border rounded-md p-3 bg-card w-64 shadow-md">
-      <div className="flex items-center mb-2">
+    <div
+      className="px-4 py-2 shadow-md rounded-md bg-white border-2 w-[280px]"
+      style={{ borderColor: statusColor }}
+    >
+      <div className="flex justify-between items-center">
+        <div className="font-bold text-sm">Crew</div>
         <div
-          className={`w-3 h-3 rounded-full mr-2 ${
-            typedData.status === "initializing"
-              ? "bg-amber-500"
-              : typedData.status === "running"
-              ? "bg-emerald-500"
-              : typedData.status === "completed"
-              ? "bg-indigo-500"
-              : "bg-slate-400"
-          }`}
+          className="rounded-full w-3 h-3"
+          style={{ backgroundColor: statusColor }}
         ></div>
-        <h3 className="font-bold">{typedData.name}</h3>
       </div>
-      {typedData.status === "running" && (
-        <span className="ml-2 px-2 py-0.5 text-xs bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100 rounded-full flex items-center">
-          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          Running
-        </span>
-      )}
-      {typedData.status === "completed" && (
-        <span className="ml-2 px-2 py-0.5 text-xs bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-100 rounded-full">
-          Completed
-        </span>
-      )}
-      <div className="mt-2 text-xs text-muted-foreground">
-        {typedData.type && (
-          <p className="mt-1 flex items-center">
-            <span className="font-medium">Type:</span>
-            <span className="ml-1 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full capitalize">
-              {typedData.type}
-            </span>
-          </p>
-        )}
-        {typedData.started_at && (
-          <p className="mt-1">
-            Started: {new Date(typedData.started_at).toLocaleString()}
-          </p>
-        )}
-        {typedData.completed_at && (
-          <p className="mt-1">
-            Completed: {new Date(typedData.completed_at).toLocaleString()}
-          </p>
-        )}
-      </div>
+      <div className="text-xs text-gray-500 mt-1">{typedData.name}</div>
+      <div className="mt-2 text-xs">Status: {typedData.status}</div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="w-2 h-2 bg-blue-500"
+        isConnectable={false}
+      />
     </div>
   );
-};
-
-// Define custom node types for React Flow
-const nodeTypes: NodeTypes = {
-  agent: AgentNode as any,
-  task: TaskNode as any,
-  crew: CrewNode as any,
 };
 
 const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
@@ -343,227 +233,426 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
   resetKey = 0,
 }) => {
   const navigate = useNavigate();
-  // WebSocket reference
-  const wsRef = useRef<WebSocket | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const clientIdRef = useRef<string | null>(null);
+  const reconnectAttemptsRef = useRef<number>(0);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // State for visualization data
+  // State variables
   const [state, setState] = useState<VisualizationState>({
     crew: null,
     agents: [],
     tasks: [],
   });
-
-  // State for UI
-  const [connected, setConnected] = useState<boolean>(false);
-  const [hasReceivedData, setHasReceivedData] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // React Flow state - Initialize with typed arrays to help TypeScript inference
   const initialNodes: Node[] = [];
   const initialEdges: Edge[] = [];
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [connectionStatus, setConnectionStatus] = useState<
+    "connecting" | "connected" | "disconnected"
+  >("connecting");
+  const [isInitializing, setIsInitializing] = useState<boolean>(false);
+  const [hasReceivedData, setHasReceivedData] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Connect to WebSocket when component mounts or crewId changes
-  useEffect(() => {
+  // Define node types
+  const nodeTypes: NodeTypes = {
+    agent: AgentNode,
+    task: TaskNode,
+    crew: CrewNode,
+  };
+
+  // Initialize crew function
+  const initializeCrew = useCallback(async (crewId: string) => {
     if (!crewId) return;
 
-    // Close any existing connection
-    if (wsRef.current) {
-      wsRef.current.close();
+    setIsInitializing(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/crews/${crewId}/initialize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to initialize crew");
+      }
+
+      console.log("Crew initialization successful:", data);
+    } catch (err) {
+      console.error("Error initializing crew:", err);
+      setError(
+        `Failed to initialize crew: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    } finally {
+      setIsInitializing(false);
+    }
+  }, []);
+
+  // WebSocket connection function
+  const connectWebSocket = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log("WebSocket already connected");
+      return;
     }
 
-    // Create a new WebSocket connection
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws/crew-visualization`;
+    // Clear any existing reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    // Clear any existing heartbeat interval
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
 
-    ws.onopen = () => {
-      console.log("WebSocket connected for crew visualization");
-      setConnected(true);
-      setError(null);
-      // We don't need to send crewId, the server handles it
-    };
+    setConnectionStatus("connecting");
 
-    ws.onmessage = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
+    try {
+      // Create WebSocket connection with crew ID in the URL
+      const wsUrl = `${
+        window.location.protocol === "https:" ? "wss:" : "ws:"
+      }//${window.location.host}/ws/crew-visualization/${crewId}`;
+      console.log(`Connecting to WebSocket at ${wsUrl}`);
 
-        if (data.type === "connection_test") {
-          console.log("Received connection test message, not updating state");
-          return;
-        }
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
 
-        if (
-          (data.crew && Object.keys(data.crew).length > 0) ||
-          (data.agents &&
-            Array.isArray(data.agents) &&
-            data.agents.length > 0) ||
-          (data.tasks && Array.isArray(data.tasks) && data.tasks.length > 0)
-        ) {
-          setHasReceivedData(true);
-        }
+      ws.onopen = () => {
+        console.log("WebSocket connection established");
+        reconnectAttemptsRef.current = 0; // Reset reconnect attempts on successful connection
+      };
 
-        setState((prevState) => {
-          // Deep copy to avoid state mutation issues
-          const newState = JSON.parse(JSON.stringify(prevState));
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
 
-          // Update crew
-          if (data.crew) {
-            newState.crew = { ...(newState.crew || {}), ...data.crew };
-          }
-
-          // Update agents using a Map for efficient merging
-          if (data.agents && Array.isArray(data.agents)) {
-            const agentMap = new Map(
-              newState.agents.map((a: Agent) => [a.id, a])
+          // Handle connection established message
+          if (data.type === "connection_established") {
+            setConnectionStatus("connected");
+            clientIdRef.current = data.client_id;
+            console.log(
+              `Connection established with client ID: ${data.client_id}`
             );
-            data.agents.forEach((newAgent: Agent) => {
-              agentMap.set(newAgent.id, {
-                ...(agentMap.get(newAgent.id) || {}),
-                ...newAgent,
-              });
-            });
-            newState.agents = Array.from(agentMap.values());
+
+            // Register for crew updates
+            if (crewId) {
+              ws.send(
+                JSON.stringify({
+                  type: "register_crew",
+                  crew_id: crewId,
+                })
+              );
+            }
+
+            // Set up heartbeat ping every 30 seconds
+            heartbeatIntervalRef.current = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "ping" }));
+              }
+            }, 30000);
+
+            // Request current state
+            ws.send(JSON.stringify({ type: "request_state" }));
           }
-
-          // Update tasks using a Map for efficient merging
-          if (data.tasks && Array.isArray(data.tasks)) {
-            const taskMap = new Map(newState.tasks.map((t: Task) => [t.id, t]));
-            data.tasks.forEach((newTask: Task) => {
-              taskMap.set(newTask.id, {
-                ...(taskMap.get(newTask.id) || {}),
-                ...newTask,
-              });
-            });
-            newState.tasks = Array.from(taskMap.values());
+          // Handle crew registration confirmation
+          else if (data.type === "crew_registered") {
+            console.log(`Registered for crew: ${data.crew_id}`);
           }
+          // Handle pong response (heartbeat)
+          else if (data.type === "pong") {
+            console.log("Heartbeat pong received");
+          }
+          // Handle state update
+          else if (data.crew || data.agents || data.tasks) {
+            console.log("Received state update:", data);
 
-          return newState;
-        });
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-        setError("Error parsing message");
-      }
-    };
+            // Merge new state with existing state
+            setState((prevState) => {
+              const newState = { ...prevState };
 
-    ws.onclose = () => {
-      console.log("WebSocket connection closed");
-      setConnected(false);
-    };
+              if (data.crew) {
+                newState.crew = data.crew;
+              }
 
-    ws.onerror = (event: Event) => {
-      console.error("WebSocket error:", event);
-      setError("Error occurred");
-    };
+              if (data.agents) {
+                // Create a map of existing agents for efficient lookup
+                const agentMap = new Map(
+                  prevState.agents.map((agent) => [agent.id, agent])
+                );
+
+                // Update or add agents from the new data
+                data.agents.forEach((agent: Agent) => {
+                  agentMap.set(agent.id, agent);
+                });
+
+                newState.agents = Array.from(agentMap.values());
+              }
+
+              if (data.tasks) {
+                // Create a map of existing tasks for efficient lookup
+                const taskMap = new Map(
+                  prevState.tasks.map((task) => [task.id, task])
+                );
+
+                // Update or add tasks from the new data
+                data.tasks.forEach((task: Task) => {
+                  taskMap.set(task.id, task);
+                });
+
+                newState.tasks = Array.from(taskMap.values());
+              }
+
+              if (data.timestamp) {
+                newState.timestamp = data.timestamp;
+              }
+
+              return newState;
+            });
+
+            setHasReceivedData(true);
+          }
+        } catch (err) {
+          console.error("Error processing WebSocket message:", err);
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.log(
+          `WebSocket connection closed: ${event.code} ${event.reason}`
+        );
+        setConnectionStatus("disconnected");
+
+        // Clear heartbeat interval
+        if (heartbeatIntervalRef.current) {
+          clearInterval(heartbeatIntervalRef.current);
+          heartbeatIntervalRef.current = null;
+        }
+
+        // Attempt to reconnect with exponential backoff
+        if (reconnectAttemptsRef.current < 5) {
+          const delay = Math.min(
+            1000 * 2 ** reconnectAttemptsRef.current,
+            30000
+          );
+          console.log(
+            `Attempting to reconnect in ${delay}ms (attempt ${
+              reconnectAttemptsRef.current + 1
+            }/5)`
+          );
+
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current += 1;
+            connectWebSocket();
+          }, delay);
+        } else {
+          console.log("Maximum reconnection attempts reached");
+          setError(
+            "Failed to connect to visualization service after multiple attempts. Please try again later."
+          );
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        setError("Error connecting to visualization service");
+      };
+    } catch (err) {
+      console.error("Error setting up WebSocket:", err);
+      setConnectionStatus("disconnected");
+      setError(
+        `Failed to connect: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }, [crewId]);
+
+  // Reset state when crew ID changes
+  useEffect(() => {
+    // Reset state
+    setState({
+      crew: null,
+      agents: [],
+      tasks: [],
+    });
+    setHasReceivedData(false);
+    setError(null);
+
+    // Close existing WebSocket connection
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    // Clear any existing timeouts/intervals
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    // Reset reconnect attempts
+    reconnectAttemptsRef.current = 0;
+
+    if (crewId) {
+      // Initialize crew first
+      initializeCrew(crewId).then(() => {
+        // Then connect to WebSocket
+        connectWebSocket();
+      });
+    }
 
     // Cleanup on unmount
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
+        wsRef.current = null;
+      }
+
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
       }
     };
-  }, [crewId]);
-
-  // Reset state when resetKey changes
-  useEffect(() => {
-    if (resetKey > 0) {
-      setState({
-        crew: null,
-        agents: [],
-        tasks: [],
-      });
-      setHasReceivedData(false);
-      setError(null);
-    }
-  }, [resetKey]);
+  }, [crewId, resetKey, connectWebSocket, initializeCrew]);
 
   // Update nodes and edges when state changes
   useEffect(() => {
-    console.log("Updating nodes and edges with state:", state);
+    if (!state.crew && !state.agents.length && !state.tasks.length) {
+      return;
+    }
 
     const newNodes: Node[] = [];
     const newEdges: Edge[] = [];
 
-    // 1. Crew node
+    // 1. Create crew node if available
     if (state.crew) {
-      const crewNode: Node = {
+      const crewNode: Node<CrewNodeData> = {
         id: `crew-${state.crew.id}`,
         type: "crew",
+        position: { x: 400, y: 50 },
         data: {
-          id: state.crew.id,
-          name: state.crew.name,
-          status: state.crew.status,
-          started_at: state.crew.started_at,
-          completed_at: state.crew.completed_at,
-          output: state.crew.output,
-          type: state.crew.type || "sequential",
-          execution_order: state.crew.execution_order || [],
+          ...state.crew,
         },
-        position: { x: 0, y: 50 },
-        draggable: true,
-        sourcePosition: Position.Bottom,
-        targetPosition: Position.Top,
-        connectable: true,
       };
+
       newNodes.push(crewNode);
     }
 
-    // 2. Create agent nodes in vertical layout
+    // 2. Create agent nodes
+    // Sort agents by status to show running first, then waiting, then completed
     const sortedAgents = [...state.agents].sort((a, b) => {
-      const aFirstTask = state.tasks.find((t) => t.agent_id === a.id);
-      const bFirstTask = state.tasks.find((t) => t.agent_id === b.id);
+      const statusOrder: Record<string, number> = {
+        running: 0,
+        waiting: 1,
+        initializing: 2,
+        completed: 3,
+      };
 
-      if (aFirstTask && bFirstTask) {
-        return (
-          state.tasks.indexOf(aFirstTask) - state.tasks.indexOf(bFirstTask)
-        );
-      }
-
-      if (aFirstTask && !bFirstTask) return -1;
-      if (!aFirstTask && bFirstTask) return 1;
-
-      return state.agents.indexOf(a) - state.agents.indexOf(b);
+      return (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
     });
 
-    // Agent nodes are 208px (w-52) wide, crew node is 256px (w-64).
-    // To center agents under the crew node, we offset them by half the difference.
-    const agentXOffset = (256 - 208) / 2;
-
     sortedAgents.forEach((agent, index) => {
-      const yPos = 300 + index * 150;
-      const associatedTasks = state.tasks.filter(
-        (t) => t.agent_id === agent.id
+      // Find tasks assigned to this agent
+      const agentTasks = state.tasks.filter(
+        (task) => task.agent_id === agent.id
       );
 
-      const agentNode: Node = {
+      const agentNode: Node<AgentNodeData> = {
         id: `agent-${agent.id}`,
         type: "agent",
+        position: {
+          x: 200 + (index % 3) * 300,
+          y: 200 + Math.floor(index / 3) * 150,
+        },
         data: {
-          id: agent.id,
-          name: agent.name,
-          role: agent.role,
-          status: agent.status,
-          description: agent.description,
-          associatedTasks: associatedTasks,
+          ...agent,
+          associatedTasks: agentTasks,
           isFirst: index === 0,
           isLast: index === sortedAgents.length - 1,
         },
-        position: { x: agentXOffset, y: yPos },
-        draggable: true,
-        sourcePosition: Position.Bottom,
-        targetPosition: Position.Top,
-        connectable: true,
       };
 
       newNodes.push(agentNode);
+
+      // Connect crew to first agent
+      if (state.crew && index === 0) {
+        const crewToAgentEdge: Edge = {
+          id: `crew-${state.crew.id}-to-agent-${agent.id}`,
+          source: `crew-${state.crew.id}`,
+          target: `agent-${agent.id}`,
+          type: "default",
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "#64748b",
+          },
+          style: {
+            strokeWidth: 2,
+            stroke: "#64748b",
+          },
+        };
+
+        newEdges.push(crewToAgentEdge);
+      }
+
+      // Create task nodes for this agent
+      agentTasks.forEach((task, taskIndex) => {
+        const taskNode: Node<TaskNodeData> = {
+          id: `task-${task.id}`,
+          type: "task",
+          position: {
+            x: 200 + (index % 3) * 300,
+            y: 300 + Math.floor(index / 3) * 150 + taskIndex * 100,
+          },
+          data: {
+            ...task,
+            assignedAgentName: agent.name,
+          },
+        };
+
+        newNodes.push(taskNode);
+
+        // Connect agent to task
+        const agentToTaskEdge: Edge = {
+          id: `agent-${agent.id}-to-task-${task.id}`,
+          source: `agent-${agent.id}`,
+          target: `task-${task.id}`,
+          type: "default",
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: getStatusColor(task.status),
+          },
+          style: {
+            strokeWidth: 2,
+            stroke: getStatusColor(task.status),
+          },
+          animated: task.status === "running",
+        };
+
+        newEdges.push(agentToTaskEdge);
+      });
     });
 
-    // 3. Create edges
-    // Connect agents in sequence
+    // 3. Create edges between agents in sequence
     for (let i = 0; i < sortedAgents.length - 1; i++) {
       const currentAgent = sortedAgents[i];
       const nextAgent = sortedAgents[i + 1];
@@ -573,7 +662,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
 
       // Determine edge color based on current agent status
       let edgeColor = "#64748b"; // default slate-500
-      let animated = true;
+      let animated = false;
 
       if (currentAgent.status === "completed") {
         edgeColor = "#6366f1"; // indigo-500 for completed
@@ -586,7 +675,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
         id: `agent-${currentAgent.id}-to-${nextAgent.id}`,
         source: sourceId,
         target: targetId,
-        type: "default", // Use default edge type
+        type: "default",
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: edgeColor,
@@ -601,82 +690,118 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
       newEdges.push(agentEdge);
     }
 
-    // Update nodes and edges using the setter functions
-    setNodes(newNodes);
-    setEdges(newEdges);
+    // Update nodes and edges
+    setNodes(newNodes as Node[]);
+    setEdges(newEdges as Edge[]);
   }, [state, setNodes, setEdges]);
 
   return (
-    <Card className="p-6 mb-6 overflow-hidden">
+    <Card className="p-6 mb-6 overflow-hidden relative">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">
-          Crew Execution Visualization
-        </h3>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="flex items-center gap-1"
-          onClick={() => {
-            // Use the crew ID from the state (WebSocket data) if available, otherwise fall back to the prop
-            const effectiveCrewId = state.crew?.id || crewId;
-            console.log(`Using crew ID for traces: ${effectiveCrewId}`);
-            navigate(`/kickoff/traces?crewId=${effectiveCrewId}`);
-          }}
-        >
-          <ExternalLink className="h-4 w-4" />
-          View Traces
-        </Button>
+        <h3 className="text-lg font-semibold">Crew Execution Visualization</h3>
+        {state.crew?.id && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-1"
+            onClick={() => {
+              // Use the crew ID from the state (WebSocket data) if available, otherwise fall back to the prop
+              const effectiveCrewId = state.crew?.id || crewId;
+              console.log(`Using crew ID for traces: ${effectiveCrewId}`);
+              navigate(`/kickoff/traces?crewId=${effectiveCrewId}`);
+            }}
+          >
+            <ExternalLink className="h-4 w-4" />
+            View Traces
+          </Button>
+        )}
       </div>
 
-      {error && (
-        <div className="bg-rose-100 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 p-3 rounded-md mb-4">
-          {error}
-        </div>
-      )}
-
-      {/* Show loading state */}
-      {isRunning && !hasReceivedData && (
-        <div className="flex items-center justify-center h-64">
-          <div className="flex flex-col items-center">
-            <Loader2 className="h-8 w-8 animate-spin mb-2" />
-            <p className="text-sm text-muted-foreground">
-              Connecting to visualization service...
-            </p>
+      {/* Loading state */}
+      {!hasReceivedData && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 dark:bg-slate-900/80 z-10">
+          <Loader2 className="h-8 w-8 animate-spin text-indigo-500 mb-4" />
+          <h3 className="text-lg font-medium">
+            {isInitializing
+              ? "Initializing crew..."
+              : isRunning
+              ? "Waiting for data..."
+              : "Loading visualization..."}
+          </h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {isInitializing
+              ? "Setting up the crew structure..."
+              : isRunning
+              ? "The crew execution will appear here once it starts"
+              : "Connecting to visualization service..."}
+          </p>
+          <div className="mt-4 flex items-center space-x-2">
+            <div
+              className={`h-2 w-2 rounded-full ${
+                connectionStatus === "connected"
+                  ? "bg-green-500"
+                  : connectionStatus === "connecting"
+                  ? "bg-amber-500"
+                  : "bg-red-500"
+              }`}
+            ></div>
+            <span className="text-xs">
+              {connectionStatus === "connected"
+                ? "Connected"
+                : connectionStatus === "connecting"
+                ? "Connecting..."
+                : "Disconnected"}
+            </span>
+            {connectionStatus === "disconnected" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => connectWebSocket()}
+                className="ml-2"
+              >
+                Reconnect
+              </Button>
+            )}
           </div>
         </div>
       )}
 
-      {/* React Flow Canvas */}
-      {(hasReceivedData || !isRunning) && (
-        <div
-          className="h-[600px] border rounded-md overflow-hidden mb-6"
-          ref={canvasRef}
-        >
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.2 }}
-            attributionPosition="bottom-right"
-            defaultEdgeOptions={{
-              type: "default",
-              markerEnd: { type: MarkerType.ArrowClosed },
-            }}
-            connectionLineType={ConnectionLineType.SmoothStep}
-            proOptions={{ hideAttribution: true }}
-            minZoom={0.5}
-            maxZoom={1.5}
-            elementsSelectable={true}
-          >
-            <Background color="#aaa" gap={16} />
-            <Controls />
-            <MiniMap nodeStrokeWidth={3} zoomable pannable />
-          </ReactFlow>
+      {/* Error message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <p className="text-sm">{error}</p>
         </div>
       )}
+
+      {/* React Flow Canvas */}
+      <div
+        className="h-[600px] border rounded-md overflow-hidden mb-6"
+        ref={canvasRef}
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          attributionPosition="bottom-right"
+          defaultEdgeOptions={{
+            type: "default",
+            markerEnd: { type: MarkerType.ArrowClosed },
+          }}
+          connectionLineType={ConnectionLineType.SmoothStep}
+          proOptions={{ hideAttribution: true }}
+          minZoom={0.5}
+          maxZoom={1.5}
+          elementsSelectable={true}
+        >
+          <Background color="#aaa" gap={16} />
+          <Controls />
+          <MiniMap nodeStrokeWidth={3} zoomable pannable />
+        </ReactFlow>
+      </div>
 
       {/* Crew Results Section */}
       {state.crew?.status === "completed" && state.crew?.output && (
@@ -686,66 +811,54 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
             <div className="text-base leading-7">
               <ReactMarkdown
                 components={{
-                  h1: ({ ...props }) => (
-                    <h1
-                      className="text-2xl font-bold mt-6 mb-4"
-                      {...props}
-                    />
+                  h1: ({ ...props }: React.ComponentPropsWithoutRef<"h1">) => (
+                    <h1 className="text-2xl font-bold mt-6 mb-4" {...props} />
                   ),
-                  h2: ({ ...props }) => (
-                    <h2
-                      className="text-xl font-bold mt-5 mb-3"
-                      {...props}
-                    />
+                  h2: ({ ...props }: React.ComponentPropsWithoutRef<"h2">) => (
+                    <h2 className="text-xl font-bold mt-5 mb-3" {...props} />
                   ),
-                  h3: ({ ...props }) => (
-                    <h3
-                      className="text-lg font-bold mt-4 mb-2"
-                      {...props}
-                    />
+                  h3: ({ ...props }: React.ComponentPropsWithoutRef<"h3">) => (
+                    <h3 className="text-lg font-bold mt-4 mb-2" {...props} />
                   ),
-                  p: ({ ...props }) => (
+                  p: ({ ...props }: React.ComponentPropsWithoutRef<"p">) => (
                     <p className="mb-4" {...props} />
                   ),
-                  ul: ({ ...props }) => (
+                  ul: ({ ...props }: React.ComponentPropsWithoutRef<"ul">) => (
                     <ul className="list-disc pl-6 mb-4" {...props} />
                   ),
-                  ol: ({ ...props }) => (
+                  ol: ({ ...props }: React.ComponentPropsWithoutRef<"ol">) => (
                     <ol className="list-decimal pl-6 mb-4" {...props} />
                   ),
-                  li: ({ ...props }) => (
+                  li: ({ ...props }: React.ComponentPropsWithoutRef<"li">) => (
                     <li className="mb-1" {...props} />
                   ),
-                  a: ({ ...props }) => (
-                    <a
-                      className="text-blue-500 hover:underline"
-                      {...props}
-                    />
+                  a: ({ ...props }: React.ComponentPropsWithoutRef<"a">) => (
+                    <a className="text-blue-500 hover:underline" {...props} />
                   ),
-                  blockquote: ({ ...props }) => (
+                  blockquote: ({
+                    ...props
+                  }: React.ComponentPropsWithoutRef<"blockquote">) => (
                     <blockquote
                       className="border-l-4 border-muted pl-4 italic my-4"
                       {...props}
                     />
                   ),
-                  code: ({ children, className, ...props }: any) => {
+                  code: (props) => {
+                    // Using a simpler approach to avoid TypeScript errors
+                    const { children, className } = props;
                     const match = /language-(\w+)/.exec(className || "");
                     const isInline =
-                      !match && !children?.toString().includes("\n");
+                      !match &&
+                      (typeof children === "string"
+                        ? !children.includes("\n")
+                        : true);
                     return isInline ? (
-                      <code
-                        className="bg-muted px-1 py-0.5 rounded"
-                        {...props}
-                      >
+                      <code className="bg-muted px-1 py-0.5 rounded" {...props}>
                         {children}
                       </code>
                     ) : (
-                      <pre
-                        className="bg-muted p-4 rounded-md overflow-x-auto mb-4"
-                      >
-                        <code className={className} {...props}>
-                          {children}
-                        </code>
+                      <pre className="p-4 rounded-md bg-muted overflow-x-auto">
+                        <code className={className}>{children}</code>
                       </pre>
                     );
                   },

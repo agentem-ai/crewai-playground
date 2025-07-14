@@ -14,6 +14,10 @@ from crewai.utilities.events import (
     LLMCallStartedEvent,
     LLMCallCompletedEvent,
 )
+from crewai_playground.events import (
+    CrewInitializationRequestedEvent,
+    CrewInitializationCompletedEvent,
+)
 from crewai_playground.telemetry import telemetry_service
 from crewai.utilities.events.base_event_listener import BaseEventListener
 
@@ -46,66 +50,100 @@ class CrewVisualizationListener(BaseEventListener):
     def __init__(self):
         self._registered_buses = set()
         super().__init__()
-        self.active_connections: List[WebSocket] = []
+        # Replace simple connection list with client dictionary
+        self.clients = {}  # client_id -> {websocket, crew_id, connected_at, last_ping}
         self.crew_state: Dict[str, Any] = {}
         self.agent_states: Dict[str, Dict[str, Any]] = {}
         self.task_states: Dict[str, Dict[str, Any]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, client_id: str, crew_id: str = None):
         """Connect a new WebSocket client."""
         # Capture the running loop so we can schedule updates from sync event callbacks
         self.loop = asyncio.get_running_loop()
 
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.clients[client_id] = {
+            "websocket": websocket,
+            "crew_id": crew_id,
+            "connected_at": datetime.utcnow(),
+            "last_ping": datetime.utcnow()
+        }
         logger.info(
-            f"WebSocket client connected. Total connections: {len(self.active_connections)}"
+            f"WebSocket client {client_id} connected. Total connections: {len(self.clients)}"
         )
-        # Always send current state to the new client, even if empty
-        logger.info(f"Sending initial state to new client")
-        await self.send_update(websocket)
+        # If crew_id provided, send current state for that crew
+        if crew_id and self.crew_state and self.crew_state.get("id") == crew_id:
+            logger.info(f"Sending initial state to new client for crew {crew_id}")
+            await self.send_state_to_client(client_id)
 
-    def disconnect(self, websocket: WebSocket):
-        """Disconnect a WebSocket client."""
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    def disconnect(self, client_id: str):
+        """Disconnect a client by ID."""
+        if client_id in self.clients:
+            del self.clients[client_id]
             logger.info(
-                f"WebSocket client disconnected. Remaining connections: {len(self.active_connections)}"
+                f"WebSocket client {client_id} disconnected. Remaining connections: {len(self.clients)}"
             )
+            
+    async def register_client_for_crew(self, client_id: str, crew_id: str):
+        """Register a client for updates from a specific crew."""
+        if client_id in self.clients:
+            self.clients[client_id]["crew_id"] = crew_id
+            logger.info(f"Client {client_id} registered for crew {crew_id}")
+            await self.send_state_to_client(client_id)
+    
+    async def send_state_to_client(self, client_id: str):
+        """Send current state to a specific client."""
+        if client_id not in self.clients:
+            return
+            
+        client = self.clients[client_id]
+        websocket = client["websocket"]
+        crew_id = client["crew_id"]
+        
+        # Only send state for the client's registered crew
+        if crew_id and self.crew_state and self.crew_state.get("id") == crew_id:
+            try:
+                state = {
+                    "crew": self.crew_state,
+                    "agents": list(self.agent_states.values()),
+                    "tasks": list(self.task_states.values())
+                }
+                # Use CustomJSONEncoder to handle datetime and other complex objects
+                json_data = json.dumps(state, cls=CustomJSONEncoder)
+                await websocket.send_text(json_data)
+                logger.debug(f"Sent state to client {client_id} for crew {crew_id}")
+            except Exception as e:
+                logger.error(f"Error sending state to client {client_id}: {str(e)}")
+                self.disconnect(client_id)
 
     async def broadcast_update(self):
         """Broadcast the current state to all connected WebSocket clients."""
-        if not self.active_connections:
+        if not self.clients:
             logger.info("No active connections to broadcast to")
             return
 
-        logger.info(f"Broadcasting update to {len(self.active_connections)} clients")
-        for connection in self.active_connections.copy():
-            try:
-                await self.send_update(connection)
-            except Exception as e:
-                logger.error(f"Error broadcasting update: {str(e)}")
-                # Connection might be closed, will be cleaned up in send_update
-
-    async def send_update(self, websocket: WebSocket):
-        """Send the current state to a specific WebSocket client."""
-        update = {
-            "crew": self.crew_state,
-            "agents": list(self.agent_states.values()),
-            "tasks": list(self.task_states.values()),
-        }
-        json_data = json.dumps(update, cls=CustomJSONEncoder)
-        try:
-            await websocket.send_text(json_data)
-            logger.debug(f"Sent update to WebSocket client")
-        except Exception as e:
-            logger.error(f"Error sending update: {str(e)}")
-            # Remove the connection if it's closed
-            if websocket in self.active_connections:
-                self.active_connections.remove(websocket)
-                logger.info(
-                    f"Removed closed connection. Remaining: {len(self.active_connections)}"
-                )
+        crew_id = self.crew_state.get("id") if self.crew_state else None
+        logger.info(f"Broadcasting update for crew {crew_id} to {len(self.clients)} clients")
+        
+        for client_id, client in list(self.clients.items()):
+            client_crew_id = client.get("crew_id")
+            # Only broadcast to clients registered for this crew or with no specific crew
+            if not client_crew_id or (crew_id and client_crew_id == crew_id):
+                try:
+                    websocket = client["websocket"]
+                    state = {
+                        "crew": self.crew_state,
+                        "agents": list(self.agent_states.values()),
+                        "tasks": list(self.task_states.values()),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    # Use CustomJSONEncoder to handle datetime and other complex objects
+                    json_data = json.dumps(state, cls=CustomJSONEncoder)
+                    await websocket.send_text(json_data)
+                    logger.debug(f"Sent update to client {client_id} for crew {crew_id}")
+                except Exception as e:
+                    logger.error(f"Error broadcasting to client {client_id}: {str(e)}")
+                    self.disconnect(client_id)
 
     def reset_state(self):
         """Reset the state when a new crew execution starts."""
@@ -123,6 +161,59 @@ class CrewVisualizationListener(BaseEventListener):
 
         logger.info(f"Setting up new listeners for event bus {bus_id}")
         self._registered_buses.add(bus_id)
+        
+        @crewai_event_bus.on(CrewInitializationRequestedEvent)
+        def on_crew_initialization_requested(source, event):
+            """Handle crew initialization request."""
+            crew_id = event.crew_id
+            logger.info(f"Crew initialization requested for {event.crew_name} (ID: {crew_id})")
+            
+            # Reset state for new initialization
+            self.reset_state()
+            
+            # Store crew information
+            self.crew_state = {
+                "id": crew_id,
+                "name": event.crew_name,
+                "status": "initializing",
+                "started_at": event.timestamp or datetime.utcnow(),
+            }
+            
+            # Schedule async broadcast
+            if hasattr(self, "loop"):
+                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
+        
+        @crewai_event_bus.on(CrewInitializationCompletedEvent)
+        def on_crew_initialization_completed(source, event):
+            """Handle crew initialization completion."""
+            crew_id = event.crew_id
+            logger.info(f"Crew initialization completed for {event.crew_name} (ID: {crew_id})")
+            
+            # Update crew state
+            self.crew_state = {
+                "id": crew_id,
+                "name": event.crew_name,
+                "status": "ready",
+                "initialized_at": event.timestamp or datetime.utcnow(),
+            }
+            
+            # Initialize agent states
+            for agent in event.agents:
+                agent_id = agent.get("id")
+                if agent_id:
+                    self.agent_states[agent_id] = agent
+                    logger.debug(f"Added agent {agent_id} to state")
+            
+            # Initialize task states
+            for task in event.tasks:
+                task_id = task.get("id")
+                if task_id:
+                    self.task_states[task_id] = task
+                    logger.debug(f"Added task {task_id} to state")
+            
+            # Schedule async broadcast
+            if hasattr(self, "loop"):
+                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
 
         @crewai_event_bus.on(CrewKickoffStartedEvent)
         def on_crew_kickoff_started(source, event):

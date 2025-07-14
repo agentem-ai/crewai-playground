@@ -585,6 +585,122 @@ async def execute_tool(tool_name: str, request: ToolExecuteRequest) -> JSONRespo
         )
 
 
+@app.post("/api/crews/{crew_id}/initialize")
+async def initialize_crew(crew_id: str) -> JSONResponse:
+    """Initialize a specific crew structure without running it.
+    
+    Args:
+        crew_id: The ID of the crew to initialize
+        
+    Returns:
+        JSONResponse with initialization status
+    """
+    try:
+        # Find the crew path
+        crew_path = None
+        for crew in discovered_crews:
+            if crew.get("id") == crew_id:
+                crew_path = crew.get("path")
+                break
+                
+        if not crew_path:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Crew with ID {crew_id} not found"
+            )
+            
+        # Load the crew
+        crew_instance, crew_name = load_crew_from_module(Path(crew_path))
+        
+        # Get event bus and set up visualization listener
+        if hasattr(crew_instance, "get_event_bus"):
+            event_bus = crew_instance.get_event_bus()
+        else:
+            from crewai.utilities.events import crewai_event_bus
+            event_bus = crewai_event_bus
+            
+        # Ensure listener is setup
+        crew_visualization_listener.setup_listeners(event_bus)
+        
+        # Extract agents and tasks info
+        agents = []
+        for agent in crew_instance.agents:
+            agent_id = str(agent.id) if hasattr(agent, "id") else f"agent_{len(agents)}"
+            agents.append({
+                "id": agent_id,
+                "role": agent.role,
+                "name": agent.name if hasattr(agent, "name") else agent.role,
+                "status": "waiting",
+                "description": agent.backstory[:100] + "..." if len(agent.backstory) > 100 else agent.backstory
+            })
+            
+        # Extract tasks info
+        tasks = []
+        task_map = {}
+        for i, task in enumerate(crew_instance.tasks):
+            task_id = str(task.id) if hasattr(task, "id") else f"task_{i}"
+            task_map[task_id] = task
+            
+            # Try to find an agent for this task
+            assigned_agent_id = None
+            if hasattr(task, "agent") and task.agent:
+                agent_id = str(task.agent.id) if hasattr(task.agent, "id") else None
+                if agent_id:
+                    assigned_agent_id = agent_id
+            
+            tasks.append({
+                "id": task_id,
+                "description": task.description if hasattr(task, "description") else "",
+                "status": "pending",
+                "agent_id": assigned_agent_id
+            })
+            
+        # Emit initialization events
+        from crewai_playground.events import CrewInitializationRequestedEvent, CrewInitializationCompletedEvent
+        
+        event_bus.emit(
+            crew_instance,
+            CrewInitializationRequestedEvent(
+                crew_id=crew_id, 
+                crew_name=crew_name,
+                timestamp=datetime.datetime.utcnow()
+            )
+        )
+        
+        # After extracting structure, emit completion event
+        event_bus.emit(
+            crew_instance,
+            CrewInitializationCompletedEvent(
+                crew_id=crew_id,
+                crew_name=crew_name,
+                agents=agents,
+                tasks=tasks,
+                timestamp=datetime.datetime.utcnow()
+            )
+        )
+        
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Crew {crew_name} initialized",
+                "crew_id": crew_id,
+                "agent_count": len(agents),
+                "task_count": len(tasks)
+            },
+            status_code=200
+        )
+        
+    except Exception as e:
+        logging.error(f"Error initializing crew {crew_id}: {str(e)}")
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": f"Error initializing crew: {str(e)}"
+            },
+            status_code=500
+        )
+
+
 @app.post("/api/crews/{crew_id}/kickoff")
 async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
     """Run a specific crew directly with optional inputs.
@@ -666,51 +782,74 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
         raise HTTPException(status_code=500, detail=error_message)
 
 
-@app.websocket("/ws/crew-visualization")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time crew visualization updates."""
-    logging.info("New WebSocket connection request for crew visualization")
+@app.websocket("/ws/crew-visualization/{crew_id}")
+async def websocket_endpoint(websocket: WebSocket, crew_id: str = None):
+    """WebSocket endpoint with optional crew_id path parameter."""
+    client_id = str(uuid.uuid4())
+    logging.info(f"New WebSocket connection request for crew visualization, crew_id: {crew_id}, client_id: {client_id}")
+    
     try:
         # Connect the WebSocket client to the event listener
-        await crew_visualization_listener.connect(websocket)
-        logging.info("WebSocket client connected successfully")
+        await crew_visualization_listener.connect(websocket, client_id, crew_id)
+        logging.info(f"WebSocket client {client_id} connected successfully")
 
-        # Send a test message to verify the connection is working
-        try:
-            from crewai_playground.event_listener import CustomJSONEncoder
-
-            test_message = {
-                "type": "connection_test",
-                "status": "connected",
-                "timestamp": datetime.datetime.now(),
-            }
-            await websocket.send_text(json.dumps(test_message, cls=CustomJSONEncoder))
-            logging.info("Test message sent to WebSocket client")
-        except Exception as e:
-            logging.error(f"Failed to send test message: {str(e)}", exc_info=True)
-
+        # Send confirmation message
+        await websocket.send_json({
+            "type": "connection_established",
+            "client_id": client_id,
+            "crew_id": crew_id,
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        
         # Keep the connection open and handle messages
         while True:
-            # Wait for messages from the client (if any)
+            # Wait for messages from the client
             try:
                 data = await websocket.receive_text()
-                logging.debug(f"Received message from client: {data}")
-                # Currently we don't expect any messages from the client
-                # but we could handle them here if needed
+                logging.debug(f"Received message from client {client_id}: {data}")
+                
+                try:
+                    message = json.loads(data)
+                    msg_type = message.get("type", "")
+                    
+                    # Handle crew registration message
+                    if msg_type == "register_crew":
+                        new_crew_id = message.get("crew_id")
+                        if new_crew_id:
+                            await crew_visualization_listener.register_client_for_crew(
+                                client_id, new_crew_id
+                            )
+                            await websocket.send_json({
+                                "type": "crew_registered",
+                                "crew_id": new_crew_id
+                            })
+                    
+                    # Handle state request message
+                    elif msg_type == "request_state":
+                        await crew_visualization_listener.send_state_to_client(client_id)
+                        
+                    # Handle ping message for heartbeat
+                    elif msg_type == "ping":
+                        await websocket.send_json({"type": "pong"})
+                        
+                except json.JSONDecodeError:
+                    logging.error(f"Invalid JSON message from client {client_id}: {data}")
+                    
             except WebSocketDisconnect:
                 # Handle disconnection
-                logging.info("WebSocket client disconnected")
-                crew_visualization_listener.disconnect(websocket)
+                logging.info(f"WebSocket client {client_id} disconnected")
+                crew_visualization_listener.disconnect(client_id)
                 break
     except WebSocketDisconnect:
-        logging.info("WebSocket disconnected during handshake")
-        crew_visualization_listener.disconnect(websocket)
+        logging.info(f"WebSocket client {client_id} disconnected during handshake")
+        crew_visualization_listener.disconnect(client_id)
     except Exception as e:
-        logging.error(f"WebSocket error: {str(e)}", exc_info=True)
+        logging.error(f"WebSocket error for client {client_id}: {str(e)}", exc_info=True)
         # Try to disconnect if there was an error
         try:
-            crew_visualization_listener.disconnect(websocket)
-        except:
+            crew_visualization_listener.disconnect(client_id)
+        except Exception as disconnect_error:
+            logging.error(f"Error disconnecting client {client_id}: {str(disconnect_error)}")
             pass
 
 

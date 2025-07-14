@@ -70,7 +70,7 @@ export default function Kickoff() {
         const data = await response.json();
         if (data.crews) {
           setCrews(data.crews);
-          
+
           // Automatically select the first crew if none is selected
           if (data.crews.length > 0 && !selectedCrewId) {
             setSelectedCrewId(data.crews[0].id);
@@ -160,7 +160,7 @@ export default function Kickoff() {
     setError(null);
     setResult(null);
     setIsRunningCrew(true);
-    setResetKey(prev => prev + 1); // Increment reset key to trigger state reset
+    setResetKey((prev) => prev + 1); // Increment reset key to trigger state reset
 
     // Convert input fields to the expected format
     const inputs: Record<string, string> = {};
@@ -219,9 +219,7 @@ export default function Kickoff() {
 
       {crewDetails && (
         <div className="p-4 rounded-lg border bg-accent/50">
-          <h3 className="text-lg font-semibold mb-2">
-            {crewDetails.name}
-          </h3>
+          <h3 className="text-lg font-semibold mb-2">{crewDetails.name}</h3>
           <p className="text-sm text-muted-foreground">
             {crewDetails.description}
           </p>
@@ -269,9 +267,7 @@ export default function Kickoff() {
           <Button
             type="submit"
             className="w-full"
-            disabled={
-              loading || inputFields.some((field) => !field.value)
-            }
+            disabled={loading || inputFields.some((field) => !field.value)}
           >
             {loading ? (
               <>
@@ -298,11 +294,11 @@ export default function Kickoff() {
 
       {/* Crew Agent Visualization Canvas */}
       {selectedCrewId && (
-        <CrewAgentCanvas 
-        crewId={selectedCrewId} 
-        isRunning={isRunningCrew} 
-        resetKey={resetKey}
-      />
+        <CrewAgentCanvas
+          crewId={selectedCrewId}
+          isRunning={isRunningCrew}
+          resetKey={resetKey}
+        />
       )}
 
       {!error && !selectedCrewId && (
@@ -310,8 +306,8 @@ export default function Kickoff() {
           <div className="text-center max-w-md">
             <h2 className="text-2xl font-bold mb-2">Run a Crew Directly</h2>
             <p className="text-muted-foreground mb-4">
-              Select a crew from the sidebar, provide the required inputs,
-              and run it to see results here.
+              Select a crew from the sidebar, provide the required inputs, and
+              run it to see results here.
             </p>
             {loading && (
               <div className="flex justify-center mt-8">
@@ -321,8 +317,6 @@ export default function Kickoff() {
           </div>
         </div>
       )}
-
-      {/* Results are now displayed in the CrewAgentCanvas component */}
     </Layout>
   );
 }
