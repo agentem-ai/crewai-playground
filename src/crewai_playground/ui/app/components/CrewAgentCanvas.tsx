@@ -15,8 +15,19 @@ import {
   MarkerType,
   ConnectionLineType,
   Handle,
+  applyNodeChanges,
+  applyEdgeChanges,
+  useReactFlow,
 } from "@xyflow/react";
-import type { NodeTypes, Node, Edge, NodeProps } from "@xyflow/react";
+import type { 
+  NodeTypes, 
+  Node, 
+  Edge, 
+  NodeProps,
+  NodeChange,
+  EdgeChange,
+  ReactFlowInstance 
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 
@@ -378,10 +389,17 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
     agents: [],
     tasks: [],
   });
-  const initialNodes: Node[] = [];
-  const initialEdges: Edge[] = [];
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    []
+  );
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    []
+  );
   const [connectionStatus, setConnectionStatus] = useState<
     "connecting" | "connected" | "disconnected"
   >("connecting");
@@ -667,6 +685,16 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
     };
   }, [crewId, resetKey, connectWebSocket, initializeCrew]);
 
+  // Center the graph when nodes change or when a new crew is selected
+  useEffect(() => {
+    if (reactFlowInstance && nodes.length > 0) {
+      // Use a small timeout to ensure the graph is rendered before centering
+      setTimeout(() => {
+        reactFlowInstance.fitView({ padding: 0.2 });
+      }, 50);
+    }
+  }, [nodes.length, reactFlowInstance, crewId, resetKey]);
+
   // Update nodes and edges when state changes
   useEffect(() => {
     if (!state.crew && !state.agents.length && !state.tasks.length) {
@@ -902,6 +930,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
           minZoom={0.5}
           maxZoom={1.5}
           elementsSelectable={true}
+          onInit={setReactFlowInstance}
         >
           <Background color="#aaa" gap={16} />
           <Controls />
