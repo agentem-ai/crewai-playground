@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { v4 as uuidv4 } from 'uuid'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -53,6 +54,8 @@ interface ChatState {
   toggleDarkMode: () => void
   updateChatTitle: (chatId: string, title: string) => void
   updateChatThread: (chatId: string, updates: Partial<Omit<ChatThread, 'id' | 'messages' | 'lastUpdated'>>) => void
+  findChatByCrewId: (crewId: string) => string | null
+  generateUUID: () => string
 }
 
 export const useChatStore = create<ChatState>()(
@@ -64,6 +67,20 @@ export const useChatStore = create<ChatState>()(
       currentChatId: null,
       chatHistory: {},
       isDarkMode: false,
+
+      generateUUID: () => uuidv4(),
+
+      findChatByCrewId: (crewId: string) => {
+        const { chatHistory } = get();
+        const chatEntries = Object.entries(chatHistory);
+        
+        // Sort by lastUpdated to get the most recent chat for this crew
+        const sortedChats = chatEntries.sort((a, b) => b[1].lastUpdated - a[1].lastUpdated);
+        
+        // Find the first chat with matching crew ID
+        const matchingChat = sortedChats.find(([_, chat]) => chat.crewId === crewId);
+        return matchingChat ? matchingChat[0] : null;
+      },
 
       setCrews: (crews) => set({ crews }),
       setFlows: (flows) => set({ flows }),
