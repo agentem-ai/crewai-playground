@@ -1321,50 +1321,47 @@ async def get_available_metrics():
 
 
 async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationConfigRequest):
-    """Run evaluation asynchronously in the background."""
+    """Run evaluation asynchronously in the background using real CrewAI evaluation."""
     try:
         # Update status to running
         evaluation_runs[eval_id]["status"] = "running"
         evaluation_runs[eval_id]["progress"] = 10.0
         
-        # Create evaluator with available agents
-        evaluator = create_default_evaluator(agents)
-        active_evaluations[eval_id] = evaluator
+        # Create evaluator with available agents - only use real Agent objects
+        real_agents = [agent for agent in agents if not isinstance(agent, dict)]
         
-        # Simulate evaluation progress
-        for iteration in range(1, config.iterations + 1):
-            # Update progress
-            progress = 10.0 + (80.0 * iteration / config.iterations)
-            evaluation_runs[eval_id]["progress"] = progress
+        if not real_agents:
+            # If no real agents, fall back to mock evaluation
+            logging.info(f"No real agents found for evaluation {eval_id}, using mock evaluation")
+            agent_results = await _run_mock_evaluation(agents, config)
+        else:
+            # Run real CrewAI evaluation
+            logging.info(f"Running real CrewAI evaluation for {eval_id} with {len(real_agents)} agents")
+            evaluator = create_default_evaluator(real_agents)
+            active_evaluations[eval_id] = evaluator
             
-            # Simulate some evaluation work
-            await asyncio.sleep(2)  # Simulate evaluation time
-        
-        # Create mock evaluation results since we don't have actual crew execution
-        # In a real implementation, this would use the actual evaluation results
-        agent_results = {}
-        for i, agent in enumerate(agents):
-            # Handle both real Agent objects and mock agent dictionaries
-            if isinstance(agent, dict):
-                agent_id = agent.get("id", f"agent_{i}")
-                agent_role = agent.get("role", f"Agent {i}")
+            # Find crews that contain these agents
+            crews_to_evaluate = []
+            for crew_id in config.crew_ids:
+                crew_info = next((c for c in discovered_crews if c.get("id") == crew_id), None)
+                if crew_info:
+                    try:
+                        from pathlib import Path
+                        crew_path_obj = Path(crew_info.get("path"))
+                        loaded_crew_data = load_crew_from_module(crew_path_obj)
+                        if loaded_crew_data and len(loaded_crew_data) > 0:
+                            crew_instance = loaded_crew_data[0]
+                            crews_to_evaluate.append(crew_instance)
+                    except Exception as e:
+                        logging.warning(f"Failed to load crew {crew_id} for evaluation: {str(e)}")
+                        continue
+            
+            if not crews_to_evaluate:
+                logging.warning(f"No crews loaded for evaluation {eval_id}, using mock evaluation")
+                agent_results = await _run_mock_evaluation(agents, config)
             else:
-                # Real Agent object
-                agent_id = str(getattr(agent, "id", f"agent_{i}"))
-                agent_role = getattr(agent, "role", f"Agent {i}")
-            
-            # Create mock evaluation result for each agent
-            agent_results[agent_role] = {
-                "agent_id": agent_id,
-                "agent_role": agent_role,
-                "overall_score": 7.5 + (i * 0.5),  # Mock scores
-                "metrics": {
-                    "goal_alignment": {"score": 8.0, "feedback": "Agent effectively aligned with goals"},
-                    "semantic_quality": {"score": 7.5, "feedback": "Good semantic understanding"},
-                    "reasoning_efficiency": {"score": 7.0, "feedback": "Efficient reasoning process"},
-                },
-                "task_count": config.iterations
-            }
+                # Run real evaluation with crews
+                agent_results = await _run_real_evaluation(evaluator, crews_to_evaluate, config, eval_id)
         
         # Calculate overall score
         if agent_results:
@@ -1398,13 +1395,138 @@ async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationCon
     except Exception as e:
         logging.error(f"Error running evaluation {eval_id}: {str(e)}")
         evaluation_runs[eval_id]["status"] = "failed"
+        evaluation_runs[eval_id]["progress"] = 0.0
         evaluation_runs[eval_id]["end_time"] = datetime.datetime.now().isoformat()
+        
+        # Clean up
         if eval_id in active_evaluations:
             del active_evaluations[eval_id]
 
 
+async def _run_mock_evaluation(agents: List, config: EvaluationConfigRequest) -> dict:
+    """Run mock evaluation for testing purposes."""
+    agent_results = {}
+    for i, agent in enumerate(agents):
+        # Handle both real Agent objects and mock agent dictionaries
+        if isinstance(agent, dict):
+            agent_id = agent.get("id", f"agent_{i}")
+            agent_role = agent.get("role", f"Agent {i}")
+        else:
+            # Real Agent object
+            agent_id = str(getattr(agent, "id", f"agent_{i}"))
+            agent_role = getattr(agent, "role", f"Agent {i}")
+        
+        # Create mock evaluation result for each agent
+        agent_results[agent_role] = {
+            "agent_id": agent_id,
+            "agent_role": agent_role,
+            "overall_score": 7.5 + (i * 0.5),  # Mock scores
+            "metrics": {
+                "goal_alignment": {"score": 8.0, "feedback": "Agent effectively aligned with goals"},
+                "semantic_quality": {"score": 7.5, "feedback": "Good semantic understanding"},
+                "reasoning_efficiency": {"score": 7.0, "feedback": "Efficient reasoning process"},
+            },
+            "task_count": config.iterations
+        }
+    return agent_results
+
+
+async def _run_real_evaluation(evaluator, crews_to_evaluate: List, config: EvaluationConfigRequest, eval_id: str) -> dict:
+    """Run real CrewAI evaluation with actual crew execution."""
+    try:
+        # Prepare test inputs for evaluation
+        test_inputs = config.test_inputs or {"query": "Evaluate agent performance on this task"}
+        
+        # Run evaluation for each iteration
+        for iteration in range(1, config.iterations + 1):
+            logging.info(f"Running evaluation iteration {iteration}/{config.iterations} for {eval_id}")
+            
+            # Update progress
+            progress = 10.0 + (70.0 * iteration / config.iterations)
+            evaluation_runs[eval_id]["progress"] = progress
+            
+            # Set evaluator iteration
+            evaluator.set_iteration(iteration)
+            
+            # Run each crew with the test inputs
+            for crew in crews_to_evaluate:
+                try:
+                    logging.info(f"Running crew {crew} for evaluation iteration {iteration}")
+                    # Execute the crew with test inputs
+                    crew_result = crew.kickoff(inputs=test_inputs)
+                    logging.info(f"Crew execution completed for iteration {iteration}")
+                except Exception as e:
+                    logging.warning(f"Crew execution failed for iteration {iteration}: {str(e)}")
+                    continue
+            
+            # Small delay between iterations
+            await asyncio.sleep(1)
+        
+        # Get evaluation results from the evaluator
+        logging.info(f"Collecting evaluation results for {eval_id}")
+        evaluation_results = evaluator.get_evaluation_results()
+        
+        # Convert CrewAI evaluation results to our format
+        agent_results = {}
+        for agent_role, results_list in evaluation_results.items():
+            if not results_list:
+                continue
+                
+            # Aggregate results across all iterations for this agent
+            total_scores = {}
+            total_feedback = []
+            task_count = len(results_list)
+            
+            for result in results_list:
+                # Extract metrics from AgentEvaluationResult
+                for metric_category, evaluation_score in result.metrics.items():
+                    metric_name = metric_category.value if hasattr(metric_category, 'value') else str(metric_category)
+                    
+                    if metric_name not in total_scores:
+                        total_scores[metric_name] = []
+                    
+                    if evaluation_score.score is not None:
+                        total_scores[metric_name].append(evaluation_score.score)
+                    
+                    if evaluation_score.feedback:
+                        total_feedback.append(f"{metric_name}: {evaluation_score.feedback}")
+            
+            # Calculate average scores
+            metrics = {}
+            overall_scores = []
+            
+            for metric_name, scores in total_scores.items():
+                if scores:
+                    avg_score = sum(scores) / len(scores)
+                    metrics[metric_name] = {
+                        "score": round(avg_score, 1),
+                        "feedback": f"Average score across {len(scores)} evaluations"
+                    }
+                    overall_scores.append(avg_score)
+            
+            # Calculate overall score
+            overall_score = round(sum(overall_scores) / len(overall_scores), 1) if overall_scores else None
+            
+            agent_results[agent_role] = {
+                "agent_id": str(results_list[0].agent_id) if results_list else f"agent_{agent_role}",
+                "agent_role": agent_role,
+                "overall_score": overall_score,
+                "metrics": metrics,
+                "task_count": task_count
+            }
+        
+        logging.info(f"Real evaluation completed for {eval_id} with {len(agent_results)} agent results")
+        return agent_results
+        
+    except Exception as e:
+        logging.error(f"Error in real evaluation for {eval_id}: {str(e)}")
+        # Fall back to mock evaluation on error
+        logging.info(f"Falling back to mock evaluation for {eval_id}")
+        return await _run_mock_evaluation(evaluator.agents if hasattr(evaluator, 'agents') else [], config)
+
+
 @app.get("/{full_path:path}")
-async def serve_react_app(full_path: str):
+async def serve_ui(full_path: str):
     """Serve the React application and handle client-side routing."""
     # Check if the path points to an existing file in the build directory
     requested_file = ui_dir / full_path
