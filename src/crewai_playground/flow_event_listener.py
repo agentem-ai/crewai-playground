@@ -62,6 +62,7 @@ class FlowWebSocketEventListener:
 
     def __init__(self):
         self.flow_states = {}
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._registered_buses = set()
 
     def setup_listeners(self, crewai_event_bus):
@@ -75,6 +76,12 @@ class FlowWebSocketEventListener:
             logger.info(f"Flow listeners already set up for event bus {bus_id}.")
             return
 
+        # Capture the current running loop for safe scheduling
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.loop = None
+
         logger.info(f"Setting up new flow listeners for event bus {bus_id}")
         self._registered_buses.add(bus_id)
 
@@ -85,13 +92,13 @@ class FlowWebSocketEventListener:
         def handle_flow_started(source, event: FlowStartedEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
             logger.info(f"Flow started event received for flow: {flow_id}")
-            asyncio.create_task(listener_self._handle_flow_started(flow_id, event))
+            listener_self._schedule(listener_self._handle_flow_started(flow_id, event))
 
         @crewai_event_bus.on(FlowFinishedEvent)
         def handle_flow_finished(source, event: FlowFinishedEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
             logger.info(f"Flow finished event received for flow: {flow_id}")
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_flow_finished(flow_id, event, source)
             )
 
@@ -102,7 +109,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Method execution started event received for flow: {flow_id}, method: {event.method_name}"
             )
-            asyncio.create_task(listener_self._handle_method_started(flow_id, event))
+            listener_self._schedule(listener_self._handle_method_started(flow_id, event))
 
         @crewai_event_bus.on(MethodExecutionFinishedEvent)
         def handle_method_execution_finished(
@@ -112,7 +119,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Method execution finished event received for flow: {flow_id}, method: {event.method_name}"
             )
-            asyncio.create_task(listener_self._handle_method_finished(flow_id, event))
+            listener_self._schedule(listener_self._handle_method_finished(flow_id, event))
 
         @crewai_event_bus.on(MethodExecutionFailedEvent)
         def handle_method_execution_failed(source, event: MethodExecutionFailedEvent):
@@ -120,7 +127,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Method execution failed event received for flow: {flow_id}, method: {event.method_name}"
             )
-            asyncio.create_task(listener_self._handle_method_failed(flow_id, event))
+            listener_self._schedule(listener_self._handle_method_failed(flow_id, event))
 
         # Crew Events
         @crewai_event_bus.on(CrewKickoffStartedEvent)
@@ -129,7 +136,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew kickoff started event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_crew_kickoff_started(flow_id, event)
             )
 
@@ -139,7 +146,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew kickoff completed event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_crew_kickoff_completed(flow_id, event)
             )
 
@@ -149,7 +156,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew kickoff failed event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_crew_kickoff_failed(flow_id, event)
             )
 
@@ -159,7 +166,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew test started event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(listener_self._handle_crew_test_started(flow_id, event))
+            listener_self._schedule(listener_self._handle_crew_test_started(flow_id, event))
 
         @crewai_event_bus.on(CrewTestCompletedEvent)
         def handle_crew_test_completed(source, event: CrewTestCompletedEvent):
@@ -167,7 +174,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew test completed event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_crew_test_completed(flow_id, event)
             )
 
@@ -177,7 +184,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew test failed event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(listener_self._handle_crew_test_failed(flow_id, event))
+            listener_self._schedule(listener_self._handle_crew_test_failed(flow_id, event))
 
         @crewai_event_bus.on(CrewTrainStartedEvent)
         def handle_crew_train_started(source, event: CrewTrainStartedEvent):
@@ -185,7 +192,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew train started event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_crew_train_started(flow_id, event)
             )
 
@@ -195,7 +202,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew train completed event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_crew_train_completed(flow_id, event)
             )
 
@@ -205,7 +212,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Crew train failed event received for flow: {flow_id}, crew: {event.crew_name}"
             )
-            asyncio.create_task(listener_self._handle_crew_train_failed(flow_id, event))
+            listener_self._schedule(listener_self._handle_crew_train_failed(flow_id, event))
 
         # Agent Events
         @crewai_event_bus.on(AgentExecutionStartedEvent)
@@ -219,7 +226,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Agent execution started event received for flow: {flow_id}, agent role: {agent_role}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_agent_execution_started(flow_id, event)
             )
 
@@ -236,7 +243,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Agent execution completed event received for flow: {flow_id}, agent role: {agent_role}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_agent_execution_completed(flow_id, event)
             )
 
@@ -251,7 +258,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Agent execution error event received for flow: {flow_id}, agent role: {agent_role}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_agent_execution_error(flow_id, event)
             )
 
@@ -262,7 +269,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Tool usage started event received for flow: {flow_id}, tool: {event.tool_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_tool_usage_started(flow_id, event)
             )
 
@@ -272,7 +279,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Tool usage finished event received for flow: {flow_id}, tool: {event.tool_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_tool_usage_finished(flow_id, event)
             )
 
@@ -282,7 +289,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Tool usage error event received for flow: {flow_id}, tool: {event.tool_name}"
             )
-            asyncio.create_task(listener_self._handle_tool_usage_error(flow_id, event))
+            listener_self._schedule(listener_self._handle_tool_usage_error(flow_id, event))
 
         @crewai_event_bus.on(ToolValidateInputErrorEvent)
         def handle_tool_validate_input_error(
@@ -292,7 +299,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Tool validate input error event received for flow: {flow_id}, tool: {event.tool_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_tool_validate_input_error(flow_id, event)
             )
 
@@ -302,7 +309,7 @@ class FlowWebSocketEventListener:
             logger.info(
                 f"Tool execution error event received for flow: {flow_id}, tool: {event.tool_name}"
             )
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_tool_execution_error(flow_id, event)
             )
 
@@ -310,7 +317,7 @@ class FlowWebSocketEventListener:
         def handle_tool_selection_error(source, event: ToolSelectionErrorEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
             logger.info(f"Tool selection error event received for flow: {flow_id}")
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_tool_selection_error(flow_id, event)
             )
 
@@ -319,13 +326,13 @@ class FlowWebSocketEventListener:
         def handle_llm_call_started(source, event: LLMCallStartedEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
             # Not logging LLM calls to avoid noise
-            asyncio.create_task(listener_self._handle_llm_call_started(flow_id, event))
+            listener_self._schedule(listener_self._handle_llm_call_started(flow_id, event))
 
         @crewai_event_bus.on(LLMCallCompletedEvent)
         def handle_llm_call_completed(source, event: LLMCallCompletedEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
             # Not logging LLM calls to avoid noise
-            asyncio.create_task(
+            listener_self._schedule(
                 listener_self._handle_llm_call_completed(flow_id, event)
             )
 
@@ -333,15 +340,25 @@ class FlowWebSocketEventListener:
         def handle_llm_call_failed(source, event: LLMCallFailedEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
             logger.info(f"LLM call failed event received for flow: {flow_id}")
-            asyncio.create_task(listener_self._handle_llm_call_failed(flow_id, event))
+            listener_self._schedule(listener_self._handle_llm_call_failed(flow_id, event))
 
         @crewai_event_bus.on(LLMStreamChunkEvent)
         def handle_llm_stream_chunk(source, event: LLMStreamChunkEvent):
             flow_id = getattr(source, "flow_id", str(getattr(source, "id", id(source))))
             # Not logging LLM stream chunks to avoid noise
-            asyncio.create_task(listener_self._handle_llm_stream_chunk(flow_id, event))
+            listener_self._schedule(listener_self._handle_llm_stream_chunk(flow_id, event))
 
         logger.info(f"Finished setting up flow event listeners for bus {bus_id}")
+
+    def _schedule(self, coro: 'coroutine'):
+        """Schedule coroutine safely on an event loop."""
+        try:
+            asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            if self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro, self.loop)
+            else:
+                logger.debug("Event dropped: no running loop available for scheduling")
 
     async def _handle_flow_started(self, flow_id: str, event: FlowStartedEvent):
         """Handle flow started event asynchronously."""

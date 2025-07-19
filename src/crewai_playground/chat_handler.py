@@ -60,7 +60,7 @@ class ChatHandler:
         self.is_initialized = False
 
         # Register event listeners
-        from crewai_playground.event_listener import crew_visualization_listener
+        from crewai_playground.flow_event_listener import flow_websocket_listener as crew_visualization_listener
 
         crew_visualization_listener.setup_listeners(crewai_event_bus)
 
@@ -72,7 +72,7 @@ class ChatHandler:
         This allows the visualization to display agents before the crew starts running.
         """
         try:
-            from crewai_playground.event_listener import crew_visualization_listener
+            from crewai_playground.flow_event_listener import flow_websocket_listener as crew_visualization_listener
             import uuid
 
             # Get or create a crew ID
