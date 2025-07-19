@@ -658,6 +658,60 @@ export default function EvaluationsPage() {
                   </div>
 
                   <div className="space-y-2">
+                    <Label>Evaluation Metrics</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Select which metrics to evaluate agents on. Leave empty to use all available metrics.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto border rounded-md p-3">
+                      {metrics && Array.isArray(metrics) && metrics.length > 0 ? (
+                        metrics.map((metric) => (
+                          <div
+                            key={metric.id}
+                            className="flex items-start space-x-2"
+                          >
+                            <input
+                              type="checkbox"
+                              id={`metric-${metric.id}`}
+                              checked={newEvaluation.metric_categories?.includes(metric.id) || false}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setNewEvaluation((prev) => ({
+                                    ...prev,
+                                    metric_categories: [...(prev.metric_categories || []), metric.id],
+                                  }));
+                                } else {
+                                  setNewEvaluation((prev) => ({
+                                    ...prev,
+                                    metric_categories: (prev.metric_categories || []).filter(
+                                      (id) => id !== metric.id
+                                    ),
+                                  }));
+                                }
+                              }}
+                              className="rounded mt-1"
+                            />
+                            <div className="flex-1">
+                              <Label
+                                htmlFor={`metric-${metric.id}`}
+                                className="text-sm font-medium cursor-pointer"
+                              >
+                                {metric.name}
+                              </Label>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {metric.description}
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-span-2 text-center text-muted-foreground py-4">
+                          {metrics.length === 0 ? "Loading metrics..." : "No metrics available"}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label>Aggregation Strategy</Label>
                     <Select
                       value={newEvaluation.aggregation_strategy}
@@ -674,7 +728,10 @@ export default function EvaluationsPage() {
                       <SelectContent>
                         {aggregationStrategies.map((strategy) => (
                           <SelectItem key={strategy.id} value={strategy.id}>
-                            {strategy.name}
+                            <div className="flex flex-col">
+                              <span>{strategy.name}</span>
+                              <span className="text-xs text-muted-foreground">{strategy.description}</span>
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectContent>
