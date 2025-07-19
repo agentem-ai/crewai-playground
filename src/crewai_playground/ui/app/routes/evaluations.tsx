@@ -8,12 +8,6 @@ import {
 } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "../components/ui/tabs";
 import { Progress } from "../components/ui/progress";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -25,6 +19,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
 import {
   Play,
   BarChart3,
@@ -45,6 +45,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { Layout } from "../components/Layout";
 
 interface EvaluationRun {
   id: string;
@@ -329,7 +330,8 @@ export default function EvaluationsPage() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <Layout>
+      <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -922,6 +924,7 @@ export default function EvaluationsPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </Layout>
   );
 }
