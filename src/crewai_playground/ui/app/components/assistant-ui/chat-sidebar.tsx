@@ -33,11 +33,12 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
     deleteChat,
     toggleDarkMode,
     findChatByCrewId,
+    generateUUID,
   } = useChatStore();
 
   // Generate a new chat ID
   const generateChatId = () => {
-    return Math.random().toString(36).substring(2, 15);
+    return generateUUID();
   };
 
   // Set initial chat when component mounts
