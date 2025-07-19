@@ -421,12 +421,19 @@ class FlowWebSocketEventListener:
     def _schedule(self, coro: 'coroutine'):
         """Schedule coroutine safely on an event loop."""
         try:
-            asyncio.get_running_loop().create_task(coro)
+            # Create task and store reference to avoid "never awaited" warnings
+            task = asyncio.get_running_loop().create_task(coro)
+            # Add done callback to handle any exceptions
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
         except RuntimeError:
             if self.loop and self.loop.is_running():
-                asyncio.run_coroutine_threadsafe(coro, self.loop)
+                future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+                # Add done callback to handle any exceptions
+                future.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
             else:
                 logger.debug("Event dropped: no running loop available for scheduling")
+                # Close the coroutine to avoid warnings
+                coro.close()
 
     async def _handle_flow_started(self, flow_id: str, event: FlowStartedEvent):
         """Handle flow started event asynchronously."""
