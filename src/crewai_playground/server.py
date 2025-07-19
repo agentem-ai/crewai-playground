@@ -1474,9 +1474,9 @@ async def run_evaluation_async(
         # Calculate overall score
         if agent_results:
             overall_scores = [
-                result["overall_score"]
+                result.get("overall_score")
                 for result in agent_results.values()
-                if result["overall_score"] is not None
+                if result.get("overall_score") is not None
             ]
             overall_score = (
                 sum(overall_scores) / len(overall_scores) if overall_scores else None
