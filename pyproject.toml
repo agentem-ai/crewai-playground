@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crewai-playground"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 authors = [{ name = "Lennex Zinyando", email = "brizdigital@gmail.com" }]
 description = "CrewAI playground web interface"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "crewai>=0.134.0",
+  "crewai>=0.148.0",
   "click>=8.2.1",
   "fastapi>=0.115.14",
   "uvicorn>=0.35.0",
