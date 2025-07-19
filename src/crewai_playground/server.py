@@ -70,11 +70,6 @@ from crewai_playground.websocket_utils import (
 )
 from crewai_playground.flow_event_listener import flow_websocket_listener
 from crewai.utilities.events import crewai_event_bus
-from crewai.utilities.events.agent_events import (
-    AgentEvaluationStartedEvent,
-    AgentEvaluationCompletedEvent,
-    AgentEvaluationFailedEvent,
-)
 
 # CrewAI Evaluation imports
 try:
@@ -90,6 +85,9 @@ try:
     )
 
     EVALUATION_AVAILABLE = True
+
+    # Register the official evaluation trace callback once at startup
+    create_evaluation_callbacks().setup_listeners(crewai_event_bus)
 
     # Simple aggregation strategy enum since it's not available in the module
     class AggregationStrategy:
@@ -1520,236 +1518,94 @@ async def run_evaluation_async(
 
 
 async def _run_real_evaluation(
-    evaluator,
+    evaluator: "AgentEvaluator",
     crews_to_evaluate: List,
     config: EvaluationConfigRequest,
     eval_id: str,
     agents: List = None,
 ) -> dict:
-    """Run real CrewAI evaluation with actual crew execution."""
-    try:
-        # Prepare test inputs for evaluation
-        test_inputs = config.test_inputs or {
-            "query": "Evaluate agent performance on this task"
-        }
+    """Run CrewAI evaluation using the official EvaluationTraceCallback.
 
-        # Dictionary to collect all evaluation events across iterations
-        all_evaluation_events = {"started": [], "completed": [], "failed": []}
+    The evaluation trace callback is already registered at startup via
+    `create_evaluation_callbacks().setup_listeners(crewai_event_bus)` so the
+    `AgentEvaluator` will automatically emit `AgentEvaluation*` events and keep
+    track of results.  We simply run each crew, then ask the evaluator for the
+    aggregated results of the current iteration.
+    """
 
-        # Run evaluation for each iteration
-        for iteration in range(1, config.iterations + 1):
-            logging.info(
-                f"Running evaluation iteration {iteration}/{config.iterations} for {eval_id}"
-            )
+    # Fallback if evaluation subsystem is disabled
+    if not EVALUATION_AVAILABLE:
+        raise RuntimeError("CrewAI evaluation module not available")
 
-            # Update progress
-            progress = 10.0 + (70.0 * iteration / config.iterations)
-            evaluation_runs[eval_id]["progress"] = progress
+    # Ensure evaluator has a clean state before starting
+    evaluator.reset_iterations_results()
 
-            # Set evaluator iteration
-            evaluator.set_iteration(iteration)
+    # Default test inputs if none provided
+    test_inputs = config.test_inputs or {
+        "query": "Evaluate agent performance on this task"
+    }
 
-            # Run each crew with the test inputs
-            for crew in crews_to_evaluate:
-                try:
-                    # Create a dictionary to collect events for this crew execution
-                    iteration_events = {"started": [], "completed": [], "failed": []}
+    overall_agent_results: dict[str, Any] = {}
 
-                    # Use scoped handlers to ensure proper event capture
-                    with crewai_event_bus.scoped_handlers():
-                        # Register event handlers for evaluation events
-                        @crewai_event_bus.on(AgentEvaluationStartedEvent)
-                        def capture_started(source, event):
-                            logging.info(
-                                f"Captured evaluation started event: {event.agent_id}"
-                            )
-                            iteration_events["started"].append(event)
-                            all_evaluation_events["started"].append(event)
-
-                        @crewai_event_bus.on(AgentEvaluationCompletedEvent)
-                        def capture_completed(source, event):
-                            logging.info(
-                                f"Captured evaluation completed event: {event.agent_id}"
-                            )
-                            iteration_events["completed"].append(event)
-                            all_evaluation_events["completed"].append(event)
-
-                        @crewai_event_bus.on(AgentEvaluationFailedEvent)
-                        def capture_failed(source, event):
-                            logging.error(
-                                f"Captured evaluation failed event: {event.agent_id} - {event.error}"
-                            )
-                            iteration_events["failed"].append(event)
-                            all_evaluation_events["failed"].append(event)
-
-                        # Execute the crew with test inputs and properly await it
-                        logging.info(f"Executing crew for iteration {iteration}")
-                        await crew.kickoff_async(inputs=test_inputs)
-
-                        results = evaluator.get_evaluation_results()
-                        print("Evaluation results", results)
-
-                        # Log event capture summary
-                        logging.info(
-                            f"Captured {len(iteration_events['started'])} started, "
-                            f"{len(iteration_events['completed'])} completed, and "
-                            f"{len(iteration_events['failed'])} failed events for iteration {iteration}"
-                        )
-
-                except Exception as e:
-                    logging.error(f"Error: {str(e)}")
-                    continue
-
-            # Small delay between iterations
-            await asyncio.sleep(1)
-
-        # Log event capture summary for all iterations
+    for iteration in range(1, config.iterations + 1):
         logging.info(
-            f"Total captured events for {eval_id}: "
-            f"{len(all_evaluation_events['started'])} started, "
-            f"{len(all_evaluation_events['completed'])} completed, and "
-            f"{len(all_evaluation_events['failed'])} failed events"
+            "Running evaluation iteration %s/%s for %s",
+            iteration,
+            config.iterations,
+            eval_id,
         )
 
-        # Get evaluation results from the evaluator
-        logging.info(f"Collecting evaluation results for {eval_id}")
-        evaluation_results = evaluator.get_evaluation_results()
-        print(f"Raw evaluation results for {eval_id}: {evaluation_results}")
+        # Update progress indicator (10-80 % range)
+        evaluation_runs[eval_id]["progress"] = 10.0 + (
+            70.0 * iteration / config.iterations
+        )
 
-        # Convert CrewAI evaluation results to our format
-        agent_results = {}
+        # Tell evaluator which iteration we're in
+        evaluator.set_iteration(iteration)
 
-        if not evaluation_results:
-            # Enhanced error message with event counts to help diagnose issues
-            error_msg = f"No evaluation results returned from evaluator for {eval_id}."
-            logging.error(error_msg)
+        # Kick off each crew with the provided test inputs
+        for crew in crews_to_evaluate:
+            await crew.kickoff_async(inputs=test_inputs)
 
-            # If we have failed events, include their errors in the exception
-            if all_evaluation_events["failed"]:
-                error_details = [
-                    f"{e.agent_id}: {e.error}" for e in all_evaluation_events["failed"]
-                ]
-                error_msg += f" Failures: {'; '.join(error_details)}"
+        # Aggregate results for this iteration using SIMPLE_AVERAGE strategy
+        iteration_results = evaluator.get_agent_evaluation(
+            strategy=AggregationStrategy.SIMPLE_AVERAGE,
+            include_evaluation_feedback=True,
+        )
+        logging.debug("Iteration %s results: %s", iteration, iteration_results)
 
-            raise RuntimeError(error_msg)
-
-        # Process evaluation results by agent role
-        for agent_role, results_list in evaluation_results.items():
-            if not results_list:
-                logging.warning(
-                    f"No results for agent {agent_role} in evaluation {eval_id}"
-                )
-                continue
-
-            # Aggregate results across all iterations for this agent
-            total_scores = {}
-            total_feedback = []
-            task_count = len(results_list)
-            agent_id = None
-
-            # Process each evaluation result for this agent
-            for result in results_list:
-                # Store agent_id for consistent reference
-                if agent_id is None and hasattr(result, "agent_id"):
-                    agent_id = str(result.agent_id)
-
-                # Extract metrics from AgentEvaluationResult
-                for metric_category, evaluation_score in result.metrics.items():
-                    # Handle different metric category formats
-                    metric_name = (
-                        metric_category.value
-                        if hasattr(metric_category, "value")
-                        else str(metric_category)
-                    )
-
-                    if metric_name not in total_scores:
-                        total_scores[metric_name] = []
-
-                    # Add score if available
-                    if evaluation_score.score is not None:
-                        total_scores[metric_name].append(evaluation_score.score)
-
-                    # Add feedback if available
-                    if evaluation_score.feedback:
-                        total_feedback.append(
-                            f"{metric_name}: {evaluation_score.feedback}"
-                        )
-
-            # Calculate average scores and format metrics
-            metrics = {}
-            overall_scores = []
-
-            for metric_name, scores in total_scores.items():
-                if scores:
-                    avg_score = sum(scores) / len(scores)
-                    metrics[metric_name] = {
-                        "score": round(avg_score, 1),
-                        "feedback": f"Average score across {len(scores)} evaluations",
-                        "color": _get_score_color(
-                            avg_score
-                        ),  # Add color coding based on score
-                    }
-                    overall_scores.append(avg_score)
-
-            # Calculate overall score from metrics
-            if overall_scores:
-                overall_score = round(sum(overall_scores) / len(overall_scores), 1)
-                overall_color = _get_score_color(overall_score)
-            else:
-                # No scores captured - this indicates an evaluation system issue
-                logging.error(
-                    f"No metric scores captured for agent {agent_role} in evaluation {eval_id}"
-                )
-                overall_score = None
-                overall_color = None
-                metrics = {}
-
-            # Create the agent result entry
-            agent_results[agent_role] = {
-                "agent_id": agent_id or f"agent_{agent_role}",
-                "agent_role": agent_role,
-                "overall_score": overall_score,
-                "overall_color": overall_color,
-                "metrics": metrics,
-                "task_count": task_count,
-                "feedback": (
-                    total_feedback
-                    if total_feedback
-                    else ["No detailed feedback available"]
-                ),
-            }
-
-        # Calculate summary statistics
-        total_agents = len(agent_results)
-        all_agent_scores = [
-            ar["overall_score"]
-            for ar in agent_results.values()
-            if ar["overall_score"] is not None
-        ]
-
-        # Add summary information to the results
-        result = {
-            "agent_results": agent_results,
-            "summary": {
-                "overall_score": (
-                    round(sum(all_agent_scores) / len(all_agent_scores), 1)
-                    if all_agent_scores
-                    else None
-                ),
-                "total_agents": total_agents,
-                "aggregation_strategy": config.aggregation_strategy,
-            },
+        # Overwrite running tally (last iteration wins – can be adjusted)
+        overall_agent_results = {
+            role: (res.model_dump() if hasattr(res, "model_dump") else res.__dict__)
+            for role, res in iteration_results.items()
         }
 
-        logging.info(
-            f"Real evaluation completed for {eval_id} with {len(agent_results)} agent results"
-        )
-        return result
+        # Yield to event loop briefly to avoid blocking
+        await asyncio.sleep(0)
 
-    except Exception as e:
-        logging.error(f"Error in real evaluation for {eval_id}: {str(e)}")
-        # Re-raise the error since we don't support mock fallbacks
-        raise RuntimeError(f"Real evaluation failed for {eval_id}: {str(e)}") from e
+    # Build summary statistics
+    scores = [
+        r.get("overall_score")
+        for r in overall_agent_results.values()
+        if r.get("overall_score") is not None
+    ]
+    overall_score = round(sum(scores) / len(scores), 1) if scores else None
+
+    result = {
+        "agent_results": overall_agent_results,
+        "summary": {
+            "overall_score": overall_score,
+            "total_agents": len(overall_agent_results),
+            "aggregation_strategy": config.aggregation_strategy,
+        },
+    }
+
+    logging.info(
+        "Real evaluation completed for %s with %d agent results",
+        eval_id,
+        len(overall_agent_results),
+    )
+    return result
 
 
 def _get_score_color(score):
