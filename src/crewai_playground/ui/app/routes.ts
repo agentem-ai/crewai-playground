@@ -8,4 +8,5 @@ export default [
   { path: "tools", file: "routes/tools.tsx" },
   { path: "flow", file: "routes/flow.tsx" },
   { path: "flow/traces", file: "routes/flow.traces.tsx" },
+  { path: "evaluations", file: "routes/evaluations.tsx" },
 ] satisfies RouteConfig;
