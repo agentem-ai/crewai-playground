@@ -1,5 +1,5 @@
 import { type ReactNode, useState, useEffect } from "react";
-import { useSearchParams } from "react-router";
+import { useSearchParams, useNavigate } from "react-router";
 import { Moon, Plus, Sun, Trash2 } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import {
@@ -19,6 +19,7 @@ interface ChatSidebarProps {
 
 export const ChatSidebar = ({ children }: ChatSidebarProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [chatToDelete, setChatToDelete] = useState<string | null>(null);
   const {
     crews,
@@ -210,26 +211,19 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
 
   // Handle chat selection
   const handleChatSelect = (chatId: string) => {
-    setCurrentChat(chatId);
     const chat = chatHistory[chatId];
+    if (!chat) return;
 
     // Update localStorage with selected chat
     localStorage.setItem("crewai_chat_id", chatId);
     if (chat.crewId) {
       localStorage.setItem("crewai_crew_id", chat.crewId);
-      // Only update current crew if it's different to avoid unnecessary state changes
-      if (currentCrewId !== chat.crewId) {
-        setCurrentCrew(chat.crewId);
-      }
     }
 
-    setSearchParams((params) => {
-      params.set("chatId", chatId);
-      if (chat.crewId) {
-        params.set("crew", chat.crewId);
-      }
-      return params;
-    });
+    // Navigate to the chat URL to trigger proper crew initialization
+    // This will cause the CrewAIChatUIRuntimeProvider to handle crew changes properly
+    const chatUrl = `/chat?chatId=${chatId}${chat.crewId ? `&crew=${chat.crewId}` : ''}`;
+    navigate(chatUrl);
   };
 
   // Handle chat deletion

@@ -138,6 +138,9 @@ export function CrewAIChatUIRuntimeProvider({
       const storedChatId = localStorage.getItem('crewai_chat_id');
       const storedCrewId = localStorage.getItem('crewai_crew_id');
       
+      // Prioritize selectedCrewId from URL params over localStorage
+      const effectiveCrewId = selectedCrewId || storedCrewId;
+      
       // Determine which chat ID to use
       let chatId;
       
@@ -148,19 +151,53 @@ export function CrewAIChatUIRuntimeProvider({
         
         // Update URL if needed
         if (window.location.pathname.includes('/chat/')) {
-          navigate(`/chat/${chatId}?crew=${storedCrewId || ''}`);
+          navigate(`/chat/${chatId}?crew=${effectiveCrewId || ''}`);
+        }
+        
+        // Initialize crew context for existing chat if we have a crew ID
+        if (effectiveCrewId) {
+          console.log('Initializing existing chat with crew:', { chatId, crewId: effectiveCrewId });
+          try {
+            const response = await fetch(`/api/initialize`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                chat_id: chatId,
+                crew_id: effectiveCrewId,
+              }),
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === "success") {
+              console.log('Successfully initialized existing chat with crew');
+              if (data.message) {
+                addMessage(chatId, {
+                  role: 'assistant',
+                  content: data.message,
+                  timestamp: Date.now(),
+                });
+              }
+            } else {
+              console.error("Failed to initialize existing chat with crew", data);
+            }
+          } catch (error) {
+            console.error("Error initializing existing chat with crew", error);
+          }
         }
       } else {
         // Otherwise use current chat ID or generate a new one
         chatId = currentChatId || generateUUID();
         
         // Check if we already have a chat for this crew
-        if (currentCrewId) {
-          const existingChatId = findChatByCrewId(currentCrewId);
+        if (effectiveCrewId) {
+          const existingChatId = findChatByCrewId(effectiveCrewId);
           if (existingChatId) {
             chatId = existingChatId;
           } else {
-            createChat(chatId, currentCrewId);
+            createChat(chatId, effectiveCrewId);
           }
         } else {
           createChat(chatId, null);
@@ -168,10 +205,10 @@ export function CrewAIChatUIRuntimeProvider({
         
         setCurrentChat(chatId);
         
-        // Store the new chat ID
+        // Store the new chat ID and effective crew ID
         localStorage.setItem('crewai_chat_id', chatId);
-        if (currentCrewId) {
-          localStorage.setItem('crewai_crew_id', currentCrewId);
+        if (effectiveCrewId) {
+          localStorage.setItem('crewai_crew_id', effectiveCrewId);
         }
         
         // Only initialize with API if it's a new chat
@@ -182,7 +219,7 @@ export function CrewAIChatUIRuntimeProvider({
           },
           body: JSON.stringify({
             chat_id: chatId,
-            crew_id: currentCrewId,
+            crew_id: effectiveCrewId,
           }),
         });
         
@@ -238,15 +275,19 @@ export function CrewAIChatUIRuntimeProvider({
       prevCrewId: prevCrewIdRef.current 
     });
     
-    // Skip the initial render or if we don't have a selected crew ID
+    // Skip if we don't have a selected crew ID
     if (!selectedCrewId) {
       console.log('Skipping crew change - missing crew ID');
       return;
     }
     
-    // Only proceed if the crew ID has actually changed
-    if (prevCrewIdRef.current === selectedCrewId) {
-      console.log('Skipping crew change - crew ID unchanged');
+    // Always proceed if this is the first time (prevCrewIdRef.current is null)
+    // or if the crew ID has actually changed
+    const isFirstTime = prevCrewIdRef.current === null;
+    const hasCrewChanged = prevCrewIdRef.current !== selectedCrewId;
+    
+    if (!isFirstTime && !hasCrewChanged) {
+      console.log('Skipping crew change - crew ID unchanged and not first time');
       return;
     }
     
