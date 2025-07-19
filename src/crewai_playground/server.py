@@ -1472,38 +1472,22 @@ async def _run_real_evaluation(evaluator, crews_to_evaluate: List, config: Evalu
         agent_results = {}
         
         if not evaluation_results:
-            logging.warning(f"No evaluation results returned from evaluator for {eval_id}")
-            # Create fallback results based on the agents that were evaluated
-            if agents:
-                for i, agent in enumerate(agents):
-                    agent_role = getattr(agent, 'role', f'Agent_{i+1}')
-                    agent_results[agent_role] = {
-                        "agent_id": getattr(agent, 'id', f'agent_{i+1}'),
-                        "agent_role": agent_role,
-                        "overall_score": 7.5,  # Default score indicating successful execution
-                        "metrics": {
-                            "goal_alignment": {"score": 7.5, "feedback": "Agent completed tasks successfully"},
-                            "semantic_quality": {"score": 7.5, "feedback": "Output quality was satisfactory"},
-                            "reasoning_efficiency": {"score": 7.5, "feedback": "Reasoning process was efficient"}
-                        },
-                        "task_count": config.iterations
-                    }
-            else:
-                # Fallback when no agents provided
-                agent_results["default_agent"] = {
-                    "agent_id": "default_agent",
-                    "agent_role": "Default Agent",
-                    "overall_score": 7.0,
-                    "metrics": {
-                        "execution_success": {"score": 7.0, "feedback": "Evaluation completed successfully"}
-                    },
-                    "task_count": config.iterations
-                }
-        else:
-            for agent_role, results_list in evaluation_results.items():
-                if not results_list:
-                    logging.warning(f"No results for agent {agent_role} in evaluation {eval_id}")
-                    continue
+            logging.error(f"No evaluation results returned from evaluator for {eval_id}")
+            raise RuntimeError(
+                f"Evaluation {eval_id} failed to capture any results. "
+                f"This indicates that the CrewAI evaluation system did not properly capture execution events. "
+                f"Please ensure that:"
+                f"\n1. The crew has real CrewAI agents (not mock data)"
+                f"\n2. The agents are properly configured and functional"
+                f"\n3. The crew execution completes successfully"
+                f"\n4. The evaluation callback is properly integrated with the event system"
+            )
+        
+        # Process real evaluation results only
+        for agent_role, results_list in evaluation_results.items():
+            if not results_list:
+                logging.warning(f"No results for agent {agent_role} in evaluation {eval_id}")
+                continue
                     
                 # Aggregate results across all iterations for this agent
                 total_scores = {}
@@ -1537,15 +1521,14 @@ async def _run_real_evaluation(evaluator, crews_to_evaluate: List, config: Evalu
                         }
                         overall_scores.append(avg_score)
                 
-                # Calculate overall score - ensure we always have a score
+                # Calculate overall score from real evaluation metrics only
                 if overall_scores:
                     overall_score = round(sum(overall_scores) / len(overall_scores), 1)
                 else:
-                    # Fallback score if no metrics were captured
-                    overall_score = 7.0
-                    metrics = {
-                        "execution_success": {"score": 7.0, "feedback": "Task completed successfully"}
-                    }
+                    # No real scores captured - this indicates an evaluation system issue
+                    logging.error(f"No metric scores captured for agent {agent_role} in evaluation {eval_id}")
+                    overall_score = None
+                    metrics = {}
                 
                 agent_results[agent_role] = {
                     "agent_id": str(results_list[0].agent_id) if results_list else f"agent_{agent_role}",
