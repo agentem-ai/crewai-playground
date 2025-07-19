@@ -241,12 +241,29 @@ export default function EvaluationsPage() {
     try {
       const response = await fetch("/api/evaluations/metrics");
       const data = await response.json();
+      console.log('Metrics API response:', data); // Debug log
       if (data.status === "success") {
-        setMetrics(data.data.metrics);
-        setAggregationStrategies(data.data.aggregation_strategies);
+        setMetrics(data.data.metrics || []);
+        setAggregationStrategies(data.data.aggregation_strategies || []);
+      } else {
+        console.error('Metrics API error:', data);
+        // Fallback aggregation strategies
+        setAggregationStrategies([
+          { id: "simple_average", name: "Simple Average", description: "Equal weight to all tasks" },
+          { id: "weighted_by_complexity", name: "Weighted by Complexity", description: "Weight by task complexity" },
+          { id: "best_performance", name: "Best Performance", description: "Use best scores across tasks" },
+          { id: "worst_performance", name: "Worst Performance", description: "Use worst scores across tasks" }
+        ]);
       }
     } catch (error) {
       console.error("Error fetching metrics:", error);
+      // Fallback aggregation strategies on error
+      setAggregationStrategies([
+        { id: "simple_average", name: "Simple Average", description: "Equal weight to all tasks" },
+        { id: "weighted_by_complexity", name: "Weighted by Complexity", description: "Weight by task complexity" },
+        { id: "best_performance", name: "Best Performance", description: "Use best scores across tasks" },
+        { id: "worst_performance", name: "Worst Performance", description: "Use worst scores across tasks" }
+      ]);
     }
   };
 
