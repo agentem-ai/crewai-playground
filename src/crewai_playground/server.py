@@ -1584,7 +1584,7 @@ async def _run_real_evaluation(
 
                         # Execute the crew with test inputs and properly await it
                         logging.info(f"Executing crew for iteration {iteration}")
-                        crew.kickoff(inputs=test_inputs)
+                        await crew.kickoff_async(inputs=test_inputs)
 
                         results = evaluator.get_evaluation_results()
                         print("Evaluation results", results)
