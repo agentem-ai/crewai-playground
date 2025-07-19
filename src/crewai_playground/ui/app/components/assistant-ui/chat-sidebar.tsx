@@ -32,6 +32,7 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
     createChat,
     deleteChat,
     toggleDarkMode,
+    findChatByCrewId,
   } = useChatStore();
 
   // Generate a new chat ID
@@ -169,10 +170,41 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
   // Handle crew selection
   const handleCrewChange = (crewId: string) => {
     setCurrentCrew(crewId);
-    setSearchParams((params) => {
-      params.set("crew", crewId);
-      return params;
-    });
+    
+    // Check if there's an existing chat for this crew
+    const existingChatId = findChatByCrewId(crewId);
+    
+    if (existingChatId) {
+      // Open the existing chat for this crew
+      setCurrentChat(existingChatId);
+      
+      // Update localStorage
+      localStorage.setItem("crewai_chat_id", existingChatId);
+      localStorage.setItem("crewai_crew_id", crewId);
+      
+      // Update URL params
+      setSearchParams((params) => {
+        params.set("chatId", existingChatId);
+        params.set("crew", crewId);
+        return params;
+      });
+    } else {
+      // No existing chat for this crew, create a new one
+      const newChatId = generateChatId();
+      createChat(newChatId, crewId, "New Chat");
+      setCurrentChat(newChatId);
+      
+      // Update localStorage
+      localStorage.setItem("crewai_chat_id", newChatId);
+      localStorage.setItem("crewai_crew_id", crewId);
+      
+      // Update URL params
+      setSearchParams((params) => {
+        params.set("chatId", newChatId);
+        params.set("crew", crewId);
+        return params;
+      });
+    }
   };
 
   // Handle chat selection
@@ -184,6 +216,10 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
     localStorage.setItem("crewai_chat_id", chatId);
     if (chat.crewId) {
       localStorage.setItem("crewai_crew_id", chat.crewId);
+      // Only update current crew if it's different to avoid unnecessary state changes
+      if (currentCrewId !== chat.crewId) {
+        setCurrentCrew(chat.crewId);
+      }
     }
 
     setSearchParams((params) => {

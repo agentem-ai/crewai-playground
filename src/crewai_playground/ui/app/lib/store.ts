@@ -120,8 +120,6 @@ export const useChatStore = create<ChatState>()(
           
           const crew = state.crews.find((c) => c.id === crewId)
           return {
-            currentChatId: chatId,
-            currentCrewId: crewId || state.currentCrewId,
             chatHistory: {
               ...state.chatHistory,
               [chatId]: {
