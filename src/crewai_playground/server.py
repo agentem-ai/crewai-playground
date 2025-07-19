@@ -53,7 +53,7 @@ from crewai_playground.crew_loader import (
     discover_available_crews,
 )
 from crewai_playground.chat_handler import ChatHandler
-from crewai_playground.event_listener import crew_visualization_listener
+from crewai_playground.flow_event_listener import flow_websocket_listener as crew_visualization_listener
 from crewai_playground.tool_loader import discover_available_tools as discover_tools
 from crewai_playground.telemetry import telemetry_service
 from crewai_playground.flow_api import (
