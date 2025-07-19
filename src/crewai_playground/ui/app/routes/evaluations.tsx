@@ -225,7 +225,7 @@ export default function EvaluationsPage() {
       const data = await response.json();
       if (data.status === "success") {
         setCrews(
-          data.data.crews.map((crew: any) => ({
+          data.crews.map((crew: any) => ({
             id: crew.id,
             name: crew.name,
             description: crew.description,
