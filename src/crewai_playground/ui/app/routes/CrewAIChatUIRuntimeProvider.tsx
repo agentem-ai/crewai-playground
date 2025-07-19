@@ -334,14 +334,58 @@ export function CrewAIChatUIRuntimeProvider({
             navigate(`/chat/${chatId}?crew=${selectedCrewId}`);
           }
           
-          // Add system message indicating crew change
-          addMessage(chatId, {
-            role: 'system',
-            content: `Switched to existing chat with ${crewName}.`,
-            timestamp: Date.now(),
-          });
+          // Call the API to initialize crew context for the existing chat
+          const payload = {
+            chat_id: chatId,
+            crew_id: selectedCrewId,
+          };
+          console.log('Calling /api/initialize for existing chat with payload:', payload);
           
-          // No need to call API since we're using an existing chat
+          try {
+            const response = await fetch(`/api/initialize`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === "success") {
+              console.log('Successfully initialized existing chat with crew');
+              // Update the chat thread with the crew info
+              updateChatThread(chatId, {
+                crewId: selectedCrewId,
+                crewName: crewName,
+              });
+              
+              // Add welcome message from the assistant if provided
+              if (data.message) {
+                addMessage(chatId, {
+                  role: 'assistant',
+                  content: data.message,
+                  timestamp: Date.now(),
+                });
+              }
+            } else {
+              console.error("Failed to initialize existing chat with crew", data);
+              // Add fallback system message
+              addMessage(chatId, {
+                role: 'system',
+                content: `Switched to existing chat with ${crewName}.`,
+                timestamp: Date.now(),
+              });
+            }
+          } catch (error) {
+            console.error("Error initializing existing chat with crew", error);
+            // Add fallback system message
+            addMessage(chatId, {
+              role: 'system',
+              content: `Switched to existing chat with ${crewName}.`,
+              timestamp: Date.now(),
+            });
+          }
         } else {
           console.log('Creating new chat for crew:', selectedCrewId);
           // Create a new chat for this crew
