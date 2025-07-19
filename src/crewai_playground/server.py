@@ -1149,6 +1149,81 @@ async def create_evaluation(config: EvaluationConfigRequest):
         raise HTTPException(status_code=500, detail=f"Error creating evaluation: {str(e)}")
 
 
+@app.get("/api/evaluations/metrics")
+async def get_available_metrics():
+    """Get list of available evaluation metrics."""
+    if not EVALUATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Evaluation features not available")
+    
+    try:
+        metrics = [
+            {
+                "id": "goal_alignment",
+                "name": "Goal Alignment",
+                "description": "Evaluates how well the agent's output aligns with the given goal"
+            },
+            {
+                "id": "semantic_quality",
+                "name": "Semantic Quality",
+                "description": "Assesses the semantic quality and coherence of the agent's output"
+            },
+            {
+                "id": "reasoning_efficiency",
+                "name": "Reasoning Efficiency",
+                "description": "Measures the efficiency of the agent's reasoning process"
+            },
+            {
+                "id": "tool_selection",
+                "name": "Tool Selection",
+                "description": "Evaluates the appropriateness of tool selection and usage"
+            },
+            {
+                "id": "parameter_extraction",
+                "name": "Parameter Extraction",
+                "description": "Assesses the accuracy of parameter extraction for tool calls"
+            },
+            {
+                "id": "tool_invocation",
+                "name": "Tool Invocation",
+                "description": "Evaluates the correctness of tool invocation and usage"
+            }
+        ]
+        
+        aggregation_strategies = [
+            {
+                "id": "simple_average",
+                "name": "Simple Average",
+                "description": "Equal weight to all tasks"
+            },
+            {
+                "id": "weighted_by_complexity",
+                "name": "Weighted by Complexity",
+                "description": "Weight by task complexity"
+            },
+            {
+                "id": "best_performance",
+                "name": "Best Performance",
+                "description": "Use best scores across tasks"
+            },
+            {
+                "id": "worst_performance",
+                "name": "Worst Performance",
+                "description": "Use worst scores across tasks"
+            }
+        ]
+        
+        return {
+            "status": "success",
+            "data": {
+                "metrics": metrics,
+                "aggregation_strategies": aggregation_strategies
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error fetching available metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching available metrics: {str(e)}")
+
+
 @app.get("/api/evaluations/{evaluation_id}")
 async def get_evaluation(evaluation_id: str):
     """Get detailed information about a specific evaluation run."""
@@ -1245,79 +1320,7 @@ async def delete_evaluation(evaluation_id: str):
         raise HTTPException(status_code=500, detail=f"Error deleting evaluation: {str(e)}")
 
 
-@app.get("/api/evaluations/metrics")
-async def get_available_metrics():
-    """Get list of available evaluation metrics."""
-    if not EVALUATION_AVAILABLE:
-        raise HTTPException(status_code=501, detail="Evaluation features not available")
-    
-    try:
-        metrics = [
-            {
-                "id": "goal_alignment",
-                "name": "Goal Alignment",
-                "description": "Evaluates how well the agent's output aligns with the given goal"
-            },
-            {
-                "id": "semantic_quality",
-                "name": "Semantic Quality",
-                "description": "Assesses the semantic quality and coherence of the agent's output"
-            },
-            {
-                "id": "reasoning_efficiency",
-                "name": "Reasoning Efficiency",
-                "description": "Measures the efficiency of the agent's reasoning process"
-            },
-            {
-                "id": "tool_selection",
-                "name": "Tool Selection",
-                "description": "Evaluates the appropriateness of tool selection and usage"
-            },
-            {
-                "id": "parameter_extraction",
-                "name": "Parameter Extraction",
-                "description": "Assesses the accuracy of parameter extraction for tool calls"
-            },
-            {
-                "id": "tool_invocation",
-                "name": "Tool Invocation",
-                "description": "Evaluates the correctness of tool invocation and usage"
-            }
-        ]
-        
-        aggregation_strategies = [
-            {
-                "id": "simple_average",
-                "name": "Simple Average",
-                "description": "Equal weight to all tasks"
-            },
-            {
-                "id": "weighted_by_complexity",
-                "name": "Weighted by Complexity",
-                "description": "Weight by task complexity"
-            },
-            {
-                "id": "best_performance",
-                "name": "Best Performance",
-                "description": "Use best scores across tasks"
-            },
-            {
-                "id": "worst_performance",
-                "name": "Worst Performance",
-                "description": "Use worst scores across tasks"
-            }
-        ]
-        
-        return {
-            "status": "success",
-            "data": {
-                "metrics": metrics,
-                "aggregation_strategies": aggregation_strategies
-            }
-        }
-    except Exception as e:
-        logging.error(f"Error fetching available metrics: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching available metrics: {str(e)}")
+
 
 
 async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationConfigRequest):
