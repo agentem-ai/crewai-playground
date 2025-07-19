@@ -156,6 +156,11 @@ export function CrewAIChatUIRuntimeProvider({
         
         // Initialize crew context for existing chat if we have a crew ID
         if (effectiveCrewId) {
+          // Check if initialization is needed to prevent double calls
+          if (!shouldInitialize(chatId, effectiveCrewId)) {
+            return;
+          }
+          
           console.log('Initializing existing chat with crew:', { chatId, crewId: effectiveCrewId });
           try {
             const response = await fetch(`/api/initialize`, {
@@ -266,6 +271,23 @@ export function CrewAIChatUIRuntimeProvider({
   // Ref to track previous crew ID to detect changes
   const prevCrewIdRef = useRef<string | null>(null);
   
+  // Ref to track initialization state to prevent double initialization
+  const initializationStateRef = useRef<Set<string>>(new Set());
+  
+  // Helper function to create unique initialization key
+  const getInitializationKey = (chatId: string, crewId: string) => `${chatId}-${crewId}`;
+  
+  // Helper function to check if initialization is needed
+  const shouldInitialize = (chatId: string, crewId: string) => {
+    const key = getInitializationKey(chatId, crewId);
+    if (initializationStateRef.current.has(key)) {
+      console.log('Skipping initialization - already completed for:', { chatId, crewId });
+      return false;
+    }
+    initializationStateRef.current.add(key);
+    return true;
+  };
+  
   // Effect to handle crew changes and initialize appropriate chat
   useEffect(() => {
     console.log('Crew change effect triggered:', { 
@@ -332,6 +354,11 @@ export function CrewAIChatUIRuntimeProvider({
           // Update URL if needed
           if (window.location.pathname.includes('/chat/')) {
             navigate(`/chat/${chatId}?crew=${selectedCrewId}`);
+          }
+          
+          // Check if initialization is needed to prevent double calls
+          if (!shouldInitialize(chatId, selectedCrewId)) {
+            return;
           }
           
           // Call the API to initialize crew context for the existing chat
@@ -402,6 +429,9 @@ export function CrewAIChatUIRuntimeProvider({
           // Store the new chat ID
           localStorage.setItem('crewai_chat_id', chatId);
           localStorage.setItem('crewai_crew_id', selectedCrewId);
+          
+          // Mark initialization as in progress for new chat
+          initializationStateRef.current.add(getInitializationKey(chatId, selectedCrewId));
           
           // Call the API to initialize with the new crew
           const payload = {
