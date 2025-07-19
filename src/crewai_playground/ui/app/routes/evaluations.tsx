@@ -26,6 +26,14 @@ import {
   TabsTrigger,
 } from "../components/ui/tabs";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../components/ui/dialog";
+import {
   Play,
   BarChart3,
   Clock,
@@ -43,6 +51,7 @@ import {
   Users,
   Target,
   Zap,
+  X,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Layout } from "../components/Layout";
@@ -173,7 +182,7 @@ export default function EvaluationsPage() {
     useState<EvaluationResults | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Form state for creating new evaluations
   const [newEvaluation, setNewEvaluation] = useState<EvaluationConfig>({
@@ -182,7 +191,15 @@ export default function EvaluationsPage() {
     metric_categories: [],
     iterations: 1,
     aggregation_strategy: "simple_average",
+    test_inputs: {},
   });
+  const [testInputsJson, setTestInputsJson] = useState<string>(
+    JSON.stringify(
+      { query: "Evaluate agent performance on this task" },
+      null,
+      2
+    )
+  );
 
   // Fetch data on component mount
   useEffect(() => {
@@ -241,28 +258,60 @@ export default function EvaluationsPage() {
     try {
       const response = await fetch("/api/evaluations/metrics");
       const data = await response.json();
-      console.log('Metrics API response:', data); // Debug log
+      console.log("Metrics API response:", data); // Debug log
       if (data.status === "success") {
         setMetrics(data.data.metrics || []);
         setAggregationStrategies(data.data.aggregation_strategies || []);
       } else {
-        console.error('Metrics API error:', data);
+        console.error("Metrics API error:", data);
         // Fallback aggregation strategies
         setAggregationStrategies([
-          { id: "simple_average", name: "Simple Average", description: "Equal weight to all tasks" },
-          { id: "weighted_by_complexity", name: "Weighted by Complexity", description: "Weight by task complexity" },
-          { id: "best_performance", name: "Best Performance", description: "Use best scores across tasks" },
-          { id: "worst_performance", name: "Worst Performance", description: "Use worst scores across tasks" }
+          {
+            id: "simple_average",
+            name: "Simple Average",
+            description: "Equal weight to all tasks",
+          },
+          {
+            id: "weighted_by_complexity",
+            name: "Weighted by Complexity",
+            description: "Weight by task complexity",
+          },
+          {
+            id: "best_performance",
+            name: "Best Performance",
+            description: "Use best scores across tasks",
+          },
+          {
+            id: "worst_performance",
+            name: "Worst Performance",
+            description: "Use worst scores across tasks",
+          },
         ]);
       }
     } catch (error) {
       console.error("Error fetching metrics:", error);
       // Fallback aggregation strategies on error
       setAggregationStrategies([
-        { id: "simple_average", name: "Simple Average", description: "Equal weight to all tasks" },
-        { id: "weighted_by_complexity", name: "Weighted by Complexity", description: "Weight by task complexity" },
-        { id: "best_performance", name: "Best Performance", description: "Use best scores across tasks" },
-        { id: "worst_performance", name: "Worst Performance", description: "Use worst scores across tasks" }
+        {
+          id: "simple_average",
+          name: "Simple Average",
+          description: "Equal weight to all tasks",
+        },
+        {
+          id: "weighted_by_complexity",
+          name: "Weighted by Complexity",
+          description: "Weight by task complexity",
+        },
+        {
+          id: "best_performance",
+          name: "Best Performance",
+          description: "Use best scores across tasks",
+        },
+        {
+          id: "worst_performance",
+          name: "Worst Performance",
+          description: "Use worst scores across tasks",
+        },
       ]);
     }
   };
@@ -285,26 +334,48 @@ export default function EvaluationsPage() {
       return;
     }
 
+    // Parse and validate test inputs JSON
+    let parsedTestInputs = {};
+    try {
+      parsedTestInputs = JSON.parse(testInputsJson);
+    } catch (error) {
+      alert("Invalid JSON in test inputs. Please check the format.");
+      return;
+    }
+
     setIsCreating(true);
     try {
+      const evaluationData = {
+        ...newEvaluation,
+        test_inputs: parsedTestInputs,
+      };
+
       const response = await fetch("/api/evaluations", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(newEvaluation),
+        body: JSON.stringify(evaluationData),
       });
 
       const data = await response.json();
       if (data.status === "success") {
-        setShowCreateForm(false);
+        setShowCreateModal(false);
         setNewEvaluation({
           name: "",
           crew_ids: [],
           metric_categories: [],
           iterations: 1,
           aggregation_strategy: "simple_average",
+          test_inputs: {},
         });
+        setTestInputsJson(
+          JSON.stringify(
+            { query: "Evaluate agent performance on this task" },
+            null,
+            2
+          )
+        );
         fetchEvaluations();
       } else {
         alert("Error creating evaluation: " + data.detail);
@@ -349,450 +420,511 @@ export default function EvaluationsPage() {
   return (
     <Layout>
       <div className="container mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Agent Evaluations
-          </h1>
-          <p className="text-muted-foreground">
-            Evaluate and analyze agent performance across multiple metrics and
-            iterations
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Filter className="h-4 w-4 mr-2" />
-            Filter
-          </Button>
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fetchEvaluations()}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Button onClick={() => setShowCreateForm(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Evaluation
-          </Button>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total Evaluations
-            </CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{evaluationRuns.length}</div>
-            <p className="text-xs text-muted-foreground">
-              {evaluationRuns.filter((r) => r.status === "completed").length}{" "}
-              completed
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              Agent Evaluations
+            </h1>
+            <p className="text-muted-foreground">
+              Evaluate and analyze agent performance across multiple metrics and
+              iterations
             </p>
-          </CardContent>
-        </Card>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm">
+              <Filter className="h-4 w-4 mr-2" />
+              Filter
+            </Button>
+            <Button variant="outline" size="sm">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchEvaluations()}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            <Button onClick={() => setShowCreateModal(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Evaluation
+            </Button>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Average Score</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div
-              className={cn(
-                "text-2xl font-bold",
-                (() => {
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total Evaluations
+              </CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{evaluationRuns.length}</div>
+              <p className="text-xs text-muted-foreground">
+                {evaluationRuns.filter((r) => r.status === "completed").length}{" "}
+                completed
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Average Score
+              </CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div
+                className={cn(
+                  "text-2xl font-bold",
+                  (() => {
+                    const completedRuns = evaluationRuns.filter(
+                      (r) => r.status === "completed" && r.overallScore
+                    );
+                    if (completedRuns.length === 0)
+                      return "text-muted-foreground";
+                    const avgScore =
+                      completedRuns.reduce(
+                        (sum, r) => sum + (r.overallScore || 0),
+                        0
+                      ) / completedRuns.length;
+                    return getScoreColor(avgScore);
+                  })()
+                )}
+              >
+                {(() => {
                   const completedRuns = evaluationRuns.filter(
                     (r) => r.status === "completed" && r.overallScore
                   );
-                  if (completedRuns.length === 0)
-                    return "text-muted-foreground";
+                  if (completedRuns.length === 0) return "-";
                   const avgScore =
                     completedRuns.reduce(
                       (sum, r) => sum + (r.overallScore || 0),
                       0
                     ) / completedRuns.length;
-                  return getScoreColor(avgScore);
-                })()
-              )}
-            >
-              {(() => {
-                const completedRuns = evaluationRuns.filter(
-                  (r) => r.status === "completed" && r.overallScore
-                );
-                if (completedRuns.length === 0) return "-";
-                const avgScore =
-                  completedRuns.reduce(
-                    (sum, r) => sum + (r.overallScore || 0),
-                    0
-                  ) / completedRuns.length;
-                return avgScore.toFixed(1);
-              })()}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {evaluationRuns.filter((r) => r.status === "completed").length}{" "}
-              evaluations
-            </p>
-          </CardContent>
-        </Card>
+                  return avgScore.toFixed(1);
+                })()}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {evaluationRuns.filter((r) => r.status === "completed").length}{" "}
+                evaluations
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Runs</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {evaluationRuns.filter((r) => r.status === "running").length}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {evaluationRuns.filter((r) => r.status === "pending").length}{" "}
-              pending
-            </p>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Active Runs</CardTitle>
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {evaluationRuns.filter((r) => r.status === "running").length}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {evaluationRuns.filter((r) => r.status === "pending").length}{" "}
+                pending
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Agents Evaluated
-            </CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {evaluationRuns.reduce((sum, r) => sum + r.agentCount, 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">Across all runs</p>
-          </CardContent>
-        </Card>
-      </div>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Agents Evaluated
+              </CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {evaluationRuns.reduce((sum, r) => sum + r.agentCount, 0)}
+              </div>
+              <p className="text-xs text-muted-foreground">Across all runs</p>
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* Main Content */}
-      <Tabs
-        value={selectedTab}
-        onValueChange={setSelectedTab}
-        className="space-y-4"
-      >
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="results">Results</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          <TabsTrigger value="configuration">Configuration</TabsTrigger>
-        </TabsList>
+        {/* Main Content */}
+        <Tabs
+          value={selectedTab}
+          onValueChange={setSelectedTab}
+          className="space-y-4"
+        >
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="results">Results</TabsTrigger>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            <TabsTrigger value="configuration">Configuration</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="overview" className="space-y-4">
-          {/* Create Evaluation Form */}
-          {showCreateForm && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Create New Evaluation</CardTitle>
-                <CardDescription>
-                  Configure and start a new agent evaluation run
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="eval-name">Evaluation Name</Label>
-                    <Input
-                      id="eval-name"
-                      placeholder="Enter evaluation name"
-                      value={newEvaluation.name}
-                      onChange={(e) =>
-                        setNewEvaluation((prev) => ({
-                          ...prev,
-                          name: e.target.value,
-                        }))
-                      }
-                    />
+          <TabsContent value="overview" className="space-y-4">
+            {/* Create Evaluation Modal */}
+            <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+              <DialogContent className="max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>Create New Evaluation</DialogTitle>
+                  <DialogDescription>
+                    Configure and start a new agent evaluation run with custom
+                    test inputs
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="eval-name">Evaluation Name</Label>
+                      <Input
+                        id="eval-name"
+                        placeholder="Enter evaluation name"
+                        value={newEvaluation.name}
+                        onChange={(e) =>
+                          setNewEvaluation((prev) => ({
+                            ...prev,
+                            name: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="iterations">Iterations</Label>
+                      <Input
+                        id="iterations"
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={newEvaluation.iterations}
+                        onChange={(e) =>
+                          setNewEvaluation((prev) => ({
+                            ...prev,
+                            iterations: parseInt(e.target.value) || 1,
+                          }))
+                        }
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="iterations">Iterations</Label>
-                    <Input
-                      id="iterations"
-                      type="number"
-                      min="1"
-                      max="10"
-                      value={newEvaluation.iterations}
-                      onChange={(e) =>
+                    <Label>Select Crews to Evaluate</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-32 overflow-y-auto border rounded-md p-3">
+                      {crews && Array.isArray(crews) && crews.length > 0 ? (
+                        crews.map((crew) => (
+                          <div
+                            key={crew.id}
+                            className="flex items-center space-x-2"
+                          >
+                            <input
+                              type="checkbox"
+                              id={`crew-${crew.id}`}
+                              checked={newEvaluation.crew_ids.includes(crew.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setNewEvaluation((prev) => ({
+                                    ...prev,
+                                    crew_ids: [...prev.crew_ids, crew.id],
+                                  }));
+                                } else {
+                                  setNewEvaluation((prev) => ({
+                                    ...prev,
+                                    crew_ids: prev.crew_ids.filter(
+                                      (id) => id !== crew.id
+                                    ),
+                                  }));
+                                }
+                              }}
+                              className="rounded"
+                            />
+                            <Label
+                              htmlFor={`crew-${crew.id}`}
+                              className="text-sm"
+                            >
+                              {crew.name}
+                            </Label>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-span-2 text-center text-muted-foreground py-4">
+                          No crews available. Please create crews first.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Aggregation Strategy</Label>
+                    <Select
+                      value={newEvaluation.aggregation_strategy}
+                      onValueChange={(value) =>
                         setNewEvaluation((prev) => ({
                           ...prev,
-                          iterations: parseInt(e.target.value) || 1,
+                          aggregation_strategy: value,
                         }))
                       }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {aggregationStrategies.map((strategy) => (
+                          <SelectItem key={strategy.id} value={strategy.id}>
+                            {strategy.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Test Inputs Section */}
+                  <div className="space-y-2">
+                    <Label htmlFor="test-inputs">Test Inputs (JSON)</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Define the inputs that will be passed to crews during
+                      evaluation. These inputs are used by{" "}
+                      <code>crew.kickoff(inputs=test_inputs)</code> for real
+                      CrewAI evaluations.
+                    </p>
+                    <Textarea
+                      id="test-inputs"
+                      placeholder="Enter test inputs as JSON..."
+                      value={testInputsJson}
+                      onChange={(e) => setTestInputsJson(e.target.value)}
+                      rows={8}
+                      className="font-mono text-sm"
                     />
+                    <div className="text-xs text-muted-foreground">
+                      <strong>Example:</strong>{" "}
+                      {`{"query": "Analyze market trends", "topic": "AI technology"}`}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end space-x-2 pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowCreateModal(false);
+                        // Reset form
+                        setNewEvaluation({
+                          name: "",
+                          crew_ids: [],
+                          metric_categories: [],
+                          iterations: 1,
+                          aggregation_strategy: "simple_average",
+                          test_inputs: {},
+                        });
+                        setTestInputsJson(
+                          JSON.stringify(
+                            {
+                              query: "Evaluate agent performance on this task",
+                            },
+                            null,
+                            2
+                          )
+                        );
+                      }}
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Cancel
+                    </Button>
+                    <Button onClick={createEvaluation} disabled={isCreating}>
+                      {isCreating ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Creating...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-4 w-4 mr-2" />
+                          Start Evaluation
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </div>
+              </DialogContent>
+            </Dialog>
 
-                <div className="space-y-2">
-                  <Label>Select Crews to Evaluate</Label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-32 overflow-y-auto">
-                    {crews.map((crew) => (
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent Evaluation Runs</CardTitle>
+                <CardDescription>
+                  Monitor the status and progress of your agent evaluations
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="text-center py-8">
+                    <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-muted-foreground">
+                      Loading evaluations...
+                    </p>
+                  </div>
+                ) : evaluationRuns.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Target className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg font-medium mb-2">
+                      No Evaluations Yet
+                    </h3>
+                    <p className="text-muted-foreground mb-4">
+                      Create your first evaluation to start analyzing agent
+                      performance
+                    </p>
+                    <Button onClick={() => setShowCreateModal(true)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Evaluation
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {evaluationRuns.map((run) => (
                       <div
-                        key={crew.id}
-                        className="flex items-center space-x-2"
+                        key={run.id}
+                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
                       >
-                        <input
-                          type="checkbox"
-                          id={`crew-${crew.id}`}
-                          checked={newEvaluation.crew_ids.includes(crew.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewEvaluation((prev) => ({
-                                ...prev,
-                                crew_ids: [...prev.crew_ids, crew.id],
-                              }));
-                            } else {
-                              setNewEvaluation((prev) => ({
-                                ...prev,
-                                crew_ids: prev.crew_ids.filter(
-                                  (id) => id !== crew.id
-                                ),
-                              }));
-                            }
-                          }}
-                          className="rounded"
-                        />
-                        <Label htmlFor={`crew-${crew.id}`} className="text-sm">
-                          {crew.name}
-                        </Label>
+                        <div className="flex items-center space-x-4">
+                          <div className="flex flex-col">
+                            <h3 className="font-medium">{run.name}</h3>
+                            <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                              <span>{run.agentCount} agents</span>
+                              <span>•</span>
+                              <span>{run.metricCount} metrics</span>
+                              <span>•</span>
+                              <span>
+                                {formatDuration(run.startTime, run.endTime)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-4">
+                          {run.status === "running" && (
+                            <div className="flex items-center space-x-2">
+                              <Progress value={run.progress} className="w-20" />
+                              <span className="text-sm text-muted-foreground">
+                                {run.progress.toFixed(0)}%
+                              </span>
+                            </div>
+                          )}
+
+                          {run.overallScore && (
+                            <div className="text-right">
+                              <div
+                                className={cn(
+                                  "text-lg font-semibold",
+                                  getScoreColor(run.overallScore)
+                                )}
+                              >
+                                {run.overallScore.toFixed(1)}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Overall Score
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex items-center space-x-2">
+                            {getStatusBadge(run.status)}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => viewEvaluationResults(run.id)}
+                              disabled={run.status !== "completed"}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteEvaluation(run.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Aggregation Strategy</Label>
-                  <Select
-                    value={newEvaluation.aggregation_strategy}
-                    onValueChange={(value) =>
-                      setNewEvaluation((prev) => ({
-                        ...prev,
-                        aggregation_strategy: value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {aggregationStrategies.map((strategy) => (
-                        <SelectItem key={strategy.id} value={strategy.id}>
-                          {strategy.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex justify-end space-x-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowCreateForm(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button onClick={createEvaluation} disabled={isCreating}>
-                    {isCreating ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-4 w-4 mr-2" />
-                        Start Evaluation
-                      </>
-                    )}
-                  </Button>
-                </div>
+                )}
               </CardContent>
             </Card>
-          )}
+          </TabsContent>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Evaluation Runs</CardTitle>
-              <CardDescription>
-                Monitor the status and progress of your agent evaluations
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="text-center py-8">
-                  <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground">
-                    Loading evaluations...
-                  </p>
-                </div>
-              ) : evaluationRuns.length === 0 ? (
-                <div className="text-center py-12">
-                  <Target className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-medium mb-2">
-                    No Evaluations Yet
-                  </h3>
-                  <p className="text-muted-foreground mb-4">
-                    Create your first evaluation to start analyzing agent
-                    performance
-                  </p>
-                  <Button onClick={() => setShowCreateForm(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Evaluation
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {evaluationRuns.map((run) => (
-                    <div
-                      key={run.id}
-                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-center space-x-4">
-                        <div className="flex flex-col">
-                          <h3 className="font-medium">{run.name}</h3>
-                          <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                            <span>{run.agentCount} agents</span>
-                            <span>•</span>
-                            <span>{run.metricCount} metrics</span>
-                            <span>•</span>
-                            <span>
-                              {formatDuration(run.startTime, run.endTime)}
-                            </span>
-                          </div>
+          <TabsContent value="results" className="space-y-4">
+            {selectedEvaluation && evaluationResults ? (
+              <>
+                {/* Results Summary */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Evaluation Results Summary</CardTitle>
+                    <CardDescription>
+                      {
+                        evaluationRuns.find((r) => r.id === selectedEvaluation)
+                          ?.name
+                      }
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="text-center">
+                        <div
+                          className={cn(
+                            "text-3xl font-bold mb-2",
+                            evaluationResults.summary?.overall_score
+                              ? getScoreColor(
+                                  evaluationResults.summary.overall_score
+                                )
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {evaluationResults.summary?.overall_score?.toFixed(
+                            1
+                          ) || "N/A"}
                         </div>
+                        <p className="text-sm text-muted-foreground">
+                          Overall Score
+                        </p>
                       </div>
-
-                      <div className="flex items-center space-x-4">
-                        {run.status === "running" && (
-                          <div className="flex items-center space-x-2">
-                            <Progress value={run.progress} className="w-20" />
-                            <span className="text-sm text-muted-foreground">
-                              {run.progress.toFixed(0)}%
-                            </span>
-                          </div>
-                        )}
-
-                        {run.overallScore && (
-                          <div className="text-right">
-                            <div
-                              className={cn(
-                                "text-lg font-semibold",
-                                getScoreColor(run.overallScore)
-                              )}
-                            >
-                              {run.overallScore.toFixed(1)}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Overall Score
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex items-center space-x-2">
-                          {getStatusBadge(run.status)}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => viewEvaluationResults(run.id)}
-                            disabled={run.status !== "completed"}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteEvaluation(run.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                      <div className="text-center">
+                        <div className="text-3xl font-bold mb-2">
+                          {evaluationResults.summary?.total_agents || 0}
                         </div>
+                        <p className="text-sm text-muted-foreground">
+                          Agents Evaluated
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-3xl font-bold mb-2">
+                          {evaluationResults.summary?.aggregation_strategy
+                            ?.replace("_", " ")
+                            .toUpperCase() || "N/A"}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Strategy
+                        </p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                  </CardContent>
+                </Card>
 
-        <TabsContent value="results" className="space-y-4">
-          {selectedEvaluation && evaluationResults ? (
-            <>
-              {/* Results Summary */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Evaluation Results Summary</CardTitle>
-                  <CardDescription>
-                    {
-                      evaluationRuns.find((r) => r.id === selectedEvaluation)
-                        ?.name
-                    }
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="text-center">
-                      <div
-                        className={cn(
-                          "text-3xl font-bold mb-2",
-                          evaluationResults.summary?.overall_score
-                            ? getScoreColor(
-                                evaluationResults.summary.overall_score
-                              )
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {evaluationResults.summary?.overall_score?.toFixed(1) ||
-                          "N/A"}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Overall Score
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-bold mb-2">
-                        {evaluationResults.summary?.total_agents || 0}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Agents Evaluated
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-bold mb-2">
-                        {evaluationResults.summary?.aggregation_strategy
-                          ?.replace("_", " ")
-                          .toUpperCase() || "N/A"}
-                      </div>
-                      <p className="text-sm text-muted-foreground">Strategy</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Agent Results */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Agent Performance Details</CardTitle>
-                  <CardDescription>
-                    Individual agent scores and feedback across all metrics
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-6">
-                    {Object.entries(evaluationResults.agent_results || {}).map(
-                      ([agentRole, agentData]) => (
+                {/* Agent Results */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Agent Performance Details</CardTitle>
+                    <CardDescription>
+                      Individual agent scores and feedback across all metrics
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-6">
+                      {Object.entries(
+                        evaluationResults.agent_results || {}
+                      ).map(([agentRole, agentData]) => (
                         <div key={agentRole} className="border rounded-lg p-4">
                           <div className="flex items-center justify-between mb-4">
                             <div>
@@ -857,90 +989,89 @@ export default function EvaluationsPage() {
                             )}
                           </div>
                         </div>
-                      )
-                    )}
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Evaluation Results</CardTitle>
+                  <CardDescription>
+                    Detailed results and analysis from completed evaluations
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-center py-12">
+                    <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg font-medium mb-2">
+                      No Results Selected
+                    </h3>
+                    <p className="text-muted-foreground mb-4">
+                      Select a completed evaluation from the overview to view
+                      detailed results
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={() => setSelectedTab("overview")}
+                    >
+                      Go to Overview
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
-            </>
-          ) : (
+            )}
+          </TabsContent>
+
+          <TabsContent value="analytics" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Evaluation Results</CardTitle>
+                <CardTitle>Performance Analytics</CardTitle>
                 <CardDescription>
-                  Detailed results and analysis from completed evaluations
+                  Trends and insights across multiple evaluation runs
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="text-center py-12">
                   <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <h3 className="text-lg font-medium mb-2">
-                    No Results Selected
+                    Analytics Dashboard
                   </h3>
                   <p className="text-muted-foreground mb-4">
-                    Select a completed evaluation from the overview to view
-                    detailed results
+                    Performance trends and comparative analysis will be
+                    displayed here
                   </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => setSelectedTab("overview")}
-                  >
-                    Go to Overview
-                  </Button>
+                  <Button variant="outline">Generate Report</Button>
                 </div>
               </CardContent>
             </Card>
-          )}
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="analytics" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Performance Analytics</CardTitle>
-              <CardDescription>
-                Trends and insights across multiple evaluation runs
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-12">
-                <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">
-                  Analytics Dashboard
-                </h3>
-                <p className="text-muted-foreground mb-4">
-                  Performance trends and comparative analysis will be displayed
-                  here
-                </p>
-                <Button variant="outline">Generate Report</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="configuration" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Evaluation Configuration</CardTitle>
-              <CardDescription>
-                Set up new evaluations and configure evaluation parameters
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-12">
-                <Settings className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium mb-2">
-                  Configuration Panel
-                </h3>
-                <p className="text-muted-foreground mb-4">
-                  Configure evaluation settings, select metrics, and set up test
-                  scenarios
-                </p>
-                <Button>Start Configuration</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="configuration" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Evaluation Configuration</CardTitle>
+                <CardDescription>
+                  Set up new evaluations and configure evaluation parameters
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center py-12">
+                  <Settings className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-medium mb-2">
+                    Configuration Panel
+                  </h3>
+                  <p className="text-muted-foreground mb-4">
+                    Configure evaluation settings, select metrics, and set up
+                    test scenarios
+                  </p>
+                  <Button>Start Configuration</Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </Layout>
   );
