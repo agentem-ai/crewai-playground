@@ -1327,41 +1327,38 @@ async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationCon
         evaluation_runs[eval_id]["status"] = "running"
         evaluation_runs[eval_id]["progress"] = 10.0
         
-        # Create evaluator with available agents - only use real Agent objects
+        # Only use real Agent objects - no mock agents allowed
         real_agents = [agent for agent in agents if not isinstance(agent, dict)]
         
         if not real_agents:
-            # If no real agents, fall back to mock evaluation
-            logging.info(f"No real agents found for evaluation {eval_id}, using mock evaluation")
-            agent_results = await _run_mock_evaluation(agents, config)
-        else:
-            # Run real CrewAI evaluation
-            logging.info(f"Running real CrewAI evaluation for {eval_id} with {len(real_agents)} agents")
-            evaluator = create_default_evaluator(real_agents)
-            active_evaluations[eval_id] = evaluator
-            
-            # Find crews that contain these agents
-            crews_to_evaluate = []
-            for crew_id in config.crew_ids:
-                crew_info = next((c for c in discovered_crews if c.get("id") == crew_id), None)
-                if crew_info:
-                    try:
-                        from pathlib import Path
-                        crew_path_obj = Path(crew_info.get("path"))
-                        loaded_crew_data = load_crew_from_module(crew_path_obj)
-                        if loaded_crew_data and len(loaded_crew_data) > 0:
-                            crew_instance = loaded_crew_data[0]
-                            crews_to_evaluate.append(crew_instance)
-                    except Exception as e:
-                        logging.warning(f"Failed to load crew {crew_id} for evaluation: {str(e)}")
-                        continue
-            
-            if not crews_to_evaluate:
-                logging.warning(f"No crews loaded for evaluation {eval_id}, using mock evaluation")
-                agent_results = await _run_mock_evaluation(agents, config)
-            else:
-                # Run real evaluation with crews
-                agent_results = await _run_real_evaluation(evaluator, crews_to_evaluate, config, eval_id)
+            raise ValueError(f"No real CrewAI agents found for evaluation {eval_id}. Only real agents are supported.")
+        
+        # Run real CrewAI evaluation
+        logging.info(f"Running real CrewAI evaluation for {eval_id} with {len(real_agents)} agents")
+        evaluator = create_default_evaluator(real_agents)
+        active_evaluations[eval_id] = evaluator
+        
+        # Find crews that contain these agents
+        crews_to_evaluate = []
+        for crew_id in config.crew_ids:
+            crew_info = next((c for c in discovered_crews if c.get("id") == crew_id), None)
+            if crew_info:
+                try:
+                    from pathlib import Path
+                    crew_path_obj = Path(crew_info.get("path"))
+                    loaded_crew_data = load_crew_from_module(crew_path_obj)
+                    if loaded_crew_data and len(loaded_crew_data) > 0:
+                        crew_instance = loaded_crew_data[0]
+                        crews_to_evaluate.append(crew_instance)
+                except Exception as e:
+                    logging.warning(f"Failed to load crew {crew_id} for evaluation: {str(e)}")
+                    continue
+        
+        if not crews_to_evaluate:
+            raise ValueError(f"No crews could be loaded for evaluation {eval_id}. Real crews are required.")
+        
+        # Run real evaluation with crews
+        agent_results = await _run_real_evaluation(evaluator, crews_to_evaluate, config, eval_id)
         
         # Calculate overall score
         if agent_results:
@@ -1403,32 +1400,7 @@ async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationCon
             del active_evaluations[eval_id]
 
 
-async def _run_mock_evaluation(agents: List, config: EvaluationConfigRequest) -> dict:
-    """Run mock evaluation for testing purposes."""
-    agent_results = {}
-    for i, agent in enumerate(agents):
-        # Handle both real Agent objects and mock agent dictionaries
-        if isinstance(agent, dict):
-            agent_id = agent.get("id", f"agent_{i}")
-            agent_role = agent.get("role", f"Agent {i}")
-        else:
-            # Real Agent object
-            agent_id = str(getattr(agent, "id", f"agent_{i}"))
-            agent_role = getattr(agent, "role", f"Agent {i}")
-        
-        # Create mock evaluation result for each agent
-        agent_results[agent_role] = {
-            "agent_id": agent_id,
-            "agent_role": agent_role,
-            "overall_score": 7.5 + (i * 0.5),  # Mock scores
-            "metrics": {
-                "goal_alignment": {"score": 8.0, "feedback": "Agent effectively aligned with goals"},
-                "semantic_quality": {"score": 7.5, "feedback": "Good semantic understanding"},
-                "reasoning_efficiency": {"score": 7.0, "feedback": "Efficient reasoning process"},
-            },
-            "task_count": config.iterations
-        }
-    return agent_results
+
 
 
 async def _run_real_evaluation(evaluator, crews_to_evaluate: List, config: EvaluationConfigRequest, eval_id: str) -> dict:
@@ -1520,9 +1492,8 @@ async def _run_real_evaluation(evaluator, crews_to_evaluate: List, config: Evalu
         
     except Exception as e:
         logging.error(f"Error in real evaluation for {eval_id}: {str(e)}")
-        # Fall back to mock evaluation on error
-        logging.info(f"Falling back to mock evaluation for {eval_id}")
-        return await _run_mock_evaluation(evaluator.agents if hasattr(evaluator, 'agents') else [], config)
+        # Re-raise the error since we don't support mock fallbacks
+        raise RuntimeError(f"Real evaluation failed for {eval_id}: {str(e)}") from e
 
 
 @app.get("/{full_path:path}")
