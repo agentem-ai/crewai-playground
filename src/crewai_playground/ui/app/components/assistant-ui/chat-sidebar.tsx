@@ -44,7 +44,7 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
   // Set initial chat when component mounts
   useEffect(() => {
     // Fetch crews if not already loaded
-    if (crews.length === 0) {
+    if (!crews || !Array.isArray(crews) || crews.length === 0) {
       fetch("/api/crews")
         .then((response) => response.json())
         .then((data) => {
@@ -148,7 +148,7 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
     setCurrentChat,
     setSearchParams,
     createChat,
-    crews.length,
+    crews?.length || 0,
     setCrews,
     setCurrentCrew,
   ]);
@@ -252,9 +252,22 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
   };
 
   // Sort chats by last updated
-  const sortedChats = Object.values(chatHistory).sort(
+  const sortedChats = chatHistory ? Object.values(chatHistory).sort(
     (a, b) => b.lastUpdated - a.lastUpdated
-  );
+  ) : [];
+
+  // Early return if essential data is not available
+  if (!chatHistory) {
+    return (
+      <aside className="flex h-full flex-col">
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Loading...</h3>
+          </div>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <>
@@ -268,14 +281,14 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select a crew">
-                  {crews.find((c) => c.id === currentCrewId)?.name ||
+                  {(crews && Array.isArray(crews) ? crews.find((c) => c.id === currentCrewId)?.name : null) ||
                     "Select a crew"}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {crews.map((crew) => (
+                {crews && Array.isArray(crews) && crews.map((crew) => (
                   <SelectItem key={crew.id} value={crew.id}>
-                    {crew.name}
+                    {crew.name || 'Unnamed Crew'}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -290,15 +303,17 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
 
         <div className="flex-1 space-y-2 overflow-y-auto pt-6">
           <h3 className="text-lg font-semibold">Chats</h3>
-          {sortedChats.map((chat) => (
-            <div
-              key={chat.id}
-              className={cn(
-                "group flex items-center justify-between rounded-lg px-3 py-2 hover:bg-accent/50 cursor-pointer",
-                currentChatId === chat.id && "bg-accent"
-              )}
-              onClick={() => handleChatSelect(chat.id)}
-            >
+          {sortedChats && Array.isArray(sortedChats) && sortedChats.map((chat) => {
+            if (!chat || !chat.id) return null;
+            return (
+              <div
+                key={chat.id}
+                className={cn(
+                  "group flex items-center justify-between rounded-lg px-3 py-2 hover:bg-accent/50 cursor-pointer",
+                  currentChatId === chat.id && "bg-accent"
+                )}
+                onClick={() => handleChatSelect(chat.id)}
+              >
               <div className="flex-1 truncate">
                 <p className="truncate text-sm font-medium">{chat.title}</p>
                 {chat.crewName && (
@@ -319,7 +334,8 @@ export const ChatSidebar = ({ children }: ChatSidebarProps) => {
                 <Trash2 className="h-4 w-4" />
               </Button>
             </div>
-          ))}
+            );
+          })}
         </div>
       </aside>
       <DeleteChatModal
