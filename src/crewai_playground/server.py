@@ -1344,10 +1344,19 @@ async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationCon
         # In a real implementation, this would use the actual evaluation results
         agent_results = {}
         for i, agent in enumerate(agents):
+            # Handle both real Agent objects and mock agent dictionaries
+            if isinstance(agent, dict):
+                agent_id = agent.get("id", f"agent_{i}")
+                agent_role = agent.get("role", f"Agent {i}")
+            else:
+                # Real Agent object
+                agent_id = str(getattr(agent, "id", f"agent_{i}"))
+                agent_role = getattr(agent, "role", f"Agent {i}")
+            
             # Create mock evaluation result for each agent
-            agent_results[agent["role"]] = {
-                "agent_id": f"agent_{i}",
-                "agent_role": agent["role"],
+            agent_results[agent_role] = {
+                "agent_id": agent_id,
+                "agent_role": agent_role,
                 "overall_score": 7.5 + (i * 0.5),  # Mock scores
                 "metrics": {
                     "goal_alignment": {"score": 8.0, "feedback": "Agent effectively aligned with goals"},
