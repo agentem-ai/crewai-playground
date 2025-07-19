@@ -60,7 +60,9 @@ class ChatHandler:
         self.is_initialized = False
 
         # Register event listeners
-        from crewai_playground.flow_event_listener import flow_websocket_listener as crew_visualization_listener
+        from crewai_playground.flow_event_listener import (
+            flow_websocket_listener as crew_visualization_listener,
+        )
 
         crew_visualization_listener.setup_listeners(crewai_event_bus)
 
@@ -72,7 +74,9 @@ class ChatHandler:
         This allows the visualization to display agents before the crew starts running.
         """
         try:
-            from crewai_playground.flow_event_listener import flow_websocket_listener as crew_visualization_listener
+            from crewai_playground.flow_event_listener import (
+                flow_websocket_listener as crew_visualization_listener,
+            )
             import uuid
 
             # Get or create a crew ID
@@ -272,7 +276,7 @@ class ChatHandler:
 
     def _show_loading(self, event: threading.Event):
         """Display animated loading indicator while processing."""
-        chars = "-\|/"
+        chars = "-\\|/"
         i = 0
         while not event.is_set():
             logging.debug(f"Processing... {chars[i % len(chars)]}")

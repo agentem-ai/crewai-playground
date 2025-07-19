@@ -61,7 +61,15 @@ class FlowWebSocketEventListener:
     """
 
     def __init__(self):
+        # Flow-level visualization
         self.flow_states = {}
+        # Crew-level visualization (ported from legacy listener)
+        self.crew_state: Dict[str, Any] = {}
+        self.agent_states: Dict[str, Dict[str, Any]] = {}
+        self.task_states: Dict[str, Dict[str, Any]] = {}
+        # WebSocket clients {client_id: {...}}
+        self.clients: Dict[str, Dict[str, Any]] = {}
+
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._registered_buses = set()
 
@@ -350,6 +358,66 @@ class FlowWebSocketEventListener:
 
         logger.info(f"Finished setting up flow event listeners for bus {bus_id}")
 
+    # ---------------------------------------------------------------------
+    # WebSocket helper API (minimal subset for drop-in compatibility)
+    # ---------------------------------------------------------------------
+    async def connect(self, websocket, client_id: str, crew_id: str | None = None):
+        """Accept a WebSocket and track the client. Crew methods copied from legacy listener."""
+        if self.loop is None:
+            # capture main loop when first websocket attaches
+            try:
+                self.loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+        await websocket.accept()
+        self.clients[client_id] = {
+            "websocket": websocket,
+            "crew_id": crew_id,
+        }
+
+        # immediately send current state if crew matches
+        if crew_id and self.crew_state.get("id") == crew_id:
+            await self.send_state_to_client(client_id)
+
+    def disconnect(self, client_id: str):
+        self.clients.pop(client_id, None)
+
+    async def register_client_for_crew(self, client_id: str, crew_id: str):
+        if client_id in self.clients:
+            self.clients[client_id]["crew_id"] = crew_id
+            await self.send_state_to_client(client_id)
+
+    async def send_state_to_client(self, client_id: str):
+        client = self.clients.get(client_id)
+        if not client:
+            return
+        websocket = client["websocket"]
+        payload = {
+            "crew": self.crew_state,
+            "agents": list(self.agent_states.values()),
+            "tasks": list(self.task_states.values()),
+        }
+        import json, datetime
+        try:
+            await websocket.send_text(json.dumps(payload, default=str))
+        except Exception:
+            self.disconnect(client_id)
+
+    async def broadcast_update(self):
+        if not self.clients:
+            return
+        for cid in list(self.clients.keys()):
+            await self.send_state_to_client(cid)
+
+    def reset_state(self):
+        self.crew_state = {}
+        self.agent_states = {}
+        self.task_states = {}
+
+    # ---------------------------------------------------------------------
+    # Internal scheduling helper
+    # ---------------------------------------------------------------------
     def _schedule(self, coro: 'coroutine'):
         """Schedule coroutine safely on an event loop."""
         try:
