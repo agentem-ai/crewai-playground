@@ -60,6 +60,38 @@ from crewai_playground.flow_api import router as flow_router, get_active_executi
 from crewai_playground.websocket_utils import register_websocket_queue, unregister_websocket_queue
 from crewai_playground.flow_event_listener import flow_websocket_listener
 
+# CrewAI Evaluation imports
+try:
+    from crewai.experimental.evaluation import (
+        AgentEvaluator,
+        create_default_evaluator,
+        BaseEvaluator,
+        MetricCategory,
+        EvaluationScore,
+        AgentEvaluationResult,
+        EvaluationTraceCallback,
+        create_evaluation_callbacks
+    )
+    EVALUATION_AVAILABLE = True
+    
+    # Simple aggregation strategy enum since it's not available in the module
+    class AggregationStrategy:
+        SIMPLE_AVERAGE = "simple_average"
+        WEIGHTED_BY_COMPLEXITY = "weighted_by_complexity"
+        BEST_PERFORMANCE = "best_performance"
+        WORST_PERFORMANCE = "worst_performance"
+        
+except ImportError:
+    logging.warning("CrewAI evaluation module not available. Evaluation features will be disabled.")
+    EVALUATION_AVAILABLE = False
+    
+    # Fallback aggregation strategy for when evaluation is not available
+    class AggregationStrategy:
+        SIMPLE_AVERAGE = "simple_average"
+        WEIGHTED_BY_COMPLEXITY = "weighted_by_complexity"
+        BEST_PERFORMANCE = "best_performance"
+        WORST_PERFORMANCE = "worst_performance"
+
 # Create FastAPI app
 app = FastAPI()
 
@@ -161,6 +193,11 @@ chat_handlers: Dict[str, ChatHandler] = {}
 chat_threads: Dict[str, Dict[str, List]] = {}
 discovered_crews: List[Dict] = []
 
+# Evaluation state
+evaluation_runs: Dict[str, Dict] = {}
+active_evaluations: Dict[str, Any] = {}
+evaluation_results: Dict[str, Dict] = {}
+
 
 # Pydantic models for request/response validation
 class ChatMessage(BaseModel):
@@ -180,6 +217,29 @@ class KickoffRequest(BaseModel):
 
 class ToolExecuteRequest(BaseModel):
     inputs: Optional[Dict[str, str]] = None
+
+
+# Evaluation API models
+class EvaluationConfigRequest(BaseModel):
+    name: str
+    crew_ids: List[str]
+    metric_categories: Optional[List[str]] = None
+    iterations: Optional[int] = 1
+    aggregation_strategy: Optional[str] = "simple_average"
+    test_inputs: Optional[Dict[str, Any]] = None
+
+
+class EvaluationRunResponse(BaseModel):
+    id: str
+    name: str
+    status: str
+    progress: float
+    start_time: str
+    end_time: Optional[str] = None
+    agent_count: int
+    metric_count: int
+    overall_score: Optional[float] = None
+    iterations: int
 
 
 @app.post("/api/chat")
@@ -942,8 +1002,556 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
         await websocket.close()
 
 
+# ============================================================================
+# EVALUATION API ENDPOINTS
+# ============================================================================
+
+@app.get("/api/evaluations")
+async def get_evaluations():
+    """Get all evaluation runs with their status and summary."""
+    if not EVALUATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Evaluation features not available")
+    
+    try:
+        runs = []
+        for run_id, run_data in evaluation_runs.items():
+            runs.append({
+                "id": run_id,
+                "name": run_data["name"],
+                "status": run_data["status"],
+                "progress": run_data["progress"],
+                "startTime": run_data["start_time"],
+                "endTime": run_data.get("end_time"),
+                "agentCount": run_data["agent_count"],
+                "metricCount": run_data["metric_count"],
+                "overallScore": run_data.get("overall_score"),
+                "iterations": run_data["iterations"]
+            })
+        
+        return {
+            "status": "success",
+            "data": {
+                "runs": runs,
+                "summary": {
+                    "total": len(runs),
+                    "active": len([r for r in runs if r["status"] == "running"]),
+                    "completed": len([r for r in runs if r["status"] == "completed"]),
+                    "failed": len([r for r in runs if r["status"] == "failed"])
+                }
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error fetching evaluations: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching evaluations: {str(e)}")
+
+
+@app.post("/api/evaluations")
+async def create_evaluation(config: EvaluationConfigRequest):
+    """Create and start a new evaluation run."""
+    if not EVALUATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Evaluation features not available")
+    
+    try:
+        # Generate unique evaluation ID
+        eval_id = str(uuid.uuid4())
+        
+        # Load crews for evaluation
+        crews_to_evaluate = []
+        agents_to_evaluate = []
+        
+        for crew_id in config.crew_ids:
+            try:
+                # Find the crew info from discovered crews
+                crew_info = None
+                for discovered_crew in discovered_crews:
+                    if discovered_crew.get("id") == crew_id:
+                        crew_info = discovered_crew
+                        break
+                
+                if not crew_info:
+                    logging.warning(f"Crew {crew_id} not found in discovered crews")
+                    continue
+                
+                # Load the crew from its path
+                crew_path = crew_info.get("path")
+                if crew_path:
+                    from pathlib import Path
+                    crew_path_obj = Path(crew_path)  # Convert string to Path object
+                    logging.info(f"Loading crew from path: {crew_path_obj}")
+                    loaded_crew_data = load_crew_from_module(crew_path_obj)
+                    if loaded_crew_data and len(loaded_crew_data) > 0:
+                        crew_instance = loaded_crew_data[0]  # Get the crew instance
+                        crews_to_evaluate.append(crew_instance)
+                        logging.info(f"Loaded crew instance: {crew_instance}")
+                        # Extract agents from crew
+                        if hasattr(crew_instance, "agents"):
+                            crew_agents = crew_instance.agents
+                            logging.info(f"Found {len(crew_agents)} agents in crew {crew_id}: {[getattr(agent, 'role', 'Unknown') for agent in crew_agents]}")
+                            agents_to_evaluate.extend(crew_agents)
+                        else:
+                            logging.warning(f"Crew {crew_id} has no 'agents' attribute")
+                    else:
+                        logging.warning(f"Failed to load crew data from {crew_path_obj}")
+                        
+            except Exception as e:
+                logging.warning(f"Failed to load crew {crew_id}: {str(e)}")
+                continue
+        
+        # If no agents found, we cannot run real evaluations
+        if not agents_to_evaluate:
+            logging.warning("No real agents found from crews - real evaluations require actual CrewAI agents")
+            raise HTTPException(
+                status_code=400, 
+                detail="No real agents found in the selected crews. Real CrewAI evaluations require crews with actual agents. Please ensure your crews are properly configured with agents."
+            )
+        
+        # Create evaluation run record
+        run_data = {
+            "id": eval_id,
+            "name": config.name,
+            "status": "pending",
+            "progress": 0.0,
+            "start_time": datetime.datetime.now().isoformat(),
+            "end_time": None,
+            "agent_count": len(agents_to_evaluate),
+            "metric_count": len(config.metric_categories) if config.metric_categories else 6,
+            "overall_score": None,
+            "iterations": config.iterations,
+            "config": {
+                "crew_ids": config.crew_ids,
+                "metric_categories": config.metric_categories,
+                "aggregation_strategy": config.aggregation_strategy,
+                "test_inputs": config.test_inputs
+            },
+            "agents": [{
+                "id": str(agent.get("id") if isinstance(agent, dict) else getattr(agent, "id", "unknown")),
+                "role": agent.get("role") if isinstance(agent, dict) else getattr(agent, "role", "Unknown Role"),
+                "goal": agent.get("goal") if isinstance(agent, dict) else getattr(agent, "goal", ""),
+                "backstory": agent.get("backstory") if isinstance(agent, dict) else getattr(agent, "backstory", "")
+            } for agent in agents_to_evaluate]
+        }
+        
+        evaluation_runs[eval_id] = run_data
+        
+        # Start evaluation in background
+        asyncio.create_task(run_evaluation_async(eval_id, agents_to_evaluate, config))
+        
+        return {
+            "status": "success",
+            "data": {
+                "evaluation_id": eval_id,
+                "message": f"Evaluation '{config.name}' started successfully"
+            }
+        }
+        
+    except Exception as e:
+        logging.error(f"Error creating evaluation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating evaluation: {str(e)}")
+
+
+@app.get("/api/evaluations/metrics")
+async def get_available_metrics():
+    """Get list of available evaluation metrics."""
+    if not EVALUATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Evaluation features not available")
+    
+    try:
+        metrics = [
+            {
+                "id": "goal_alignment",
+                "name": "Goal Alignment",
+                "description": "Evaluates how well the agent's output aligns with the given goal"
+            },
+            {
+                "id": "semantic_quality",
+                "name": "Semantic Quality",
+                "description": "Assesses the semantic quality and coherence of the agent's output"
+            },
+            {
+                "id": "reasoning_efficiency",
+                "name": "Reasoning Efficiency",
+                "description": "Measures the efficiency of the agent's reasoning process"
+            },
+            {
+                "id": "tool_selection",
+                "name": "Tool Selection",
+                "description": "Evaluates the appropriateness of tool selection and usage"
+            },
+            {
+                "id": "parameter_extraction",
+                "name": "Parameter Extraction",
+                "description": "Assesses the accuracy of parameter extraction for tool calls"
+            },
+            {
+                "id": "tool_invocation",
+                "name": "Tool Invocation",
+                "description": "Evaluates the correctness of tool invocation and usage"
+            }
+        ]
+        
+        aggregation_strategies = [
+            {
+                "id": "simple_average",
+                "name": "Simple Average",
+                "description": "Equal weight to all tasks"
+            },
+            {
+                "id": "weighted_by_complexity",
+                "name": "Weighted by Complexity",
+                "description": "Weight by task complexity"
+            },
+            {
+                "id": "best_performance",
+                "name": "Best Performance",
+                "description": "Use best scores across tasks"
+            },
+            {
+                "id": "worst_performance",
+                "name": "Worst Performance",
+                "description": "Use worst scores across tasks"
+            }
+        ]
+        
+        return {
+            "status": "success",
+            "data": {
+                "metrics": metrics,
+                "aggregation_strategies": aggregation_strategies
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error fetching available metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching available metrics: {str(e)}")
+
+
+@app.get("/api/evaluations/{evaluation_id}")
+async def get_evaluation(evaluation_id: str):
+    """Get detailed information about a specific evaluation run."""
+    if not EVALUATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Evaluation features not available")
+    
+    if evaluation_id not in evaluation_runs:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    
+    try:
+        run_data = evaluation_runs[evaluation_id]
+        results = evaluation_results.get(evaluation_id, {})
+        
+        return {
+            "status": "success",
+            "data": {
+                "run": run_data,
+                "results": results
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error fetching evaluation {evaluation_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching evaluation: {str(e)}")
+
+
+@app.get("/api/evaluations/{evaluation_id}/results")
+async def get_evaluation_results(evaluation_id: str):
+    """Get detailed results for a completed evaluation."""
+    if not EVALUATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Evaluation features not available")
+    
+    if evaluation_id not in evaluation_runs:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    
+    try:
+        run_data = evaluation_runs[evaluation_id]
+        if run_data["status"] != "completed":
+            return {
+                "status": "success",
+                "data": {
+                    "message": f"Evaluation is {run_data['status']}",
+                    "progress": run_data["progress"]
+                }
+            }
+        
+        results = evaluation_results.get(evaluation_id, {})
+        
+        return {
+            "status": "success",
+            "data": {
+                "evaluation_id": evaluation_id,
+                "results": results,
+                "summary": {
+                    "overall_score": run_data.get("overall_score"),
+                    "agent_count": run_data["agent_count"],
+                    "metric_count": run_data["metric_count"],
+                    "iterations": run_data["iterations"]
+                }
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error fetching evaluation results {evaluation_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching evaluation results: {str(e)}")
+
+
+@app.delete("/api/evaluations/{evaluation_id}")
+async def delete_evaluation(evaluation_id: str):
+    """Delete an evaluation run and its results."""
+    if not EVALUATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Evaluation features not available")
+    
+    if evaluation_id not in evaluation_runs:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    
+    try:
+        # Stop active evaluation if running
+        if evaluation_id in active_evaluations:
+            # Cancel the evaluation task if possible
+            del active_evaluations[evaluation_id]
+        
+        # Remove from storage
+        del evaluation_runs[evaluation_id]
+        if evaluation_id in evaluation_results:
+            del evaluation_results[evaluation_id]
+        
+        return {
+            "status": "success",
+            "data": {
+                "message": "Evaluation deleted successfully"
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error deleting evaluation {evaluation_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting evaluation: {str(e)}")
+
+
+
+
+
+async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationConfigRequest):
+    """Run evaluation asynchronously in the background using real CrewAI evaluation."""
+    try:
+        # Update status to running
+        evaluation_runs[eval_id]["status"] = "running"
+        evaluation_runs[eval_id]["progress"] = 10.0
+        
+        # Ensure we have agents for evaluation
+        if not agents:
+            raise ValueError(f"No agents provided for evaluation {eval_id}. Real agents are required.")
+        
+        # Filter out any mock agents (dicts) and only use real Agent objects
+        real_agents = [agent for agent in agents if not isinstance(agent, dict)]
+        
+        if not real_agents:
+            # Log the types of agents we received for debugging
+            agent_types = [type(agent).__name__ for agent in agents]
+            logging.error(f"No real CrewAI Agent objects found for evaluation {eval_id}. Received agent types: {agent_types}")
+            raise ValueError(f"No real CrewAI Agent objects found for evaluation {eval_id}. Only real CrewAI Agent instances are supported, but received: {agent_types}")
+        
+        # Run real CrewAI evaluation
+        logging.info(f"Running real CrewAI evaluation for {eval_id} with {len(real_agents)} agents")
+        
+        # Create evaluator with proper setup
+        try:
+            evaluator = create_default_evaluator(real_agents)
+            active_evaluations[eval_id] = evaluator
+            logging.info(f"Created evaluator: {evaluator}")
+            
+            # Create evaluation callbacks for proper event listening
+            evaluation_callback = create_evaluation_callbacks()  # Takes no arguments
+            logging.info(f"Created evaluation callback: {evaluation_callback}")
+            
+        except Exception as e:
+            logging.error(f"Failed to create evaluator: {str(e)}")
+            raise
+        
+        # Find crews that contain these agents
+        crews_to_evaluate = []
+        for crew_id in config.crew_ids:
+            crew_info = next((c for c in discovered_crews if c.get("id") == crew_id), None)
+            if crew_info:
+                try:
+                    from pathlib import Path
+                    crew_path_obj = Path(crew_info.get("path"))
+                    loaded_crew_data = load_crew_from_module(crew_path_obj)
+                    if loaded_crew_data and len(loaded_crew_data) > 0:
+                        crew_instance = loaded_crew_data[0]
+                        crews_to_evaluate.append(crew_instance)
+                except Exception as e:
+                    logging.warning(f"Failed to load crew {crew_id} for evaluation: {str(e)}")
+                    continue
+        
+        if not crews_to_evaluate:
+            raise ValueError(f"No crews could be loaded for evaluation {eval_id}. Real crews are required.")
+        
+        # Run real evaluation with crews
+        agent_results = await _run_real_evaluation(evaluator, crews_to_evaluate, config, eval_id, real_agents)
+        
+        # Calculate overall score
+        if agent_results:
+            overall_scores = [result["overall_score"] for result in agent_results.values() if result["overall_score"] is not None]
+            overall_score = sum(overall_scores) / len(overall_scores) if overall_scores else None
+        else:
+            overall_score = None
+        
+        # Store results (agent_results is already in the correct format)
+        evaluation_results[eval_id] = {
+            "agent_results": agent_results,
+            "summary": {
+                "overall_score": overall_score,
+                "total_agents": len(agent_results),
+                "aggregation_strategy": config.aggregation_strategy
+            }
+        }
+        
+        # Update final status
+        evaluation_runs[eval_id]["status"] = "completed"
+        evaluation_runs[eval_id]["progress"] = 100.0
+        evaluation_runs[eval_id]["end_time"] = datetime.datetime.now().isoformat()
+        evaluation_runs[eval_id]["overall_score"] = overall_score
+        
+        # Clean up
+        if eval_id in active_evaluations:
+            del active_evaluations[eval_id]
+            
+        logging.info(f"Evaluation {eval_id} completed successfully")
+        
+    except Exception as e:
+        logging.error(f"Error running evaluation {eval_id}: {str(e)}")
+        evaluation_runs[eval_id]["status"] = "failed"
+        evaluation_runs[eval_id]["progress"] = 0.0
+        evaluation_runs[eval_id]["end_time"] = datetime.datetime.now().isoformat()
+        
+        # Clean up
+        if eval_id in active_evaluations:
+            del active_evaluations[eval_id]
+
+
+
+
+
+async def _run_real_evaluation(evaluator, crews_to_evaluate: List, config: EvaluationConfigRequest, eval_id: str, agents: List = None) -> dict:
+    """Run real CrewAI evaluation with actual crew execution."""
+    try:
+        # Prepare test inputs for evaluation
+        test_inputs = config.test_inputs or {"query": "Evaluate agent performance on this task"}
+        
+        # Run evaluation for each iteration
+        for iteration in range(1, config.iterations + 1):
+            logging.info(f"Running evaluation iteration {iteration}/{config.iterations} for {eval_id}")
+            
+            # Update progress
+            progress = 10.0 + (70.0 * iteration / config.iterations)
+            evaluation_runs[eval_id]["progress"] = progress
+            
+            # Set evaluator iteration
+            evaluator.set_iteration(iteration)
+            
+            # Run each crew with the test inputs
+            for crew in crews_to_evaluate:
+                try:
+                    logging.info(f"Running crew {crew} for evaluation iteration {iteration}")
+                    
+                    # Attach evaluation callback to crew for proper event capture
+                    if 'evaluation_callback' in locals():
+                        # The evaluation callback is already set up with the event bus
+                        # We just need to ensure it's active during crew execution
+                        logging.info(f"Evaluation callback {evaluation_callback} is active for crew execution")
+                    
+                    # Execute the crew with test inputs
+                    crew_result = crew.kickoff(inputs=test_inputs)
+                    logging.info(f"Crew execution completed for iteration {iteration}")
+                    logging.info(f"Crew result: {crew_result}")
+                    
+                except Exception as e:
+                    logging.warning(f"Crew execution failed for iteration {iteration}: {str(e)}")
+                    continue
+            
+            # Small delay between iterations
+            await asyncio.sleep(1)
+        
+        # Get evaluation results from the evaluator
+        logging.info(f"Collecting evaluation results for {eval_id}")
+        evaluation_results = evaluator.get_evaluation_results()
+        
+        logging.info(f"Raw evaluation results for {eval_id}: {evaluation_results}")
+        
+        # Convert CrewAI evaluation results to our format
+        agent_results = {}
+        
+        if not evaluation_results:
+            logging.error(f"No evaluation results returned from evaluator for {eval_id}")
+            raise RuntimeError(
+                f"Evaluation {eval_id} failed to capture any results. "
+                f"This indicates that the CrewAI evaluation system did not properly capture execution events. "
+                f"Please ensure that:"
+                f"\n1. The crew has real CrewAI agents (not mock data)"
+                f"\n2. The agents are properly configured and functional"
+                f"\n3. The crew execution completes successfully"
+                f"\n4. The evaluation callback is properly integrated with the event system"
+            )
+        
+        # Process real evaluation results only
+        for agent_role, results_list in evaluation_results.items():
+            if not results_list:
+                logging.warning(f"No results for agent {agent_role} in evaluation {eval_id}")
+                continue
+                    
+                # Aggregate results across all iterations for this agent
+                total_scores = {}
+                total_feedback = []
+                task_count = len(results_list)
+                
+                for result in results_list:
+                    # Extract metrics from AgentEvaluationResult
+                    for metric_category, evaluation_score in result.metrics.items():
+                        metric_name = metric_category.value if hasattr(metric_category, 'value') else str(metric_category)
+                        
+                        if metric_name not in total_scores:
+                            total_scores[metric_name] = []
+                        
+                        if evaluation_score.score is not None:
+                            total_scores[metric_name].append(evaluation_score.score)
+                        
+                        if evaluation_score.feedback:
+                            total_feedback.append(f"{metric_name}: {evaluation_score.feedback}")
+                
+                # Calculate average scores
+                metrics = {}
+                overall_scores = []
+                
+                for metric_name, scores in total_scores.items():
+                    if scores:
+                        avg_score = sum(scores) / len(scores)
+                        metrics[metric_name] = {
+                            "score": round(avg_score, 1),
+                            "feedback": f"Average score across {len(scores)} evaluations"
+                        }
+                        overall_scores.append(avg_score)
+                
+                # Calculate overall score from real evaluation metrics only
+                if overall_scores:
+                    overall_score = round(sum(overall_scores) / len(overall_scores), 1)
+                else:
+                    # No real scores captured - this indicates an evaluation system issue
+                    logging.error(f"No metric scores captured for agent {agent_role} in evaluation {eval_id}")
+                    overall_score = None
+                    metrics = {}
+                
+                agent_results[agent_role] = {
+                    "agent_id": str(results_list[0].agent_id) if results_list else f"agent_{agent_role}",
+                    "agent_role": agent_role,
+                    "overall_score": overall_score,
+                    "metrics": metrics,
+                    "task_count": task_count
+                }
+        
+        logging.info(f"Real evaluation completed for {eval_id} with {len(agent_results)} agent results")
+        return agent_results
+        
+    except Exception as e:
+        logging.error(f"Error in real evaluation for {eval_id}: {str(e)}")
+        # Re-raise the error since we don't support mock fallbacks
+        raise RuntimeError(f"Real evaluation failed for {eval_id}: {str(e)}") from e
+
+
 @app.get("/{full_path:path}")
-async def serve_react_app(full_path: str):
+async def serve_ui(full_path: str):
     """Serve the React application and handle client-side routing."""
     # Check if the path points to an existing file in the build directory
     requested_file = ui_dir / full_path
