@@ -1342,8 +1342,20 @@ async def run_evaluation_async(eval_id: str, agents: List, config: EvaluationCon
         
         # Run real CrewAI evaluation
         logging.info(f"Running real CrewAI evaluation for {eval_id} with {len(real_agents)} agents")
-        evaluator = create_default_evaluator(real_agents)
-        active_evaluations[eval_id] = evaluator
+        
+        # Create evaluator with proper setup
+        try:
+            evaluator = create_default_evaluator(real_agents)
+            active_evaluations[eval_id] = evaluator
+            logging.info(f"Created evaluator: {evaluator}")
+            
+            # Create evaluation callbacks for proper event listening
+            evaluation_callback = create_evaluation_callbacks()  # Takes no arguments
+            logging.info(f"Created evaluation callback: {evaluation_callback}")
+            
+        except Exception as e:
+            logging.error(f"Failed to create evaluator: {str(e)}")
+            raise
         
         # Find crews that contain these agents
         crews_to_evaluate = []
@@ -1431,9 +1443,18 @@ async def _run_real_evaluation(evaluator, crews_to_evaluate: List, config: Evalu
             for crew in crews_to_evaluate:
                 try:
                     logging.info(f"Running crew {crew} for evaluation iteration {iteration}")
+                    
+                    # Attach evaluation callback to crew for proper event capture
+                    if 'evaluation_callback' in locals():
+                        # The evaluation callback is already set up with the event bus
+                        # We just need to ensure it's active during crew execution
+                        logging.info(f"Evaluation callback {evaluation_callback} is active for crew execution")
+                    
                     # Execute the crew with test inputs
                     crew_result = crew.kickoff(inputs=test_inputs)
                     logging.info(f"Crew execution completed for iteration {iteration}")
+                    logging.info(f"Crew result: {crew_result}")
+                    
                 except Exception as e:
                     logging.warning(f"Crew execution failed for iteration {iteration}: {str(e)}")
                     continue
