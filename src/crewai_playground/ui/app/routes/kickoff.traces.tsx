@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useSearchParams, useNavigate } from "react-router";
+import { useSearchParams, useNavigate, useLocation } from "react-router";
+import { Layout } from "../components/Layout";
 import {
   Card,
   CardContent,
@@ -97,9 +98,20 @@ interface TimelineSpan {
   operation?: string;
 }
 
+export function meta() {
+  return [
+    { title: "CrewAI - Execution Traces" },
+    {
+      name: "description",
+      content: "View execution traces for your CrewAI agents",
+    },
+  ];
+}
+
 export default function TracesPage() {
   const navigate = useNavigate();
-  const { isDarkMode, toggleDarkMode } = useChatStore();
+  const location = useLocation();
+  const { isDarkMode } = useChatStore();
   const [searchParams] = useSearchParams();
   const crewId = searchParams.get("crewId");
 
@@ -111,7 +123,7 @@ export default function TracesPage() {
   const [selectedSpan, setSelectedSpan] = useState<TimelineSpan | null>(null);
 
   const handleBack = () => {
-    navigate("/kickoff");
+    navigate(`/kickoff?crewId=${crewId}`);
   };
 
   // Transform trace data into timeline spans
@@ -778,54 +790,65 @@ export default function TracesPage() {
     );
   };
 
+  // Create right sidebar with trace selection
+  const rightSidebar = (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Traces</CardTitle>
+          <CardDescription>
+            Select a trace to view details
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ScrollArea className="h-[500px]">
+            <div className="p-4">
+              {renderTraceList()}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="py-4 px-6 border-b bg-background">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBack}
-              className="mr-4"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <h1 className="text-2xl font-bold">Execution Traces</h1>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleDarkMode}
-            className="h-8 w-8"
+    <Layout rightSidebar={rightSidebar}>
+      <div className="w-full">
+        <div className="flex items-center mb-6">
+          <Button 
+            variant="default" 
+            size="sm" 
+            className="mr-4"
+            onClick={handleBack}
           >
-            {isDarkMode ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Execution
           </Button>
+          <h1 className="text-2xl font-bold">Execution Traces</h1>
         </div>
-      </header>
-
-      {/* Main Layout with Sidebar and Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-80 border-r flex-shrink-0 overflow-y-auto p-4 bg-background">
-          <div className="sticky top-0 space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Traces</CardTitle>
-              </CardHeader>
-              <CardContent>{renderTraceList()}</CardContent>
-            </Card>
+        
+        <div className="mb-6 flex items-center">
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium">Current Path:</span>{' '}
+            <button 
+              onClick={() => navigate('/kickoff')} 
+              className="hover:underline text-primary"
+            >
+              Crews
+            </button>{' '}
+            /{' '}
+            <button 
+              onClick={() => navigate(`/kickoff?crewId=${crewId}`)} 
+              className="hover:underline text-primary"
+            >
+              Execution
+            </button>{' '}
+            /{' '}
+            <span className="text-foreground">Traces</span>
           </div>
-        </aside>
+        </div>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto">
+        <div className="w-full">
             {selectedTrace ? (
               <Card>
                 <CardHeader>
@@ -869,9 +892,8 @@ export default function TracesPage() {
                 Select a trace to view details
               </div>
             )}
-          </div>
-        </main>
+        </div>
       </div>
-    </div>
+    </Layout>
   );
 }
