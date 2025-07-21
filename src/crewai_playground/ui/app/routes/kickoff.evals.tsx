@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { useSearchParams, useNavigate } from "react-router";
+import { useSearchParams, useNavigate, useLocation } from "react-router";
+import { Layout } from "../components/Layout";
 import {
   Card,
   CardContent,
@@ -136,9 +137,20 @@ function formatDuration(start: string, end?: string) {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
-function KickoffEvalsPage() {
+export function meta() {
+  return [
+    { title: "CrewAI - Evaluation Results" },
+    {
+      name: "description",
+      content: "View evaluation results for your CrewAI agents",
+    },
+  ];
+}
+
+export default function KickoffEvalsPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const crewId = searchParams.get("crewId");
   
   const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
@@ -220,28 +232,50 @@ function KickoffEvalsPage() {
   const selectedEval = evaluations.find(e => e.id === selectedEvaluation);
 
   return (
-    <div className="container mx-auto py-6">
-      <div className="flex items-center mb-6">
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="mr-2"
-          onClick={() => navigate(`/kickoff?crewId=${crewId}`)}
-        >
-          <ArrowLeft className="h-4 w-4 mr-1" />
-          Back to Execution
-        </Button>
-        <h1 className="text-2xl font-bold">Crew Evaluations</h1>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="ml-auto"
-          onClick={handleRefresh}
-        >
-          <RefreshCw className="h-4 w-4 mr-1" />
-          Refresh
-        </Button>
-      </div>
+    <Layout>
+      <div className="w-full">
+        <div className="flex items-center mb-6">
+          <Button 
+            variant="default" 
+            size="sm" 
+            className="mr-4"
+            onClick={() => navigate(`/kickoff?crewId=${crewId}`)}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Execution
+          </Button>
+          <h1 className="text-2xl font-bold">Crew Evaluations</h1>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="ml-auto"
+            onClick={handleRefresh}
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
+        
+        <div className="mb-6 flex items-center">
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium">Current Path:</span>{' '}
+            <button 
+              onClick={() => navigate('/kickoff')} 
+              className="hover:underline text-primary"
+            >
+              Crews
+            </button>{' '}
+            /{' '}
+            <button 
+              onClick={() => navigate(`/kickoff?crewId=${crewId}`)} 
+              className="hover:underline text-primary"
+            >
+              Execution
+            </button>{' '}
+            /{' '}
+            <span className="text-foreground">Evaluations</span>
+          </div>
+        </div>
 
       {loading ? (
         <Card className="mb-6">
@@ -559,7 +593,8 @@ function KickoffEvalsPage() {
         </div>
       )}
     </div>
+    </Layout>
   );
 }
 
-export default KickoffEvalsPage;
+
