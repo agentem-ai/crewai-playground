@@ -5,6 +5,7 @@ export default [
   { path: "chat", file: "routes/chat.tsx" },
   { path: "kickoff", file: "routes/kickoff.tsx" },
   { path: "kickoff/traces", file: "routes/kickoff.traces.tsx" },
+  { path: "kickoff/evals", file: "routes/kickoff.evals.tsx" },
   { path: "tools", file: "routes/tools.tsx" },
   { path: "flow", file: "routes/flow.tsx" },
   { path: "flow/traces", file: "routes/flow.traces.tsx" },
