@@ -412,10 +412,10 @@ export default function TracesPage() {
         {traces.map((trace) => (
           <div
             key={trace.id}
-            className={`p-3 border rounded-md cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${
+            className={`p-4 rounded-lg cursor-pointer hover:bg-accent/50 ${
               selectedTrace?.id === trace.id
-                ? "border-primary bg-gray-50 dark:bg-gray-800"
-                : ""
+                ? "bg-accent/50 border border-accent"
+                : "border"
             }`}
             onClick={() => {
               setSelectedTrace(trace);
@@ -432,19 +432,14 @@ export default function TracesPage() {
                     ? "default"
                     : "destructive"
                 }
-                className={
-                  trace.status === "completed"
-                    ? "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300"
-                    : ""
-                }
               >
                 {trace.status}
               </Badge>
             </div>
-            <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <div className="flex justify-between items-center text-xs text-muted-foreground mt-1">
               <div>{formatTime(trace.start_time)}</div>
-              <div className="flex items-center">
-                <span className="mr-1">
+              <div className="flex items-center gap-2">
+                <span>
                   {Object.keys(trace.agents).length} agents
                 </span>
                 <span>{Object.keys(trace.tasks).length} tasks</span>
@@ -833,17 +828,13 @@ export default function TracesPage() {
   // Create right sidebar with trace selection
   const rightSidebar = (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Traces</CardTitle>
-          <CardDescription>Select a trace to view details</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <ScrollArea className="h-[500px]">
-            <div className="p-4">{renderTraceList()}</div>
-          </ScrollArea>
-        </CardContent>
-      </Card>
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold">Traces</h3>
+        <p className="text-sm text-muted-foreground">Select a trace to view details</p>
+      </div>
+      <ScrollArea className="h-[500px] border rounded-md">
+        <div className="p-4">{renderTraceList()}</div>
+      </ScrollArea>
     </div>
   );
 
