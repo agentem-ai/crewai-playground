@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useLocation } from "react-router";
 import { Card } from "../components/ui/card";
-import { Loader2, ExternalLink } from "lucide-react";
+import { Loader2, ExternalLink, BarChart3, Activity, Play } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { cn } from "../lib/utils";
 import ReactMarkdown from "react-markdown";
 import {
   ReactFlow,
@@ -862,26 +863,63 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
     setEdges(layoutedEdges as Edge[]);
   }, [state, setNodes, setEdges]);
 
+  // Get current location to determine active tab
+  const location = useLocation();
+  const path = location.pathname;
+  
+  // Extract effective crew ID for navigation
+  const effectiveCrewId = state.crew?.id || crewId;
+  
+  // Navigation items for the kickoff section
+  const navigationItems = [
+    {
+      name: "Execution",
+      path: "/kickoff",
+      icon: <Play className="h-4 w-4" />,
+      isActive: path === "/kickoff"
+    },
+    {
+      name: "Traces",
+      path: `/kickoff/traces?crewId=${effectiveCrewId}`,
+      icon: <Activity className="h-4 w-4" />,
+      isActive: path.includes("/kickoff/traces")
+    },
+    {
+      name: "Evaluations",
+      path: `/kickoff/evals?crewId=${effectiveCrewId}`,
+      icon: <BarChart3 className="h-4 w-4" />,
+      isActive: path.includes("/kickoff/evals")
+    }
+  ];
+
+  // KickoffNavigation component
+  const KickoffNavigation = () => (
+    <div className="border rounded-lg p-1 flex mb-4 bg-muted/30">
+      {navigationItems.map((item) => (
+        <Button
+          key={item.name}
+          variant={item.isActive ? "default" : "ghost"}
+          size="sm"
+          className={cn(
+            "flex-1 flex items-center justify-center gap-2",
+            item.isActive ? "shadow-sm" : "hover:bg-muted/50"
+          )}
+          onClick={() => navigate(item.path)}
+        >
+          {item.icon}
+          {item.name}
+        </Button>
+      ))}
+    </div>
+  );
+
   return (
     <Card className="p-6 mb-6 overflow-hidden relative">
+      {/* Navigation menu */}
+      {state.crew?.id && <KickoffNavigation />}
+      
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Crew Execution Visualization</h3>
-        {state.crew?.id && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex items-center gap-1"
-            onClick={() => {
-              // Use the crew ID from the state (WebSocket data) if available, otherwise fall back to the prop
-              const effectiveCrewId = state.crew?.id || crewId;
-              console.log(`Using crew ID for traces: ${effectiveCrewId}`);
-              navigate(`/kickoff/traces?crewId=${effectiveCrewId}`);
-            }}
-          >
-            <ExternalLink className="h-4 w-4" />
-            View Traces
-          </Button>
-        )}
       </div>
 
       {/* Loading state */}
