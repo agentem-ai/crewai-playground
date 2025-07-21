@@ -8,6 +8,7 @@ import asyncio
 import datetime
 import json
 import logging
+import threading
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -67,6 +68,7 @@ active_evaluations: Dict[str, Any] = {}
 
 class EvaluationConfigRequest(BaseModel):
     """Request model for evaluation configuration"""
+
     name: str
     crew_ids: List[str]
     metric_categories: Optional[List[str]] = None
@@ -77,6 +79,7 @@ class EvaluationConfigRequest(BaseModel):
 
 class EvaluationRunResponse(BaseModel):
     """Response model for evaluation run information"""
+
     id: str
     name: str
     status: str
@@ -186,9 +189,7 @@ async def create_evaluation(config: EvaluationConfigRequest):
                         else:
                             logger.warning(f"Crew {crew_id} has no 'agents' attribute")
                     else:
-                        logger.warning(
-                            f"Failed to load crew data from {crew_path_obj}"
-                        )
+                        logger.warning(f"Failed to load crew data from {crew_path_obj}")
 
             except Exception as e:
                 logger.warning(f"Failed to load crew {crew_id}: {str(e)}")
@@ -253,8 +254,13 @@ async def create_evaluation(config: EvaluationConfigRequest):
 
         evaluation_runs[eval_id] = run_data
 
-        # Start evaluation in background
-        asyncio.create_task(run_evaluation_async(eval_id, agents_to_evaluate, config))
+        # Start evaluation in background thread
+        evaluation_thread = threading.Thread(
+            target=run_evaluation_sync_in_background,
+            args=(eval_id, agents_to_evaluate, config),
+            daemon=True,
+        )
+        evaluation_thread.start()
 
         return {
             "status": "success",
@@ -442,10 +448,10 @@ async def delete_evaluation(evaluation_id: str):
         )
 
 
-async def run_evaluation_async(
+def run_evaluation_sync_in_background(
     eval_id: str, agents: List, config: EvaluationConfigRequest
 ):
-    """Run evaluation asynchronously in the background using real CrewAI evaluation."""
+    """Run evaluation synchronously in a background thread using working sync crew execution."""
     try:
         # Update status to running
         evaluation_runs[eval_id]["status"] = "running"
@@ -500,23 +506,62 @@ async def run_evaluation_async(
             logger.error(f"Failed to create evaluator: {str(e)}")
             raise
 
-        # Run real evaluation with crews
-        agent_results = await _run_real_evaluation(
-            evaluator, crews_to_evaluate, config, eval_id, crew_agents
+        # Update progress
+        evaluation_runs[eval_id]["progress"] = 30.0
+
+        # Run crews synchronously (the working approach)
+        for i, crew in enumerate(crews_to_evaluate):
+            logger.info(
+                f"Running crew {i+1}/{len(crews_to_evaluate)} for evaluation {eval_id}"
+            )
+
+            # Execute crew synchronously with test inputs
+            test_inputs = config.test_inputs or {
+                "industry": "AI",
+                "current_year": "2024",
+            }
+            crew.kickoff(inputs=test_inputs)
+
+            # Update progress
+            progress = 30.0 + (50.0 * (i + 1) / len(crews_to_evaluate))
+            evaluation_runs[eval_id]["progress"] = progress
+
+        # Aggregate results for this iteration
+        iteration_results = evaluator.get_agent_evaluation(
+            include_evaluation_feedback=True,
         )
 
-        # Calculate overall score
-        if agent_results:
-            overall_scores = [
-                result.get("overall_score")
-                for result in agent_results.values()
-                if result.get("overall_score") is not None
-            ]
-            overall_score = (
-                sum(overall_scores) / len(overall_scores) if overall_scores else None
-            )
-        else:
-            overall_score = None
+        logger.info(f"Iteration results for {eval_id}: {iteration_results}")
+
+        # Calculate overall score from iteration results
+        overall_scores = []
+        if iteration_results and hasattr(iteration_results, "values"):
+            for agent_result in iteration_results.values():
+                if (
+                    hasattr(agent_result, "overall_score")
+                    and agent_result.overall_score is not None
+                ):
+                    overall_scores.append(agent_result.overall_score)
+                elif isinstance(agent_result, dict) and "overall_score" in agent_result:
+                    overall_scores.append(agent_result["overall_score"])
+
+        overall_score = (
+            sum(overall_scores) / len(overall_scores) if overall_scores else None
+        )
+
+        # Store results in the expected format
+        agent_results = (
+            {
+                agent_id: (
+                    result.model_dump()
+                    if hasattr(result, "model_dump")
+                    else (result.__dict__ if hasattr(result, "__dict__") else result)
+                )
+                for agent_id, result in iteration_results.items()
+            }
+            if iteration_results
+            else {}
+        )
 
         # Store results (agent_results is already in the correct format)
         evaluation_results[eval_id] = {
@@ -538,7 +583,9 @@ async def run_evaluation_async(
         if eval_id in active_evaluations:
             del active_evaluations[eval_id]
 
-        logger.info(f"Evaluation {eval_id} completed successfully")
+        logger.info(
+            f"Evaluation {eval_id} completed successfully with {len(agent_results)} agent results"
+        )
 
     except Exception as e:
         logger.error(f"Error running evaluation {eval_id}: {str(e)}")
@@ -549,111 +596,3 @@ async def run_evaluation_async(
         # Clean up
         if eval_id in active_evaluations:
             del active_evaluations[eval_id]
-
-
-async def _run_real_evaluation(
-    evaluator: "AgentEvaluator",
-    crews_to_evaluate: List,
-    config: EvaluationConfigRequest,
-    eval_id: str,
-    agents: List = None,
-) -> dict:
-    """Run CrewAI evaluation using the official EvaluationTraceCallback.
-
-    The evaluation trace callback is already registered at startup via
-    `create_evaluation_callbacks().setup_listeners(crewai_event_bus)` so the
-    `AgentEvaluator` will automatically emit `AgentEvaluation*` events and keep
-    track of results.  We simply run each crew, then ask the evaluator for the
-    aggregated results of the current iteration.
-    """
-
-    # Fallback if evaluation subsystem is disabled
-    if not EVALUATION_AVAILABLE:
-        raise RuntimeError("CrewAI evaluation module not available")
-
-    # Ensure evaluator has a clean state before starting
-    evaluator.reset_iterations_results()
-
-    # Default test inputs if none provided
-    test_inputs = config.test_inputs or {
-        "query": "Evaluate agent performance on this task"
-    }
-
-    overall_agent_results: dict[str, Any] = {}
-
-    for iteration in range(1, config.iterations + 1):
-        logger.info(
-            "Running evaluation iteration %s/%s for %s",
-            iteration,
-            config.iterations,
-            eval_id,
-        )
-
-        # Update progress indicator (10-80 % range)
-        evaluation_runs[eval_id]["progress"] = 10.0 + (
-            70.0 * iteration / config.iterations
-        )
-
-        # Tell evaluator which iteration we're in
-        evaluator.set_iteration(iteration)
-
-        # Kick off each crew with the provided test inputs
-        # Use scoped_handlers context to ensure proper event capture
-        with crewai_event_bus.scoped_handlers():
-            for crew in crews_to_evaluate:
-                await crew.kickoff_async(inputs=test_inputs)
-
-        # Aggregate results for this iteration using SIMPLE_AVERAGE strategy
-        iteration_results = evaluator.get_agent_evaluation(
-            strategy=AggregationStrategy.SIMPLE_AVERAGE,
-            include_evaluation_feedback=True,
-        )
-        logger.debug("Iteration %s results: %s", iteration, iteration_results)
-
-        # Overwrite running tally (last iteration wins – can be adjusted)
-        overall_agent_results = {
-            role: (res.model_dump() if hasattr(res, "model_dump") else res.__dict__)
-            for role, res in iteration_results.items()
-        }
-
-        # Yield to event loop briefly to avoid blocking
-        await asyncio.sleep(0)
-
-    # Build summary statistics
-    scores = [
-        r.get("overall_score")
-        for r in overall_agent_results.values()
-        if r.get("overall_score") is not None
-    ]
-    overall_score = round(sum(scores) / len(scores), 1) if scores else None
-
-    result = {
-        "agent_results": overall_agent_results,
-        "summary": {
-            "overall_score": overall_score,
-            "total_agents": len(overall_agent_results),
-            "aggregation_strategy": config.aggregation_strategy,
-        },
-    }
-
-    logger.info(
-        "Real evaluation completed for %s with %d agent results",
-        eval_id,
-        len(overall_agent_results),
-    )
-    
-    return overall_agent_results
-
-
-def _get_score_color(score):
-    """Return a color based on the evaluation score."""
-    if score is None:
-        return "white"
-    if score >= 8:
-        return "green"
-    elif score >= 6:
-        return "cyan"
-    elif score >= 4:
-        return "yellow"
-    else:
-        return "red"
