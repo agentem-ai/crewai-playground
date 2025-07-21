@@ -14,6 +14,7 @@ import {
 import { useChatStore } from "~/lib/store";
 import { Loader2 } from "lucide-react";
 import { Layout } from "../components/Layout";
+import { KickoffNavigation } from "../components/KickoffNavigation";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import ReactMarkdown from "react-markdown";
 import CrewAgentCanvas from "../components/CrewAgentCanvas";
@@ -285,6 +286,9 @@ export default function Kickoff() {
         </Alert>
       )}
 
+      {/* Navigation Menu */}
+      {selectedCrewId && <KickoffNavigation crewId={selectedCrewId} />}
+      
       {/* Crew Agent Visualization Canvas */}
       {selectedCrewId && (
         <CrewAgentCanvas

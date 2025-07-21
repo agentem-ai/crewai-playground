@@ -869,54 +869,10 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
   
   // Extract effective crew ID for navigation
   const effectiveCrewId = state.crew?.id || crewId;
-  
-  // Navigation items for the kickoff section
-  const navigationItems = [
-    {
-      name: "Execution",
-      path: "/kickoff",
-      icon: <Play className="h-4 w-4" />,
-      isActive: path === "/kickoff"
-    },
-    {
-      name: "Traces",
-      path: `/kickoff/traces?crewId=${effectiveCrewId}`,
-      icon: <Activity className="h-4 w-4" />,
-      isActive: path.includes("/kickoff/traces")
-    },
-    {
-      name: "Evaluations",
-      path: `/kickoff/evals?crewId=${effectiveCrewId}`,
-      icon: <BarChart3 className="h-4 w-4" />,
-      isActive: path.includes("/kickoff/evals")
-    }
-  ];
-
-  // KickoffNavigation component
-  const KickoffNavigation = () => (
-    <div className="border rounded-lg p-1 flex mb-4 bg-muted/30">
-      {navigationItems.map((item) => (
-        <Button
-          key={item.name}
-          variant={item.isActive ? "default" : "ghost"}
-          size="sm"
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2",
-            item.isActive ? "shadow-sm" : "hover:bg-muted/50"
-          )}
-          onClick={() => navigate(item.path)}
-        >
-          {item.icon}
-          {item.name}
-        </Button>
-      ))}
-    </div>
-  );
 
   return (
     <Card className="p-6 mb-6 overflow-hidden relative">
-      {/* Navigation menu */}
-      {state.crew?.id && <KickoffNavigation />}
+      {/* Navigation menu moved to kickoff.tsx */}
       
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Crew Execution Visualization</h3>

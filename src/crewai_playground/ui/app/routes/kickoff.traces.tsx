@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate, useLocation } from "react-router";
 import { Layout } from "../components/Layout";
+import { KickoffNavigation } from "../components/KickoffNavigation";
 import {
   Card,
   CardContent,
@@ -399,7 +400,11 @@ export default function TracesPage() {
     }
 
     if (traces.length === 0) {
-      return <div className="p-4 text-gray-500 dark:text-gray-400">No traces found.</div>;
+      return (
+        <div className="p-4 text-gray-500 dark:text-gray-400">
+          No traces found.
+        </div>
+      );
     }
 
     return (
@@ -574,7 +579,11 @@ export default function TracesPage() {
     const agents = Object.values(selectedTrace.agents);
 
     if (agents.length === 0) {
-      return <div className="p-4 text-gray-500 dark:text-gray-400">No agent data available.</div>;
+      return (
+        <div className="p-4 text-gray-500 dark:text-gray-400">
+          No agent data available.
+        </div>
+      );
     }
 
     return (
@@ -603,22 +612,30 @@ export default function TracesPage() {
               </AccordionTrigger>
               <AccordionContent className="px-4 py-2 space-y-4">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Agent ID</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    Agent ID
+                  </div>
                   <div className="text-sm font-mono">{agent.id}</div>
 
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Start Time</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    Start Time
+                  </div>
                   <div>{formatTime(agent.start_time)}</div>
 
                   {agent.end_time && (
                     <div className="grid grid-cols-2 col-span-2">
-                      <div className="text-sm text-gray-500 dark:text-gray-400">End Time</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        End Time
+                      </div>
                       <div>{formatTime(agent.end_time)}</div>
                     </div>
                   )}
 
                   {agent.output && (
                     <div className="col-span-2">
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Output</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                        Output
+                      </div>
                       <div className="bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md text-sm whitespace-pre-wrap font-mono">
                         {agent.output}
                       </div>
@@ -627,7 +644,9 @@ export default function TracesPage() {
 
                   {agent.events.length > 0 && (
                     <div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Events</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                        Events
+                      </div>
                       <div className="border rounded-md divide-y dark:divide-gray-700 col-span-2">
                         {agent.events.map((event, idx) => (
                           <div
@@ -666,7 +685,11 @@ export default function TracesPage() {
     const tasks = Object.values(selectedTrace.tasks);
 
     if (tasks.length === 0) {
-      return <div className="p-4 text-gray-500 dark:text-gray-400">No task data available.</div>;
+      return (
+        <div className="p-4 text-gray-500 dark:text-gray-400">
+          No task data available.
+        </div>
+      );
     }
 
     return (
@@ -694,7 +717,9 @@ export default function TracesPage() {
               </AccordionTrigger>
               <AccordionContent className="px-4 py-2 space-y-4">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Task ID</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    Task ID
+                  </div>
                   <div className="text-sm font-mono">{task.id}</div>
 
                   {task.agent_id && (
@@ -706,19 +731,25 @@ export default function TracesPage() {
                     </div>
                   )}
 
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Start Time</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    Start Time
+                  </div>
                   <div>{formatTime(task.start_time)}</div>
 
                   {task.end_time && (
                     <div className="grid grid-cols-2 col-span-2">
-                      <div className="text-sm text-gray-500 dark:text-gray-400">End Time</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        End Time
+                      </div>
                       <div>{formatTime(task.end_time)}</div>
                     </div>
                   )}
 
                   {task.output && (
                     <div className="col-span-2">
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Output</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                        Output
+                      </div>
                       <div className="bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md text-sm whitespace-pre-wrap font-mono">
                         {task.output}
                       </div>
@@ -727,7 +758,9 @@ export default function TracesPage() {
 
                   {task.events.length > 0 && (
                     <div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Events</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                        Events
+                      </div>
                       <div className="border rounded-md divide-y dark:divide-gray-700 col-span-2">
                         {task.events.map((event, idx) => (
                           <div
@@ -764,14 +797,21 @@ export default function TracesPage() {
     if (!selectedTrace) return null;
 
     if (selectedTrace.events.length === 0) {
-      return <div className="p-4 text-gray-500 dark:text-gray-400">No event data available.</div>;
+      return (
+        <div className="p-4 text-gray-500 dark:text-gray-400">
+          No event data available.
+        </div>
+      );
     }
 
     return (
       <div className="space-y-4">
         <div className="border rounded-md divide-y dark:divide-gray-700">
           {selectedTrace.events.map((event, idx) => (
-            <div key={idx} className="p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+            <div
+              key={idx}
+              className="p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+            >
               <div className="flex justify-between items-center">
                 <Badge variant="outline">{event.type}</Badge>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -796,15 +836,11 @@ export default function TracesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Traces</CardTitle>
-          <CardDescription>
-            Select a trace to view details
-          </CardDescription>
+          <CardDescription>Select a trace to view details</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <ScrollArea className="h-[500px]">
-            <div className="p-4">
-              {renderTraceList()}
-            </div>
+            <div className="p-4">{renderTraceList()}</div>
           </ScrollArea>
         </CardContent>
       </Card>
@@ -814,84 +850,53 @@ export default function TracesPage() {
   return (
     <Layout rightSidebar={rightSidebar}>
       <div className="w-full">
-        <div className="flex items-center mb-6">
-          <Button 
-            variant="default" 
-            size="sm" 
-            className="mr-4"
-            onClick={handleBack}
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Execution
-          </Button>
-          <h1 className="text-2xl font-bold">Execution Traces</h1>
-        </div>
-        
-        <div className="mb-6 flex items-center">
-          <div className="text-sm text-muted-foreground">
-            <span className="font-medium">Current Path:</span>{' '}
-            <button 
-              onClick={() => navigate('/kickoff')} 
-              className="hover:underline text-primary"
-            >
-              Crews
-            </button>{' '}
-            /{' '}
-            <button 
-              onClick={() => navigate(`/kickoff?crewId=${crewId}`)} 
-              className="hover:underline text-primary"
-            >
-              Execution
-            </button>{' '}
-            /{' '}
-            <span className="text-foreground">Traces</span>
-          </div>
-        </div>
+        {/* Navigation Menu */}
+        <KickoffNavigation crewId={crewId || undefined} />
 
         <div className="w-full">
-            {selectedTrace ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>{selectedTrace.crew_name}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Tabs
-                    defaultValue="overview"
-                    value={activeTab}
-                    onValueChange={setActiveTab}
-                    className="w-full"
-                  >
-                    <TabsList className="grid grid-cols-3 mb-4">
-                      <TabsTrigger
-                        value="overview"
-                        className="flex items-center gap-1"
-                      >
-                        <Info className="h-4 w-4" />
-                        <span>Overview</span>
-                      </TabsTrigger>
-                      <TabsTrigger value="agents">Agents</TabsTrigger>
-                      <TabsTrigger value="tasks">Tasks</TabsTrigger>
-                    </TabsList>
+          {selectedTrace ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>{selectedTrace.crew_name}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Tabs
+                  defaultValue="overview"
+                  value={activeTab}
+                  onValueChange={setActiveTab}
+                  className="w-full"
+                >
+                  <TabsList className="grid grid-cols-3 mb-4">
+                    <TabsTrigger
+                      value="overview"
+                      className="flex items-center gap-1"
+                    >
+                      <Info className="h-4 w-4" />
+                      <span>Overview</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="agents">Agents</TabsTrigger>
+                    <TabsTrigger value="tasks">Tasks</TabsTrigger>
+                  </TabsList>
 
-                    <TabsContent value="overview">
-                      {renderOverviewWithTimeline()}
-                    </TabsContent>
+                  <TabsContent value="overview">
+                    {renderOverviewWithTimeline()}
+                  </TabsContent>
 
-                    <TabsContent value="agents">{renderAgents()}</TabsContent>
+                  <TabsContent value="agents">{renderAgents()}</TabsContent>
 
-                    <TabsContent value="tasks">{renderTasks()}</TabsContent>
-                  </Tabs>
-                </CardContent>
-              </Card>
-            ) : loading ? (
-              <div className="flex justify-center items-center p-8">
-                <Loader2 className="h-8 w-8 animate-spin" />
-              </div>
-            ) : (
-              <div className="text-center p-8 text-gray-500">
-                Select a trace to view details
-              </div>
-            )}
+                  <TabsContent value="tasks">{renderTasks()}</TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          ) : loading ? (
+            <div className="flex justify-center items-center p-8">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : (
+            <div className="text-center p-8 text-gray-500">
+              Select a trace to view details
+            </div>
+          )}
         </div>
       </div>
     </Layout>
