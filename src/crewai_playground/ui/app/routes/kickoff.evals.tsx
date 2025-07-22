@@ -328,9 +328,9 @@ export default function KickoffEvalsPage() {
         if (rawData) {
           // Transform the data structure to match UI expectations
           const transformedData = {
-            overall_score: rawData.summary?.overall_score,
-            total_agents: rawData.summary?.total_agents,
-            aggregation_strategy: rawData.summary?.aggregation_strategy,
+            overall_score: rawData.summary?.overall_score || rawData.results?.summary?.overall_score,
+            total_agents: rawData.summary?.agent_count || rawData.results?.summary?.total_agents,
+            aggregation_strategy: rawData.results?.summary?.aggregation_strategy,
             agent_results: rawData.results?.agent_results || {}
           };
           setEvaluationResults(transformedData);
