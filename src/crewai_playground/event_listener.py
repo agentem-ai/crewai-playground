@@ -188,53 +188,92 @@ class EventListener:
     # WebSocket Client Management
     async def connect(self, websocket: WebSocket, client_id: str, crew_id: str = None):
         """Connect a new WebSocket client."""
-        self.loop = asyncio.get_running_loop()
-        await websocket.accept()
-        self.clients[client_id] = {
-            "websocket": websocket,
-            "crew_id": crew_id,
-            "connected_at": datetime.utcnow(),
-            "last_ping": datetime.utcnow(),
-        }
-        logger.info(
-            f"WebSocket client {client_id} connected. Total connections: {len(self.clients)}"
-        )
+        try:
+            await websocket.accept()
 
-        if crew_id:
-            await self.send_state_to_client(client_id)
+            self.clients[client_id] = {
+                "websocket": websocket,
+                "crew_id": crew_id,
+                "connected_at": datetime.utcnow().isoformat(),
+                "last_ping": datetime.utcnow().isoformat(),
+                "connection_status": "active",
+            }
+
+            logger.info(
+                f"WebSocket client {client_id} connected for crew {crew_id}. Total connections: {len(self.clients)}"
+            )
+
+            # Send current state to the newly connected client
+            if crew_id:
+                try:
+                    await self.send_state_to_client(client_id)
+                except Exception as e:
+                    logger.error(f"Error sending initial state to client {client_id}: {e}")
+                    # Don't disconnect on initial state send failure
+                    
+        except Exception as e:
+            logger.error(f"Error accepting WebSocket connection for client {client_id}: {e}")
+            # Clean up if connection failed
+            if client_id in self.clients:
+                del self.clients[client_id]
+            raise
 
     def disconnect(self, client_id: str):
         """Disconnect a client by ID."""
-        if client_id in self.clients:
-            del self.clients[client_id]
-            logger.info(
-                f"WebSocket client {client_id} disconnected. Remaining connections: {len(self.clients)}"
-            )
+        try:
+            if client_id in self.clients:
+                client = self.clients[client_id]
+                crew_id = client.get("crew_id")
+                del self.clients[client_id]
+                logger.info(
+                    f"WebSocket client {client_id} (crew: {crew_id}) disconnected. Remaining connections: {len(self.clients)}"
+                )
+            else:
+                logger.warning(f"Attempted to disconnect non-existent client {client_id}")
+        except Exception as e:
+            logger.error(f"Error during client {client_id} disconnect: {e}")
 
     async def register_client_for_crew(self, client_id: str, crew_id: str):
         """Register a client for updates from a specific crew."""
-        if client_id in self.clients:
-            self.clients[client_id]["crew_id"] = crew_id
-            logger.info(f"Client {client_id} registered for crew {crew_id}")
-            await self.send_state_to_client(client_id)
+        try:
+            if client_id in self.clients:
+                old_crew_id = self.clients[client_id].get("crew_id")
+                self.clients[client_id]["crew_id"] = crew_id
+                self.clients[client_id]["last_ping"] = datetime.utcnow().isoformat()
+                logger.info(f"Client {client_id} registered for crew {crew_id} (was: {old_crew_id})")
+                
+                # Send current state for the new crew
+                try:
+                    await self.send_state_to_client(client_id)
+                except Exception as e:
+                    logger.error(f"Error sending state after crew registration for client {client_id}: {e}")
+            else:
+                logger.warning(f"Attempted to register non-existent client {client_id} for crew {crew_id}")
+        except Exception as e:
+            logger.error(f"Error registering client {client_id} for crew {crew_id}: {e}")
 
     async def send_state_to_client(self, client_id: str):
         """Send current state to a specific client."""
         if client_id not in self.clients:
+            logger.warning(f"Client {client_id} not found in connected clients")
             return
 
         client = self.clients[client_id]
         websocket = client["websocket"]
-        crew_id = client["crew_id"]
+        client_crew_id = client.get("crew_id")
+        current_crew_id = self.crew_state.get("id") if self.crew_state else None
+        
+        logger.debug(f"Sending state to client {client_id}, client_crew_id: {client_crew_id}, current_crew_id: {current_crew_id}")
 
-        # Check if we have flow state for this crew
+        # Check if we have flow state for this crew first
         flow_state = None
         for fid, state in self.flow_states.items():
-            if state.get("name") == crew_id or state.get("id") == crew_id:
+            if (client_crew_id and 
+                (state.get("name") == client_crew_id or state.get("id") == client_crew_id)):
                 flow_state = state
                 break
 
-        # Send flow state if available, otherwise send crew state
+        # Send flow state if available
         if flow_state:
             try:
                 await websocket.send_text(
@@ -243,52 +282,87 @@ class EventListener:
                         cls=CustomJSONEncoder,
                     )
                 )
-                logger.debug(f"Sent flow state to client {client_id}")
+                logger.info(f"Sent flow state to client {client_id}")
+                return
             except Exception as e:
-                logger.error(
-                    f"Error sending flow state to client {client_id}: {str(e)}"
-                )
+                logger.error(f"Error sending flow state to client {client_id}: {str(e)}")
                 self.disconnect(client_id)
-        elif crew_id and self.crew_state and self.crew_state.get("id") == crew_id:
+                return
+        
+        # Send crew state (with more lenient matching)
+        should_send_crew_state = (
+            not client_crew_id or  # Client has no crew filter
+            not current_crew_id or  # No current crew (send current state anyway)
+            client_crew_id == current_crew_id or  # Exact match
+            client_crew_id == str(current_crew_id) or  # String comparison
+            bool(self.crew_state or self.agent_states or self.task_states)  # Has any state to send
+        )
+        
+        if should_send_crew_state:
             try:
                 state = {
                     "crew": self.crew_state,
                     "agents": list(self.agent_states.values()),
                     "tasks": list(self.task_states.values()),
+                    "timestamp": datetime.utcnow().isoformat(),
                 }
                 json_data = json.dumps(state, cls=CustomJSONEncoder)
                 await websocket.send_text(json_data)
-                logger.debug(f"Sent crew state to client {client_id}")
+                logger.info(f"Sent crew state to client {client_id} (crew: {bool(self.crew_state)}, agents: {len(self.agent_states)}, tasks: {len(self.task_states)})")
             except Exception as e:
-                logger.error(
-                    f"Error sending crew state to client {client_id}: {str(e)}"
-                )
+                logger.error(f"Error sending crew state to client {client_id}: {str(e)}")
                 self.disconnect(client_id)
+        else:
+            logger.debug(f"No matching state to send to client {client_id} (client_crew_id: {client_crew_id}, current_crew_id: {current_crew_id})")
 
     async def broadcast_update(self):
         """Broadcast the current state to all connected WebSocket clients."""
         if not self.clients:
+            logger.debug("No WebSocket clients connected, skipping broadcast")
             return
 
-        crew_id = self.crew_state.get("id") if self.crew_state else None
+        # Get current crew ID from crew state
+        current_crew_id = self.crew_state.get("id") if self.crew_state else None
+        logger.debug(f"Broadcasting update for crew_id: {current_crew_id}, clients: {len(self.clients)}")
+        
+        # Prepare the state data
+        state = {
+            "crew": self.crew_state,
+            "agents": list(self.agent_states.values()),
+            "tasks": list(self.task_states.values()),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
+        logger.debug(f"Broadcasting state: crew={bool(self.crew_state)}, agents={len(self.agent_states)}, tasks={len(self.task_states)}")
 
+        # Send to all connected clients (remove restrictive filtering)
+        disconnected_clients = []
         for client_id, client in list(self.clients.items()):
             client_crew_id = client.get("crew_id")
-            if not client_crew_id or (crew_id and client_crew_id == crew_id):
+            
+            # Send to clients that match the crew or have no specific crew filter
+            should_send = (
+                not client_crew_id or  # Client has no crew filter
+                not current_crew_id or  # No current crew (send to all)
+                client_crew_id == current_crew_id or  # Exact crew match
+                client_crew_id == str(current_crew_id)  # String comparison fallback
+            )
+            
+            if should_send:
                 try:
                     websocket = client["websocket"]
-                    state = {
-                        "crew": self.crew_state,
-                        "agents": list(self.agent_states.values()),
-                        "tasks": list(self.task_states.values()),
-                        "timestamp": datetime.utcnow().isoformat(),
-                    }
                     json_data = json.dumps(state, cls=CustomJSONEncoder)
                     await websocket.send_text(json_data)
-                    logger.debug(f"Sent update to client {client_id}")
+                    logger.info(f"Successfully sent update to client {client_id} for crew {client_crew_id}")
                 except Exception as e:
                     logger.error(f"Error broadcasting to client {client_id}: {str(e)}")
-                    self.disconnect(client_id)
+                    disconnected_clients.append(client_id)
+            else:
+                logger.debug(f"Skipping client {client_id} (crew filter: {client_crew_id}, current: {current_crew_id})")
+        
+        # Clean up disconnected clients
+        for client_id in disconnected_clients:
+            self.disconnect(client_id)
 
     def reset_state(self):
         """Reset the state when a new execution starts."""
@@ -319,23 +393,53 @@ class EventListener:
             except Exception as e:
                 logger.error(f"Error scheduling coroutine: {e}")
 
-    def _extract_execution_id(self, source, event) -> Optional[str]:
+    def _extract_execution_id(self, source, event):
         """Extract execution ID from source or event."""
-        if hasattr(source, "id") and source.id:
-            return str(source.id)
-        if hasattr(event, "crew_id") and event.crew_id:
+        # Try to get from event first (more reliable for crew events)
+        if hasattr(event, "execution_id"):
+            return str(event.execution_id)
+        elif hasattr(event, "crew_id"):
             return str(event.crew_id)
-        if hasattr(source, "crew_id") and source.crew_id:
+        elif hasattr(event, "id"):
+            return str(event.id)
+        elif hasattr(event, "_id"):
+            return str(event._id)
+        elif hasattr(event, "flow_id"):
+            return str(event.flow_id)
+        
+        # Try to get from source
+        if hasattr(source, "id"):
+            return str(source.id)
+        elif hasattr(source, "_id"):
+            return str(source._id)
+        elif hasattr(source, "execution_id"):
+            return str(source.execution_id)
+        elif hasattr(source, "crew_id"):
             return str(source.crew_id)
-        if source:
-            return str(source)
-        return None
+        
+        # For crew objects, try to get name or other identifiers
+        if hasattr(source, "name"):
+            return str(source.name)
+        elif hasattr(source, "__class__"):
+            class_name = source.__class__.__name__
+            if "crew" in class_name.lower():
+                return f"{class_name}_{id(source)}"
+        
+        # Fallback to object id
+        execution_id = str(id(source)) if source else str(id(event))
+        logger.debug(f"Using fallback execution_id: {execution_id} for source: {type(source)}, event: {type(event)}")
+        return execution_id
 
     def _is_flow_context(self, source, event) -> bool:
         """Determine if this event is in a flow context."""
+        # Check if source is a Flow object
         if hasattr(source, "__class__") and "Flow" in source.__class__.__name__:
             return True
+        # Check if source has flow-like attributes
         if hasattr(source, "state") and hasattr(source, "id"):
+            return True
+        # Check event for flow indicators
+        if hasattr(event, "flow_id"):
             return True
         return False
 
@@ -394,89 +498,101 @@ class EventListener:
         if flow_id:
             self._schedule(self._handle_method_finished(flow_id, event))
 
-    def handle_method_execution_failed(self, source, event):
+    async def handle_method_execution_failed(self, source, event):
         """Handle method execution failed event."""
         flow_id = self._extract_execution_id(source, event)
         if flow_id:
-            self._schedule(self._handle_method_failed(flow_id, event))
+            await self._handle_method_failed(flow_id, event)
 
-    def handle_crew_kickoff_started(self, source, event):
+    async def handle_crew_kickoff_started(self, source, event):
         """Handle crew kickoff started event."""
+        logger.info(f"Crew kickoff started event received: {event}")
         execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            if self._is_flow_context(source, event):
-                logger.debug(
-                    f"Crew kickoff started (flow context) for flow: {execution_id}"
-                )
-            else:
-                logger.info(
-                    f"Crew kickoff started (crew context) for execution: {execution_id}"
-                )
-                self._schedule(
-                    self._handle_crew_kickoff_started_crew(execution_id, event)
-                )
+        
+        if self._is_flow_context(source, event):
+            # This is a flow context - handle differently
+            logger.debug(f"Handling crew kickoff started in flow context: {execution_id}")
+            # For flows, we don't need to do anything special here
+            return
+        else:
+            # This is a crew context
+            logger.debug(f"Handling crew kickoff started in crew context: {execution_id}")
+            await self._handle_crew_kickoff_started_crew(execution_id, event)
 
-    def handle_crew_kickoff_completed(self, source, event):
+    async def handle_crew_kickoff_completed(self, source, event):
         """Handle crew kickoff completed event."""
+        logger.info(f"Crew kickoff completed event received: {event}")
         execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            if self._is_flow_context(source, event):
-                logger.debug(
-                    f"Crew kickoff completed (flow context) for flow: {execution_id}"
-                )
-            else:
-                logger.info(
-                    f"Crew kickoff completed (crew context) for execution: {execution_id}"
-                )
-                self._schedule(
-                    self._handle_crew_kickoff_completed_crew(execution_id, event)
-                )
+        
+        if self._is_flow_context(source, event):
+            # This is a flow context - handle differently
+            logger.debug(f"Handling crew kickoff completed in flow context: {execution_id}")
+            # For flows, we don't need to do anything special here
+            return
+        else:
+            # This is a crew context
+            logger.debug(f"Handling crew kickoff completed in crew context: {execution_id}")
+            await self._handle_crew_kickoff_completed_crew(execution_id, event)
 
-    def handle_crew_kickoff_failed(self, source, event):
+    async def handle_crew_kickoff_failed(self, source, event):
         """Handle crew kickoff failed event."""
         execution_id = self._extract_execution_id(source, event)
         if execution_id:
             logger.info(f"Crew kickoff failed for execution: {execution_id}")
-            self._schedule(self._handle_crew_kickoff_failed_crew(execution_id, event))
+            await self._handle_crew_kickoff_failed_crew(execution_id, event)
 
-    def handle_agent_execution_started(self, source, event):
+    async def handle_agent_execution_started(self, source, event):
         """Handle agent execution started event."""
+        logger.info(f"Agent execution started event received: {event}")
         execution_id = self._extract_execution_id(source, event)
-        if execution_id and not self._is_flow_context(source, event):
-            logger.info(
-                f"Agent execution started (crew context) for execution: {execution_id}"
-            )
-            self._schedule(
-                self._handle_agent_execution_started_crew(execution_id, event)
-            )
+        
+        if self._is_flow_context(source, event):
+            # This is a flow context - handle differently
+            logger.debug(f"Handling agent execution started in flow context: {execution_id}")
+            # For flows, we don't need to do anything special here
+            return
+        else:
+            # This is a crew context
+            logger.debug(f"Handling agent execution started in crew context: {execution_id}")
+            await self._handle_agent_execution_started_crew(execution_id, event)
 
-    def handle_agent_execution_completed(self, source, event):
+    async def handle_agent_execution_completed(self, source, event):
         """Handle agent execution completed event."""
+        logger.info(f"Agent execution completed event received: {event}")
         execution_id = self._extract_execution_id(source, event)
-        if execution_id and not self._is_flow_context(source, event):
-            logger.info(
-                f"Agent execution completed (crew context) for execution: {execution_id}"
-            )
-            self._schedule(
-                self._handle_agent_execution_completed_crew(execution_id, event)
-            )
+        
+        if self._is_flow_context(source, event):
+            # This is a flow context - handle differently
+            logger.debug(f"Handling agent execution completed in flow context: {execution_id}")
+            # For flows, we don't need to do anything special here
+            return
+        else:
+            # This is a crew context
+            logger.debug(f"Handling agent execution completed in crew context: {execution_id}")
+            await self._handle_agent_execution_completed_crew(execution_id, event)
 
-    def handle_agent_execution_error(self, source, event):
+    async def handle_agent_execution_error(self, source, event):
         """Handle agent execution error event."""
+        logger.info(f"Agent execution error event received: {event}")
         execution_id = self._extract_execution_id(source, event)
-        if execution_id and not self._is_flow_context(source, event):
-            logger.info(
-                f"Agent execution error (crew context) for execution: {execution_id}"
-            )
-            self._schedule(self._handle_agent_execution_error_crew(execution_id, event))
+        
+        if self._is_flow_context(source, event):
+            # This is a flow context - handle differently
+            logger.debug(f"Handling agent execution error in flow context: {execution_id}")
+            # For flows, we don't need to do anything special here
+            return
+        else:
+            # This is a crew context
+            logger.debug(f"Handling agent execution error in crew context: {execution_id}")
+            await self._handle_agent_execution_error_crew(execution_id, event)
 
     # Additional Crew Event Handlers
-    def handle_crew_test_started(self, source, event):
+    async def handle_crew_test_started(self, source, event):
         """Handle crew test started event."""
         execution_id = self._extract_execution_id(source, event)
         if execution_id:
             logger.info(f"Crew test started for execution: {execution_id}")
-            self._schedule(self._handle_crew_test_started_crew(execution_id, event))
+            await self._handle_crew_test_started_crew(execution_id, event)
 
     def handle_crew_test_completed(self, source, event):
         """Handle crew test completed event."""
@@ -749,20 +865,56 @@ class EventListener:
 
     async def _handle_crew_kickoff_started_crew(self, execution_id: str, event):
         """Handle crew kickoff started event in crew context."""
-        logger.info(
-            f"Crew kickoff started (crew context) for execution: {execution_id}"
-        )
+        logger.info(f"Crew kickoff started (crew context) for execution: {execution_id}")
+
+        # Extract crew information from event or source
+        crew_name = getattr(event, "crew_name", None)
+        if not crew_name and hasattr(event, "crew"):
+            crew_name = getattr(event.crew, "name", None)
+        if not crew_name:
+            crew_name = f"Crew {execution_id}"
 
         self.crew_state = {
             "id": execution_id,
-            "name": getattr(event, "crew_name", f"Crew {execution_id}"),
+            "name": crew_name,
             "status": "running",
             "timestamp": datetime.utcnow().isoformat(),
+            "type": getattr(event, "process", "sequential"),
         }
 
+        # Initialize agent and task states
         self.agent_states.clear()
         self.task_states.clear()
+        
+        # Try to extract initial agent and task information if available
+        if hasattr(event, "crew") and event.crew:
+            crew = event.crew
+            
+            # Extract agents
+            if hasattr(crew, "agents") and crew.agents:
+                for i, agent in enumerate(crew.agents):
+                    agent_id = getattr(agent, "id", f"agent_{i}")
+                    self.agent_states[agent_id] = {
+                        "id": agent_id,
+                        "name": getattr(agent, "name", f"Agent {i+1}"),
+                        "role": getattr(agent, "role", "Unknown"),
+                        "status": "initializing",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+            
+            # Extract tasks
+            if hasattr(crew, "tasks") and crew.tasks:
+                for i, task in enumerate(crew.tasks):
+                    task_id = getattr(task, "id", f"task_{i}")
+                    self.task_states[task_id] = {
+                        "id": task_id,
+                        "description": getattr(task, "description", f"Task {i+1}"),
+                        "status": "pending",
+                        "agent_id": getattr(task, "agent_id", None),
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
 
+        logger.info(f"Initialized crew state: {len(self.agent_states)} agents, {len(self.task_states)} tasks")
         await self.broadcast_update()
 
     async def _handle_crew_kickoff_completed_crew(self, execution_id: str, event):
