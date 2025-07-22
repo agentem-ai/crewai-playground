@@ -38,18 +38,17 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import {
-  ArrowLeft,
-  BarChart3,
-  Clock,
-  CheckCircle,
-  XCircle,
   AlertCircle,
+  BarChart3,
+  CheckCircle,
+  ChevronRight,
+  Clock,
   Loader2,
-  RefreshCw,
-  TrendingUp,
-  Plus,
   Play,
+  Plus,
+  RefreshCw,
   X,
+  XCircle,
 } from "lucide-react";
 import { Separator } from "../components/ui/separator";
 
@@ -109,32 +108,45 @@ function getStatusBadge(status: EvaluationRun["status"]) {
   switch (status) {
     case "running":
       return (
-        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+        <Badge
+          variant="outline"
+          className="bg-blue-50 text-blue-700 border-blue-200"
+        >
           Running
         </Badge>
       );
     case "completed":
       return (
-        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+        <Badge
+          variant="outline"
+          className="bg-green-50 text-green-700 border-green-200"
+        >
           Completed
         </Badge>
       );
     case "failed":
       return (
-        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+        <Badge
+          variant="outline"
+          className="bg-red-50 text-red-700 border-red-200"
+        >
           Failed
         </Badge>
       );
     case "pending":
       return (
-        <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+        <Badge
+          variant="outline"
+          className="bg-yellow-50 text-yellow-700 border-yellow-200"
+        >
           Pending
         </Badge>
       );
   }
 }
 
-function getScoreColor(score: number) {
+function getScoreColor(score: number | null | undefined) {
+  if (score == null) return "text-gray-500";
   if (score >= 8) return "text-green-600";
   if (score >= 6) return "text-cyan-600";
   if (score >= 4) return "text-yellow-600";
@@ -170,48 +182,56 @@ export default function KickoffEvalsPage() {
   const crewId = searchParams.get("crewId");
 
   const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
-  const [selectedEvaluation, setSelectedEvaluation] = useState<string | null>(null);
-  const [evaluationResults, setEvaluationResults] = useState<EvaluationResults | null>(null);
+  const [selectedEvaluation, setSelectedEvaluation] = useState<string | null>(
+    null
+  );
+  const [evaluationResults, setEvaluationResults] =
+    useState<EvaluationResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  
+
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [selectedEvaluationDetails, setSelectedEvaluationDetails] = useState<EvaluationRun | null>(null);
-  
+  const [selectedEvaluationDetails, setSelectedEvaluationDetails] =
+    useState<EvaluationRun | null>(null);
+
   // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newEvaluation, setNewEvaluation] = useState({
     iterations: 1,
     aggregation_strategy: "simple_average",
-    test_inputs: {}
+    test_inputs: {},
   });
   const [testInputsJson, setTestInputsJson] = useState(
-    JSON.stringify({ query: "Evaluate agent performance on this task" }, null, 2)
+    JSON.stringify(
+      { query: "Evaluate agent performance on this task" },
+      null,
+      2
+    )
   );
   const [aggregationStrategies] = useState([
     {
       id: "simple_average",
       name: "Simple Average",
-      description: "Equal weight to all tasks"
+      description: "Equal weight to all tasks",
     },
     {
       id: "weighted_by_complexity",
       name: "Weighted by Complexity",
-      description: "Weight by task complexity"
+      description: "Weight by task complexity",
     },
     {
       id: "best_performance",
       name: "Best Performance",
-      description: "Use best scores across tasks"
+      description: "Use best scores across tasks",
     },
     {
       id: "worst_performance",
       name: "Worst Performance",
-      description: "Use worst scores across tasks"
-    }
+      description: "Use worst scores across tasks",
+    },
   ]);
 
   // Create a new evaluation
@@ -246,10 +266,16 @@ export default function KickoffEvalsPage() {
         setNewEvaluation({
           iterations: 1,
           aggregation_strategy: "simple_average",
-          test_inputs: {}
+          test_inputs: {},
         });
-        setTestInputsJson(JSON.stringify({ query: "Evaluate agent performance on this task" }, null, 2));
-        setRefreshKey(prev => prev + 1);
+        setTestInputsJson(
+          JSON.stringify(
+            { query: "Evaluate agent performance on this task" },
+            null,
+            2
+          )
+        );
+        setRefreshKey((prev) => prev + 1);
       } else {
         alert("Error creating evaluation: " + data.detail);
       }
@@ -271,7 +297,8 @@ export default function KickoffEvalsPage() {
         const response = await fetch(`/api/evaluations?crew_id=${crewId}`);
         if (response.ok) {
           const data = await response.json();
-          setEvaluations(data.evaluations || []);
+          // API returns evaluations in data.runs, not data.evaluations
+          setEvaluations(data.data?.runs || []);
         }
       } catch (error) {
         console.error("Error fetching evaluations:", error);
@@ -313,7 +340,7 @@ export default function KickoffEvalsPage() {
   // Handle evaluation selection
   const handleEvaluationSelect = async (evalId: string) => {
     setSelectedEvaluation(evalId);
-    const evalDetails = evaluations.find(e => e.id === evalId);
+    const evalDetails = evaluations.find((e) => e.id === evalId);
     if (evalDetails) {
       setSelectedEvaluationDetails(evalDetails);
       setDrawerOpen(true);
@@ -341,7 +368,7 @@ export default function KickoffEvalsPage() {
                 Detailed performance metrics and agent evaluations
               </SheetDescription>
             </SheetHeader>
-            
+
             {resultsLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-indigo-500 mr-2" />
@@ -350,7 +377,9 @@ export default function KickoffEvalsPage() {
             ) : !evaluationResults ? (
               <div className="text-center py-12">
                 <AlertCircle className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium mb-2">No Results Available</h3>
+                <h3 className="text-lg font-medium mb-2">
+                  No Results Available
+                </h3>
                 <p className="text-gray-500">
                   {selectedEvaluationDetails?.status === "running"
                     ? "Evaluation is still running. Results will be available when complete."
@@ -361,14 +390,22 @@ export default function KickoffEvalsPage() {
               <div className="space-y-6">
                 {/* Evaluation Summary */}
                 <div>
-                  <h3 className="text-lg font-semibold mb-4">Evaluation Summary</h3>
+                  <h3 className="text-lg font-semibold mb-4">
+                    Evaluation Summary
+                  </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
                       <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
                         Overall Score
                       </div>
-                      <div className={`text-2xl font-bold ${getScoreColor(evaluationResults.overall_score)}`}>
-                        {evaluationResults.overall_score.toFixed(1)}
+                      <div
+                        className={`text-2xl font-bold ${getScoreColor(
+                          evaluationResults.overall_score
+                        )}`}
+                      >
+                        {evaluationResults.overall_score != null
+                          ? evaluationResults?.overall_score?.toFixed(1)
+                          : "N/A"}
                       </div>
                     </div>
                     <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
@@ -384,7 +421,10 @@ export default function KickoffEvalsPage() {
                         Aggregation Strategy
                       </div>
                       <div className="text-sm font-medium capitalize">
-                        {evaluationResults.aggregation_strategy.replace('_', ' ')}
+                        {evaluationResults.aggregation_strategy.replace(
+                          "_",
+                          " "
+                        )}
                       </div>
                     </div>
                   </div>
@@ -394,62 +434,92 @@ export default function KickoffEvalsPage() {
 
                 {/* Agent Performance Details */}
                 <div>
-                  <h3 className="text-lg font-semibold mb-4">Agent Performance</h3>
+                  <h3 className="text-lg font-semibold mb-4">
+                    Agent Performance
+                  </h3>
                   <div className="space-y-4">
-                    {Object.entries(evaluationResults.agent_results).map(([agentId, agentResult]) => (
-                      <div key={agentId} className="border rounded-lg p-4">
-                        <div className="flex justify-between items-center mb-3">
-                          <div>
-                            <h4 className="font-semibold">{agentResult.agent_role}</h4>
-                            <p className="text-sm text-gray-500">ID: {agentId}</p>
-                          </div>
-                          <div className="text-right">
-                            <div className={`text-xl font-bold ${getScoreColor(agentResult.overall_score)}`}>
-                              {agentResult.overall_score.toFixed(1)}
+                    {Object.entries(evaluationResults.agent_results).map(
+                      ([agentId, agentResult]) => (
+                        <div key={agentId} className="border rounded-lg p-4">
+                          <div className="flex justify-between items-center mb-3">
+                            <div>
+                              <h4 className="font-semibold">
+                                {agentResult.agent_role}
+                              </h4>
+                              <p className="text-sm text-gray-500">
+                                ID: {agentId}
+                              </p>
                             </div>
-                            <div className="text-sm text-gray-500">Overall Score</div>
+                            <div className="text-right">
+                              <div
+                                className={`text-xl font-bold ${getScoreColor(
+                                  agentResult.overall_score
+                                )}`}
+                              >
+                                {agentResult.overall_score != null
+                                  ? agentResult?.overall_score?.toFixed(1)
+                                  : "N/A"}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                Overall Score
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                        
-                        {agentResult.feedback && (
-                          <div className="mb-3">
-                            <p className="text-sm text-gray-600 dark:text-gray-300">
-                              {agentResult.feedback}
-                            </p>
-                          </div>
-                        )}
-                        
-                        {agentResult.metrics && Object.keys(agentResult.metrics).length > 0 && (
-                          <div>
-                            <h5 className="font-medium mb-2 text-sm">Metric Breakdown:</h5>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              {Object.entries(agentResult.metrics).map(([metricName, metric]) => (
-                                <div key={metricName} className="bg-gray-50 dark:bg-gray-800 rounded p-2">
-                                  <div className="flex justify-between items-center mb-1">
-                                    <span className="text-sm font-medium capitalize">
-                                      {metricName.replace('_', ' ')}
-                                    </span>
-                                    <span className={`text-sm font-bold ${getScoreColor(metric.score)}`}>
-                                      {metric.score.toFixed(1)}
-                                    </span>
-                                  </div>
-                                  {metric.feedback && (
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      {metric.feedback}
-                                    </p>
+
+                          {agentResult.feedback && (
+                            <div className="mb-3">
+                              <p className="text-sm text-gray-600 dark:text-gray-300">
+                                {agentResult.feedback}
+                              </p>
+                            </div>
+                          )}
+
+                          {agentResult.metrics &&
+                            Object.keys(agentResult.metrics).length > 0 && (
+                              <div>
+                                <h5 className="font-medium mb-2 text-sm">
+                                  Metric Breakdown:
+                                </h5>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {Object.entries(agentResult.metrics).map(
+                                    ([metricName, metric]) => (
+                                      <div
+                                        key={metricName}
+                                        className="bg-gray-50 dark:bg-gray-800 rounded p-2"
+                                      >
+                                        <div className="flex justify-between items-center mb-1">
+                                          <span className="text-sm font-medium capitalize">
+                                            {metricName.replace("_", " ")}
+                                          </span>
+                                          <span
+                                            className={`text-sm font-bold ${getScoreColor(
+                                              metric.score
+                                            )}`}
+                                          >
+                                            {metric.score != null
+                                              ? metric?.score?.toFixed(1)
+                                              : "N/A"}
+                                          </span>
+                                        </div>
+                                        {metric.feedback && (
+                                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            {metric.feedback}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )
                                   )}
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                              </div>
+                            )}
+                        </div>
+                      )
+                    )}
                   </div>
                 </div>
               </div>
             )}
-            
+
             <SheetClose onClick={() => setDrawerOpen(false)} />
           </SheetContent>
         </Sheet>
@@ -463,7 +533,7 @@ export default function KickoffEvalsPage() {
                 Configure and start a new evaluation for your crew
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="iterations">Number of Iterations</Label>
@@ -481,7 +551,8 @@ export default function KickoffEvalsPage() {
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Higher iterations provide more reliable results but take longer to complete
+                  Higher iterations provide more reliable results but take
+                  longer to complete
                 </p>
               </div>
 
@@ -504,7 +575,9 @@ export default function KickoffEvalsPage() {
                       <SelectItem key={strategy.id} value={strategy.id}>
                         <div className="flex flex-col">
                           <span>{strategy.name}</span>
-                          <span className="text-xs text-muted-foreground">{strategy.description}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {strategy.description}
+                          </span>
                         </div>
                       </SelectItem>
                     ))}
@@ -515,7 +588,8 @@ export default function KickoffEvalsPage() {
               <div className="space-y-2">
                 <Label htmlFor="test-inputs">Test Inputs (JSON)</Label>
                 <p className="text-sm text-muted-foreground">
-                  Define the inputs that will be passed to the crew during evaluation.
+                  Define the inputs that will be passed to the crew during
+                  evaluation.
                 </p>
                 <Textarea
                   id="test-inputs"
@@ -541,7 +615,13 @@ export default function KickoffEvalsPage() {
                       aggregation_strategy: "simple_average",
                       test_inputs: {},
                     });
-                    setTestInputsJson(JSON.stringify({ query: "Evaluate agent performance on this task" }, null, 2));
+                    setTestInputsJson(
+                      JSON.stringify(
+                        { query: "Evaluate agent performance on this task" },
+                        null,
+                        2
+                      )
+                    );
                   }}
                 >
                   <X className="h-4 w-4 mr-2" />
@@ -564,7 +644,7 @@ export default function KickoffEvalsPage() {
             </div>
           </DialogContent>
         </Dialog>
-        
+
         {loading ? (
           <Card className="mb-6">
             <CardContent className="flex items-center justify-center py-12">
@@ -577,7 +657,9 @@ export default function KickoffEvalsPage() {
             <CardContent className="py-12">
               <div className="text-center">
                 <BarChart3 className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium mb-2">No Evaluations Found</h3>
+                <h3 className="text-lg font-medium mb-2">
+                  No Evaluations Found
+                </h3>
                 <p className="text-gray-500 mb-4">
                   There are no evaluations for this crew yet.
                 </p>
@@ -605,54 +687,69 @@ export default function KickoffEvalsPage() {
                 </Button>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="space-y-2">
                   {evaluations.map((evaluation) => (
                     <div
                       key={evaluation.id}
-                      className="border rounded-lg overflow-hidden hover:shadow-md transition-all cursor-pointer group"
+                      className="border rounded-lg overflow-hidden hover:bg-muted/10 transition-all cursor-pointer w-full"
                       onClick={() => handleEvaluationSelect(evaluation.id)}
                     >
-                      <div className="p-4 border-b bg-muted/30">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center">
-                            {getStatusIcon(evaluation.status)}
-                            <span className="ml-2 font-medium">
-                              {evaluation.iterations} {evaluation.iterations === 1 ? "Iteration" : "Iterations"}
-                            </span>
-                          </div>
-                          {getStatusBadge(evaluation.status)}
-                        </div>
-                        
-                        <div className="flex items-center justify-between text-sm text-muted-foreground">
-                          <span>{evaluation.agentCount} agents</span>
-                          <span>{formatDuration(evaluation.startTime, evaluation.endTime)}</span>
-                        </div>
-                      </div>
-                      
                       <div className="p-4">
-                        {evaluation.status === "running" && (
-                          <div className="mb-3">
-                            <div className="flex items-center justify-between mb-1 text-sm">
-                              <span className="text-muted-foreground">Progress</span>
-                              <span className="font-medium">{evaluation.progress.toFixed(0)}%</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          {/* Left section - Status and details */}
+                          <div className="flex items-center space-x-4">
+                            {getStatusIcon(evaluation.status)}
+                            <div>
+                              <div className="flex items-center">
+                                <span className="font-medium mr-2">
+                                  {evaluation.iterations}{" "}
+                                  {evaluation.iterations === 1 ? "Iteration" : "Iterations"}
+                                </span>
+                                {getStatusBadge(evaluation.status)}
+                              </div>
+                              <div className="text-sm text-muted-foreground mt-1">
+                                {evaluation.agentCount} agents • {formatDuration(evaluation.startTime, evaluation.endTime)}
+                              </div>
                             </div>
-                            <Progress value={evaluation.progress} className="h-2" />
                           </div>
-                        )}
-                        
-                        {evaluation.overallScore !== undefined && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Overall Score</span>
-                            <span className={`font-bold ${getScoreColor(evaluation.overallScore)}`}>
-                              {evaluation.overallScore.toFixed(1)}
-                            </span>
+
+                          {/* Right section - Progress and score */}
+                          <div className="flex items-center space-x-6">
+                            {evaluation.status === "running" && (
+                              <div className="flex items-center space-x-3 w-48">
+                                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                                  Progress: {evaluation?.progress?.toFixed(0)}%
+                                </span>
+                                <Progress
+                                  value={evaluation.progress}
+                                  className="h-2 w-24"
+                                />
+                              </div>
+                            )}
+
+                            {evaluation.overallScore !== undefined && (
+                              <div className="flex items-center space-x-2">
+                                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                                  Score:
+                                </span>
+                                <span
+                                  className={`font-bold ${getScoreColor(
+                                    evaluation.overallScore
+                                  )}`}
+                                >
+                                  {evaluation?.overallScore?.toFixed(1)}
+                                </span>
+                              </div>
+                            )}
+
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="ml-2"
+                            >
+                              <ChevronRight className="h-5 w-5" />
+                            </Button>
                           </div>
-                        )}
-                        
-                        <div className="mt-3 text-center">
-                          <Button variant="outline" size="sm" className="w-full">
-                            View Results
-                          </Button>
                         </div>
                       </div>
                     </div>
