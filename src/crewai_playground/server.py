@@ -201,8 +201,12 @@ async def get_crew_traces(crew_id: str):
 # Get the directory containing the built React app
 ui_dir = Path(__file__).parent.parent.parent / "src" / "crewai_playground" / "ui" / "build" / "client"
 
-# Mount the static files from the React build
-app.mount("/assets", StaticFiles(directory=str(ui_dir / "assets"), html=True), name="assets")
+# Mount the static files from the React build only if the directory exists
+if ui_dir.exists() and (ui_dir / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(ui_dir / "assets"), html=True), name="assets")
+    logger.info(f"Mounted static assets from {ui_dir / 'assets'}")
+else:
+    logger.warning(f"UI assets directory not found at {ui_dir / 'assets'} - static files not mounted")
 
 # Global state
 chat_handler = None
@@ -1045,6 +1049,14 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
 @app.get("/{full_path:path}")
 async def serve_ui(full_path: str):
     """Serve the React application and handle client-side routing."""
+    # Check if UI directory exists
+    if not ui_dir.exists():
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=404, 
+            detail="UI not available - this appears to be a server-only installation"
+        )
+    
     # Check if the path points to an existing file in the build directory
     requested_file = ui_dir / full_path
 
@@ -1052,8 +1064,15 @@ async def serve_ui(full_path: str):
         return FileResponse(requested_file)
 
     # If ui/build/client/index.html exists, serve it for client-side routing
-    if ui_dir.exists() and (ui_dir / "index.html").exists():
+    if (ui_dir / "index.html").exists():
         return FileResponse(ui_dir / "index.html")
+    
+    # UI directory exists but no index.html found
+    from fastapi import HTTPException
+    raise HTTPException(
+        status_code=404,
+        detail="UI files not found - UI may not be built properly"
+    )
 
 
 def show_loading(stop_event, message):
