@@ -23,7 +23,6 @@ function Sidebar() {
     { icon: Zap, label: "Crews", path: "/kickoff" },
     { icon: Wrench, label: "Tools", path: "/tools" },
     { icon: Network, label: "Flows", path: "/flow" },
-    { icon: BarChart3, label: "Evaluations", path: "/evaluations" },
   ];
 
   return (
