@@ -204,23 +204,29 @@ from fastapi.responses import FileResponse
 # Use importlib.resources to get a handle to the packaged UI directory
 try:
     # This gets a traversable object representing the 'client' directory
-    ui_dir_trav = importlib.resources.files('crewai_playground').joinpath('ui/build/client')
+    ui_dir_trav = importlib.resources.files("crewai_playground").joinpath(
+        "ui/build/client"
+    )
 
     # The actual filesystem path can be obtained by treating it as a context manager
     with importlib.resources.as_file(ui_dir_trav) as ui_dir:
 
-        ui_dir = Path(ui_dir) # Ensure it's a Path object
+        ui_dir = Path(ui_dir)  # Ensure it's a Path object
         assets_dir = ui_dir / "assets"
-        
+
         # Mount the static files from the React build only if the directory exists
         if ui_dir.exists() and assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_dir), html=True), name="assets")
+            app.mount(
+                "/assets",
+                StaticFiles(directory=str(assets_dir), html=True),
+                name="assets",
+            )
             logger.info(f"Mounted static assets from {assets_dir}")
-            
-
 
         else:
-            logger.warning(f"UI assets directory not found at {assets_dir} - static files not mounted")
+            logger.warning(
+                f"UI assets directory not found at {assets_dir} - static files not mounted"
+            )
 
 except (ModuleNotFoundError, FileNotFoundError):
     logger.warning("UI package data not found. The UI will not be available.")
@@ -840,7 +846,9 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
 
         # Event listener setup is now handled in ChatHandler.run_crew() to ensure
         # it's set up on the correct event bus during actual crew execution
-        logging.info(f"Event listener setup will be handled during crew execution for crew: {crew_id}")
+        logging.info(
+            f"Event listener setup will be handled during crew execution for crew: {crew_id}"
+        )
 
         # Set the crew ID explicitly to ensure consistent tracking
         if hasattr(crew_instance, "id"):
@@ -1069,11 +1077,12 @@ async def serve_ui(full_path: str):
     # Check if UI directory exists
     if not ui_dir.exists():
         from fastapi import HTTPException
+
         raise HTTPException(
-            status_code=404, 
-            detail="UI not available - this appears to be a server-only installation"
+            status_code=404,
+            detail="UI not available - this appears to be a server-only installation",
         )
-    
+
     # Check if the path points to an existing file in the build directory
     requested_file = ui_dir / full_path
 
@@ -1083,12 +1092,12 @@ async def serve_ui(full_path: str):
     # If ui/build/client/index.html exists, serve it for client-side routing
     if (ui_dir / "index.html").exists():
         return FileResponse(ui_dir / "index.html")
-    
+
     # UI directory exists but no index.html found
     from fastapi import HTTPException
+
     raise HTTPException(
-        status_code=404,
-        detail="UI files not found - UI may not be built properly"
+        status_code=404, detail="UI files not found - UI may not be built properly"
     )
 
 
@@ -1124,15 +1133,6 @@ def start_server():
     click.echo("CrewAI Playground - Starting up...")
 
     try:
-        # Try to discover all crews in the current directory
-        click.echo("Discovering crews in current directory...")
-
-        # Show loading indicator for crew loading
-        stop_loading = threading.Event()
-        loading_thread = threading.Thread(
-            target=show_loading, args=(stop_loading, "Searching for crew files")
-        )
-        loading_thread.start()
 
         try:
             # Discover all available crews
@@ -1144,30 +1144,20 @@ def start_server():
 
             discovered_crews = crews_info
 
-            stop_loading.set()
-            loading_thread.join()
-
             if crews_info:
-                click.echo(f"Found {len(crews_info)} crews:")
-                for i, crew in enumerate(crews_info):
-                    click.echo(f"  {i+1}. {crew['name']} - {crew['directory']}")
-
                 # Initialize the first crew
                 try:
                     crew_path = Path(crews_info[0]["path"])
                     crew, crew_name = load_crew_from_module(crew_path)
                     chat_handler = ChatHandler(crew, crew_name)
                     chat_handlers[crews_info[0]["id"]] = chat_handler
-                    click.echo(f"Initialized {crew_name} as the default crew")
                 except Exception as e:
                     click.echo(f"Error initializing first crew: {str(e)}", err=True)
             else:
-                click.echo("No crews found. Trying fallback method...")
                 try:
                     # Fallback to the original method
                     crew, crew_name = load_crew()
                     chat_handler = ChatHandler(crew, crew_name)
-                    click.echo(f"Successfully loaded crew: {crew_name}")
 
                     # Add this to discovered crews
                     discovered_crews = [
@@ -1197,8 +1187,6 @@ def start_server():
                     )
                     sys.exit(1)
         except Exception as e:
-            stop_loading.set()
-            loading_thread.join()
             click.echo(f"Error discovering crews: {str(e)}", err=True)
             sys.exit(1)
 
