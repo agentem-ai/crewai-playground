@@ -13,18 +13,20 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "../components/ui/tabs";
-import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "../components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetClose,
+} from "../components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -49,7 +51,6 @@ import {
   Play,
   X,
 } from "lucide-react";
-import { ScrollArea } from "../components/ui/scroll-area";
 import { Separator } from "../components/ui/separator";
 
 // Define types for evaluation data
@@ -64,12 +65,6 @@ interface EvaluationRun {
   metricCount: number;
   overallScore?: number;
   iterations: number;
-}
-
-interface MetricScore {
-  category: string;
-  score: number;
-  feedback: string;
 }
 
 interface AgentEvaluation {
@@ -114,37 +109,25 @@ function getStatusBadge(status: EvaluationRun["status"]) {
   switch (status) {
     case "running":
       return (
-        <Badge
-          variant="outline"
-          className="bg-blue-50 text-blue-700 border-blue-200"
-        >
+        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
           Running
         </Badge>
       );
     case "completed":
       return (
-        <Badge
-          variant="outline"
-          className="bg-green-50 text-green-700 border-green-200"
-        >
+        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
           Completed
         </Badge>
       );
     case "failed":
       return (
-        <Badge
-          variant="outline"
-          className="bg-red-50 text-red-700 border-red-200"
-        >
+        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
           Failed
         </Badge>
       );
     case "pending":
       return (
-        <Badge
-          variant="outline"
-          className="bg-yellow-50 text-yellow-700 border-yellow-200"
-        >
+        <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
           Pending
         </Badge>
       );
@@ -187,15 +170,15 @@ export default function KickoffEvalsPage() {
   const crewId = searchParams.get("crewId");
 
   const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
-  const [selectedEvaluation, setSelectedEvaluation] = useState<string | null>(
-    null
-  );
-  const [evaluationResults, setEvaluationResults] =
-    useState<EvaluationResults | null>(null);
+  const [selectedEvaluation, setSelectedEvaluation] = useState<string | null>(null);
+  const [evaluationResults, setEvaluationResults] = useState<EvaluationResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [resultsLoading, setResultsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("overview");
   const [refreshKey, setRefreshKey] = useState(0);
+  
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedEvaluationDetails, setSelectedEvaluationDetails] = useState<EvaluationRun | null>(null);
   
   // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -206,15 +189,9 @@ export default function KickoffEvalsPage() {
     test_inputs: {}
   });
   const [testInputsJson, setTestInputsJson] = useState(
-    JSON.stringify(
-      {
-        query: "Evaluate agent performance on this task"
-      },
-      null,
-      2
-    )
+    JSON.stringify({ query: "Evaluate agent performance on this task" }, null, 2)
   );
-  const [aggregationStrategies, setAggregationStrategies] = useState([
+  const [aggregationStrategies] = useState([
     {
       id: "simple_average",
       name: "Simple Average",
@@ -239,7 +216,6 @@ export default function KickoffEvalsPage() {
 
   // Create a new evaluation
   const createEvaluation = async () => {
-    // Parse and validate test inputs JSON
     let parsedTestInputs = {};
     try {
       parsedTestInputs = JSON.parse(testInputsJson);
@@ -250,41 +226,29 @@ export default function KickoffEvalsPage() {
 
     setIsCreating(true);
     try {
-      // Create evaluation with the current crew ID
       const evaluationData = {
-        name: `Evaluation for ${crewId}`, // Auto-generate a name based on crew ID
-        crew_ids: [crewId], // Use the current crew ID
+        name: `Evaluation for ${crewId}`,
+        crew_ids: [crewId],
         iterations: newEvaluation.iterations,
         aggregation_strategy: newEvaluation.aggregation_strategy,
         test_inputs: parsedTestInputs,
-        // No metric_categories means all metrics will be used
       };
 
       const response = await fetch("/api/evaluations", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(evaluationData),
       });
 
       const data = await response.json();
       if (data.status === "success") {
         setShowCreateModal(false);
-        // Reset form
         setNewEvaluation({
           iterations: 1,
           aggregation_strategy: "simple_average",
           test_inputs: {}
         });
-        setTestInputsJson(
-          JSON.stringify(
-            { query: "Evaluate agent performance on this task" },
-            null,
-            2
-          )
-        );
-        // Refresh evaluations list
+        setTestInputsJson(JSON.stringify({ query: "Evaluate agent performance on this task" }, null, 2));
         setRefreshKey(prev => prev + 1);
       } else {
         alert("Error creating evaluation: " + data.detail);
@@ -308,16 +272,6 @@ export default function KickoffEvalsPage() {
         if (response.ok) {
           const data = await response.json();
           setEvaluations(data.evaluations || []);
-
-          // Select the first evaluation by default if available
-          if (
-            data.evaluations &&
-            data.evaluations.length > 0 &&
-            !selectedEvaluation
-          ) {
-            setSelectedEvaluation(data.evaluations[0].id);
-            fetchEvaluationResults(data.evaluations[0].id);
-          }
         }
       } catch (error) {
         console.error("Error fetching evaluations:", error);
@@ -328,7 +282,6 @@ export default function KickoffEvalsPage() {
 
     fetchEvaluations();
 
-    // Set up polling for updates if there are running evaluations
     const interval = setInterval(() => {
       if (evaluations.some((e) => e.status === "running")) {
         fetchEvaluations();
@@ -358,9 +311,14 @@ export default function KickoffEvalsPage() {
   }
 
   // Handle evaluation selection
-  const handleEvaluationSelect = (evalId: string) => {
+  const handleEvaluationSelect = async (evalId: string) => {
     setSelectedEvaluation(evalId);
-    fetchEvaluationResults(evalId);
+    const evalDetails = evaluations.find(e => e.id === evalId);
+    if (evalDetails) {
+      setSelectedEvaluationDetails(evalDetails);
+      setDrawerOpen(true);
+      await fetchEvaluationResults(evalId);
+    }
   };
 
   // Refresh evaluations
@@ -368,23 +326,145 @@ export default function KickoffEvalsPage() {
     setRefreshKey((prev) => prev + 1);
   };
 
-  // Get selected evaluation
-  const selectedEval = evaluations.find((e) => e.id === selectedEvaluation);
-
   return (
     <Layout>
       <div className="w-full">
+        {/* Navigation */}
+        <KickoffNavigation />
+
+        {/* Evaluation Results Drawer */}
+        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <SheetContent className="w-[75%] sm:max-w-[75%] overflow-y-auto">
+            <SheetHeader className="mb-6">
+              <SheetTitle className="text-2xl">Evaluation Results</SheetTitle>
+              <SheetDescription>
+                Detailed performance metrics and agent evaluations
+              </SheetDescription>
+            </SheetHeader>
+            
+            {resultsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-indigo-500 mr-2" />
+                <p>Loading evaluation results...</p>
+              </div>
+            ) : !evaluationResults ? (
+              <div className="text-center py-12">
+                <AlertCircle className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                <h3 className="text-lg font-medium mb-2">No Results Available</h3>
+                <p className="text-gray-500">
+                  {selectedEvaluationDetails?.status === "running"
+                    ? "Evaluation is still running. Results will be available when complete."
+                    : "No evaluation results are available for this evaluation."}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Evaluation Summary */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Evaluation Summary</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                        Overall Score
+                      </div>
+                      <div className={`text-2xl font-bold ${getScoreColor(evaluationResults.overall_score)}`}>
+                        {evaluationResults.overall_score.toFixed(1)}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                        Agents Evaluated
+                      </div>
+                      <div className="text-2xl font-bold">
+                        {evaluationResults.total_agents}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+                        Aggregation Strategy
+                      </div>
+                      <div className="text-sm font-medium capitalize">
+                        {evaluationResults.aggregation_strategy.replace('_', ' ')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Agent Performance Details */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Agent Performance</h3>
+                  <div className="space-y-4">
+                    {Object.entries(evaluationResults.agent_results).map(([agentId, agentResult]) => (
+                      <div key={agentId} className="border rounded-lg p-4">
+                        <div className="flex justify-between items-center mb-3">
+                          <div>
+                            <h4 className="font-semibold">{agentResult.agent_role}</h4>
+                            <p className="text-sm text-gray-500">ID: {agentId}</p>
+                          </div>
+                          <div className="text-right">
+                            <div className={`text-xl font-bold ${getScoreColor(agentResult.overall_score)}`}>
+                              {agentResult.overall_score.toFixed(1)}
+                            </div>
+                            <div className="text-sm text-gray-500">Overall Score</div>
+                          </div>
+                        </div>
+                        
+                        {agentResult.feedback && (
+                          <div className="mb-3">
+                            <p className="text-sm text-gray-600 dark:text-gray-300">
+                              {agentResult.feedback}
+                            </p>
+                          </div>
+                        )}
+                        
+                        {agentResult.metrics && Object.keys(agentResult.metrics).length > 0 && (
+                          <div>
+                            <h5 className="font-medium mb-2 text-sm">Metric Breakdown:</h5>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {Object.entries(agentResult.metrics).map(([metricName, metric]) => (
+                                <div key={metricName} className="bg-gray-50 dark:bg-gray-800 rounded p-2">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="text-sm font-medium capitalize">
+                                      {metricName.replace('_', ' ')}
+                                    </span>
+                                    <span className={`text-sm font-bold ${getScoreColor(metric.score)}`}>
+                                      {metric.score.toFixed(1)}
+                                    </span>
+                                  </div>
+                                  {metric.feedback && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      {metric.feedback}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <SheetClose onClick={() => setDrawerOpen(false)} />
+          </SheetContent>
+        </Sheet>
+
         {/* Create Evaluation Modal */}
         <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Create New Evaluation</DialogTitle>
               <DialogDescription>
-                Configure and start a new agent evaluation for this crew
+                Configure and start a new evaluation for your crew
               </DialogDescription>
             </DialogHeader>
-
-            <div className="space-y-6">
+            
+            <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="iterations">Number of Iterations</Label>
                 <Input
@@ -432,12 +512,10 @@ export default function KickoffEvalsPage() {
                 </Select>
               </div>
 
-              {/* Test Inputs Section */}
               <div className="space-y-2">
                 <Label htmlFor="test-inputs">Test Inputs (JSON)</Label>
                 <p className="text-sm text-muted-foreground">
-                  Define the inputs that will be passed to the crew during
-                  evaluation.
+                  Define the inputs that will be passed to the crew during evaluation.
                 </p>
                 <Textarea
                   id="test-inputs"
@@ -458,21 +536,12 @@ export default function KickoffEvalsPage() {
                   variant="outline"
                   onClick={() => {
                     setShowCreateModal(false);
-                    // Reset form
                     setNewEvaluation({
                       iterations: 1,
                       aggregation_strategy: "simple_average",
                       test_inputs: {},
                     });
-                    setTestInputsJson(
-                      JSON.stringify(
-                        {
-                          query: "Evaluate agent performance on this task",
-                        },
-                        null,
-                        2
-                      )
-                    );
+                    setTestInputsJson(JSON.stringify({ query: "Evaluate agent performance on this task" }, null, 2));
                   }}
                 >
                   <X className="h-4 w-4 mr-2" />
@@ -508,9 +577,7 @@ export default function KickoffEvalsPage() {
             <CardContent className="py-12">
               <div className="text-center">
                 <BarChart3 className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium mb-2">
-                  No Evaluations Found
-                </h3>
+                <h3 className="text-lg font-medium mb-2">No Evaluations Found</h3>
                 <p className="text-gray-500 mb-4">
                   There are no evaluations for this crew yet.
                 </p>
@@ -522,14 +589,14 @@ export default function KickoffEvalsPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-6">
             {/* Evaluations List */}
-            <Card className="md:col-span-1">
-              <CardHeader className="flex justify-between items-start">
+            <Card>
+              <CardHeader className="flex flex-row justify-between items-start">
                 <div>
                   <CardTitle>Evaluations</CardTitle>
                   <CardDescription>
-                    Select an evaluation to view details
+                    Click an evaluation to view detailed results
                   </CardDescription>
                 </div>
                 <Button size="sm" onClick={() => setShowCreateModal(true)}>
@@ -538,379 +605,60 @@ export default function KickoffEvalsPage() {
                 </Button>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[500px] pr-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {evaluations.map((evaluation) => (
                     <div
                       key={evaluation.id}
-                      className={`mb-3 p-3 rounded-md cursor-pointer border transition-colors ${
-                        selectedEvaluation === evaluation.id
-                          ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30"
-                          : "border-gray-200 hover:border-gray-300 dark:border-gray-700 dark:hover:border-gray-600"
-                      }`}
+                      className="border rounded-lg overflow-hidden hover:shadow-md transition-all cursor-pointer group"
                       onClick={() => handleEvaluationSelect(evaluation.id)}
                     >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="font-medium truncate mr-2">
-                          {evaluation.name ||
-                            `Evaluation ${evaluation.id.substring(0, 8)}`}
+                      <div className="p-4 border-b bg-muted/30">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center">
+                            {getStatusIcon(evaluation.status)}
+                            <span className="ml-2 font-medium">
+                              {evaluation.iterations} {evaluation.iterations === 1 ? "Iteration" : "Iterations"}
+                            </span>
+                          </div>
+                          {getStatusBadge(evaluation.status)}
                         </div>
-                        {getStatusBadge(evaluation.status)}
+                        
+                        <div className="flex items-center justify-between text-sm text-muted-foreground">
+                          <span>{evaluation.agentCount} agents</span>
+                          <span>{formatDuration(evaluation.startTime, evaluation.endTime)}</span>
+                        </div>
                       </div>
-
-                      {evaluation.status === "running" && (
-                        <Progress
-                          value={evaluation.progress}
-                          className="h-1 mb-2"
-                        />
-                      )}
-
-                      <div className="flex items-center text-xs text-gray-500 dark:text-gray-400">
-                        <Clock className="h-3 w-3 mr-1" />
-                        {new Date(evaluation.startTime).toLocaleString()}
-                      </div>
-
-                      <div className="flex items-center justify-between mt-2 text-xs">
-                        <span className="text-gray-500 dark:text-gray-400">
-                          {evaluation.agentCount} agents •{" "}
-                          {evaluation.iterations} iterations
-                        </span>
-
-                        {evaluation.overallScore !== undefined && (
-                          <span
-                            className={`font-semibold ${getScoreColor(
-                              evaluation.overallScore
-                            )}`}
-                          >
-                            Score: {evaluation.overallScore.toFixed(1)}
-                          </span>
+                      
+                      <div className="p-4">
+                        {evaluation.status === "running" && (
+                          <div className="mb-3">
+                            <div className="flex items-center justify-between mb-1 text-sm">
+                              <span className="text-muted-foreground">Progress</span>
+                              <span className="font-medium">{evaluation.progress.toFixed(0)}%</span>
+                            </div>
+                            <Progress value={evaluation.progress} className="h-2" />
+                          </div>
                         )}
+                        
+                        {evaluation.overallScore !== undefined && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Overall Score</span>
+                            <span className={`font-bold ${getScoreColor(evaluation.overallScore)}`}>
+                              {evaluation.overallScore.toFixed(1)}
+                            </span>
+                          </div>
+                        )}
+                        
+                        <div className="mt-3 text-center">
+                          <Button variant="outline" size="sm" className="w-full">
+                            View Results
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
-                </ScrollArea>
+                </div>
               </CardContent>
-            </Card>
-
-            {/* Evaluation Details */}
-            <Card className="md:col-span-2">
-              {selectedEval ? (
-                <>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle>
-                          {selectedEval.name ||
-                            `Evaluation ${selectedEval.id.substring(0, 8)}`}
-                        </CardTitle>
-                        <CardDescription>
-                          {new Date(selectedEval.startTime).toLocaleString()}
-                          {selectedEval.endTime &&
-                            ` • Duration: ${formatDuration(
-                              selectedEval.startTime,
-                              selectedEval.endTime
-                            )}`}
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center">
-                        {getStatusIcon(selectedEval.status)}
-                        <span className="ml-2 text-sm">
-                          {selectedEval.status.charAt(0).toUpperCase() +
-                            selectedEval.status.slice(1)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardHeader>
-
-                  <CardContent>
-                    {selectedEval.status === "running" && (
-                      <div className="mb-4">
-                        <div className="flex justify-between mb-1 text-sm">
-                          <span>Progress</span>
-                          <span>{Math.round(selectedEval.progress)}%</span>
-                        </div>
-                        <Progress
-                          value={selectedEval.progress}
-                          className="h-2"
-                        />
-                      </div>
-                    )}
-
-                    <Tabs
-                      value={activeTab}
-                      onValueChange={setActiveTab}
-                      className="mt-2"
-                    >
-                      <TabsList className="mb-4">
-                        <TabsTrigger value="overview">Overview</TabsTrigger>
-                        <TabsTrigger value="agents">Agent Results</TabsTrigger>
-                        <TabsTrigger value="metrics">Metrics</TabsTrigger>
-                      </TabsList>
-
-                      <TabsContent value="overview">
-                        {resultsLoading ? (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader2 className="h-6 w-6 animate-spin text-indigo-500 mr-2" />
-                            <p>Loading results...</p>
-                          </div>
-                        ) : !evaluationResults ? (
-                          <div className="text-center py-12">
-                            <AlertCircle className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                            <h3 className="text-lg font-medium mb-2">
-                              No Results Available
-                            </h3>
-                            <p className="text-gray-500">
-                              {selectedEval.status === "running"
-                                ? "Evaluation is still running. Results will be available when complete."
-                                : "No evaluation results are available for this evaluation."}
-                            </p>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
-                                <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                                  Overall Score
-                                </div>
-                                <div
-                                  className={`text-2xl font-bold ${getScoreColor(
-                                    evaluationResults.overall_score
-                                  )}`}
-                                >
-                                  {evaluationResults.overall_score.toFixed(1)}
-                                </div>
-                              </div>
-                              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
-                                <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                                  Agents Evaluated
-                                </div>
-                                <div className="text-2xl font-bold">
-                                  {evaluationResults.total_agents}
-                                </div>
-                              </div>
-                              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
-                                <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                                  Iterations
-                                </div>
-                                <div className="text-2xl font-bold">
-                                  {selectedEval.iterations}
-                                </div>
-                              </div>
-                            </div>
-
-                            <h3 className="font-semibold mb-2 flex items-center">
-                              <TrendingUp className="h-4 w-4 mr-1" />
-                              Performance Summary
-                            </h3>
-                            <p className="text-gray-600 dark:text-gray-300 mb-4">
-                              This evaluation used the{" "}
-                              <span className="font-medium">
-                                {evaluationResults.aggregation_strategy}
-                              </span>{" "}
-                              aggregation strategy across{" "}
-                              {selectedEval.iterations} iterations to evaluate{" "}
-                              {evaluationResults.total_agents} agents.
-                            </p>
-                          </div>
-                        )}
-                      </TabsContent>
-
-                      <TabsContent value="agents">
-                        {resultsLoading ? (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader2 className="h-6 w-6 animate-spin text-indigo-500 mr-2" />
-                            <p>Loading agent results...</p>
-                          </div>
-                        ) : !evaluationResults?.agent_results ? (
-                          <div className="text-center py-12">
-                            <AlertCircle className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                            <h3 className="text-lg font-medium mb-2">
-                              No Agent Results
-                            </h3>
-                            <p className="text-gray-500">
-                              No agent evaluation results are available.
-                            </p>
-                          </div>
-                        ) : (
-                          <div>
-                            {Object.entries(
-                              evaluationResults.agent_results
-                            ).map(([agentId, agentResult]) => (
-                              <div
-                                key={agentId}
-                                className="mb-6 border rounded-lg p-4"
-                              >
-                                <div className="flex justify-between items-center mb-3">
-                                  <h3 className="font-semibold">
-                                    {agentResult.agent_role}
-                                  </h3>
-                                  <div
-                                    className={`text-lg font-bold ${getScoreColor(
-                                      agentResult.overall_score
-                                    )}`}
-                                  >
-                                    {agentResult.overall_score.toFixed(1)}
-                                  </div>
-                                </div>
-
-                                <Separator className="my-3" />
-
-                                <div className="space-y-3">
-                                  {Object.entries(
-                                    agentResult.metrics || {}
-                                  ).map(([metricName, metric]) => (
-                                    <div
-                                      key={metricName}
-                                      className="grid grid-cols-12 gap-2"
-                                    >
-                                      <div className="col-span-4 text-sm font-medium">
-                                        {metricName.replace(/_/g, " ")}
-                                      </div>
-                                      <div className="col-span-2">
-                                        <span
-                                          className={`text-sm font-semibold ${getScoreColor(
-                                            metric.score
-                                          )}`}
-                                        >
-                                          {metric.score.toFixed(1)}
-                                        </span>
-                                      </div>
-                                      <div className="col-span-6 text-sm text-gray-600 dark:text-gray-300">
-                                        {metric.feedback}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-
-                                <Separator className="my-3" />
-
-                                <div className="text-sm text-gray-600 dark:text-gray-300">
-                                  <p className="font-medium mb-1">
-                                    Overall Feedback:
-                                  </p>
-                                  <p>{agentResult.feedback}</p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </TabsContent>
-
-                      <TabsContent value="metrics">
-                        {resultsLoading ? (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader2 className="h-6 w-6 animate-spin text-indigo-500 mr-2" />
-                            <p>Loading metrics...</p>
-                          </div>
-                        ) : !evaluationResults?.agent_results ? (
-                          <div className="text-center py-12">
-                            <AlertCircle className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                            <h3 className="text-lg font-medium mb-2">
-                              No Metrics Available
-                            </h3>
-                            <p className="text-gray-500">
-                              No evaluation metrics are available.
-                            </p>
-                          </div>
-                        ) : (
-                          <div>
-                            {/* Extract unique metrics across all agents */}
-                            {(() => {
-                              const metrics: Record<
-                                string,
-                                { scores: number[]; feedbacks: string[] }
-                              > = {};
-
-                              Object.values(
-                                evaluationResults.agent_results
-                              ).forEach((agent) => {
-                                Object.entries(agent.metrics || {}).forEach(
-                                  ([name, data]) => {
-                                    if (!metrics[name]) {
-                                      metrics[name] = {
-                                        scores: [],
-                                        feedbacks: [],
-                                      };
-                                    }
-                                    metrics[name].scores.push(data.score);
-                                    metrics[name].feedbacks.push(data.feedback);
-                                  }
-                                );
-                              });
-
-                              return Object.entries(metrics).map(
-                                ([metricName, data]) => {
-                                  const avgScore =
-                                    data.scores.reduce((a, b) => a + b, 0) /
-                                    data.scores.length;
-
-                                  return (
-                                    <div
-                                      key={metricName}
-                                      className="mb-6 border rounded-lg p-4"
-                                    >
-                                      <div className="flex justify-between items-center mb-3">
-                                        <h3 className="font-semibold">
-                                          {metricName.replace(/_/g, " ")}
-                                        </h3>
-                                        <div
-                                          className={`text-lg font-bold ${getScoreColor(
-                                            avgScore
-                                          )}`}
-                                        >
-                                          {avgScore.toFixed(1)}
-                                        </div>
-                                      </div>
-
-                                      <div className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-                                        Average score across{" "}
-                                        {data.scores.length} agents
-                                      </div>
-
-                                      <Separator className="my-3" />
-
-                                      <div className="space-y-3">
-                                        {data.feedbacks.map(
-                                          (feedback, index) => (
-                                            <div
-                                              key={index}
-                                              className="text-sm"
-                                            >
-                                              <span
-                                                className={`font-semibold ${getScoreColor(
-                                                  data.scores[index]
-                                                )}`}
-                                              >
-                                                {data.scores[index].toFixed(1)}:
-                                              </span>{" "}
-                                              {feedback}
-                                            </div>
-                                          )
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                }
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </TabsContent>
-                    </Tabs>
-                  </CardContent>
-                </>
-              ) : (
-                <CardContent className="flex items-center justify-center py-12 text-center">
-                  <div>
-                    <BarChart3 className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                    <h3 className="text-lg font-medium mb-2">
-                      No Evaluation Selected
-                    </h3>
-                    <p className="text-gray-500">
-                      Select an evaluation from the list to view details
-                    </p>
-                  </div>
-                </CardContent>
-              )}
             </Card>
           </div>
         )}
