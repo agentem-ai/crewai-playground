@@ -816,27 +816,19 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
         # Load the crew
         crew_instance, crew_name = load_crew_from_module(Path(crew_path))
 
-        # Get the crew's event bus and set up the visualization listener
-        if hasattr(crew_instance, "get_event_bus"):
-            event_bus = crew_instance.get_event_bus()
-            crew_visualization_listener.setup_listeners(event_bus)
-            logging.info(f"Crew visualization listener set up for crew: {crew_id}")
+        # Event listener setup is now handled in ChatHandler.run_crew() to ensure
+        # it's set up on the correct event bus during actual crew execution
+        logging.info(f"Event listener setup will be handled during crew execution for crew: {crew_id}")
+
+        # Set the crew ID explicitly to ensure consistent tracking
+        if hasattr(crew_instance, "id"):
+            logging.info(f"Crew ID from instance: {crew_instance.id}")
         else:
-            # If the crew doesn't have a get_event_bus method, use the global event bus
-            crew_visualization_listener.setup_listeners(crewai_event_bus)
-            logging.info(
-                f"Using global event bus for crew: {crew_id} since it doesn't have get_event_bus method"
-            )
+            # Set an ID on the crew instance if it doesn't have one
+            import uuid
 
-            # Set the crew ID explicitly to ensure consistent tracking
-            if hasattr(crew_instance, "id"):
-                logging.info(f"Crew ID from instance: {crew_instance.id}")
-            else:
-                # Set an ID on the crew instance if it doesn't have one
-                import uuid
-
-                crew_instance.id = crew_id
-                logging.info(f"Set crew ID to: {crew_id} on crew instance")
+            crew_instance.id = crew_id
+            logging.info(f"Set crew ID to: {crew_id} on crew instance")
 
         # Create a handler for this crew if it doesn't exist
         if crew_id not in chat_handlers:
