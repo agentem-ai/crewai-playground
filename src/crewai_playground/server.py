@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 import threading
 from typing import Dict, Optional, List, Any
+from . import __version__
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -1080,8 +1081,8 @@ def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:
     )
 
 
-def main():
-    """Main entry point for the CLI."""
+def start_server():
+    """Start the CrewAI Playground server."""
     global chat_handler, discovered_crews
 
     click.echo("CrewAI Playground - Starting up...")
@@ -1196,6 +1197,11 @@ def main():
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(1)
+
+
+def main():
+    """Main entry point - defaults to start server for backward compatibility."""
+    start_server()
 
 
 if __name__ == "__main__":
