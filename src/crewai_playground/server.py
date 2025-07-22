@@ -29,6 +29,9 @@ logging.basicConfig(
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
+# Create logger for this module
+logger = logging.getLogger(__name__)
+
 # Load environment variables from a .env file if present
 try:
     from dotenv import load_dotenv, find_dotenv
@@ -53,7 +56,9 @@ from crewai_playground.crew_loader import (
     discover_available_crews,
 )
 from crewai_playground.chat_handler import ChatHandler
-from crewai_playground.flow_event_listener import flow_websocket_listener as crew_visualization_listener
+from crewai_playground.event_listener import (
+    event_listener as crew_visualization_listener,
+)
 from crewai_playground.tool_loader import discover_available_tools as discover_tools
 from crewai_playground.telemetry import telemetry_service
 from crewai_playground.flow_api import (
@@ -68,9 +73,14 @@ from crewai_playground.websocket_utils import (
     register_websocket_queue,
     unregister_websocket_queue,
 )
-from crewai_playground.flow_event_listener import flow_websocket_listener
+from crewai_playground.event_listener import (
+    event_listener as flow_websocket_listener,
+)
 from crewai.utilities.events import crewai_event_bus
-from crewai_playground.evaluation_api import router as evaluation_router, EVALUATION_AVAILABLE
+from crewai_playground.evaluation_api import (
+    router as evaluation_router,
+    EVALUATION_AVAILABLE,
+)
 
 
 # Create FastAPI app
@@ -88,6 +98,18 @@ app.add_middleware(
 # Include API routers
 app.include_router(flow_router)
 app.include_router(evaluation_router)
+
+
+# Startup event to ensure event loop is available for unified event listener
+@app.on_event("startup")
+async def startup_event():
+    """Initialize event loop reference for unified event listener."""
+    try:
+        crew_visualization_listener.ensure_event_loop()
+        flow_websocket_listener.ensure_event_loop()
+        logger.info("Event loop initialized for unified event listeners")
+    except Exception as e:
+        logger.error(f"Error initializing event loop for unified event listeners: {e}")
 
 
 # Dashboard API endpoint
@@ -1025,17 +1047,6 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
         logging.error(f"Flow WebSocket error: {str(e)}", exc_info=True)
     finally:
         await websocket.close()
-
-
-
-
-
-
-
-
-
-
-
 
 
 @app.get("/{full_path:path}")
