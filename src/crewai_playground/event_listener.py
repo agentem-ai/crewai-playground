@@ -220,18 +220,10 @@ class EventListener:
 
     def disconnect(self, client_id: str):
         """Disconnect a client by ID."""
-        try:
-            if client_id in self.clients:
-                client = self.clients[client_id]
-                crew_id = client.get("crew_id")
-                del self.clients[client_id]
-                logger.info(
-                    f"WebSocket client {client_id} (crew: {crew_id}) disconnected. Remaining connections: {len(self.clients)}"
-                )
-            else:
-                logger.warning(f"Attempted to disconnect non-existent client {client_id}")
-        except Exception as e:
-            logger.error(f"Error during client {client_id} disconnect: {e}")
+        if client_id not in self.clients:
+            logger.warning(f"Attempted to disconnect non-existent client {client_id}")
+            return
+        self._safe_disconnect(client_id)
 
     async def register_client_for_crew(self, client_id: str, crew_id: str):
         """Register a client for updates from a specific crew."""
@@ -337,7 +329,13 @@ class EventListener:
 
         # Send to all connected clients (remove restrictive filtering)
         disconnected_clients = []
-        for client_id, client in list(self.clients.items()):
+        clients_snapshot = list(self.clients.items())  # Create snapshot to avoid concurrent modification
+        
+        for client_id, client in clients_snapshot:
+            # Check if client still exists (might have been removed by another thread)
+            if client_id not in self.clients:
+                continue
+                
             client_crew_id = client.get("crew_id")
             
             # Send to clients that match the crew or have no specific crew filter
@@ -353,16 +351,28 @@ class EventListener:
                     websocket = client["websocket"]
                     json_data = json.dumps(state, cls=CustomJSONEncoder)
                     await websocket.send_text(json_data)
-                    logger.info(f"Successfully sent update to client {client_id} for crew {client_crew_id}")
+                    logger.debug(f"Successfully sent update to client {client_id} for crew {client_crew_id}")
                 except Exception as e:
                     logger.error(f"Error broadcasting to client {client_id}: {str(e)}")
                     disconnected_clients.append(client_id)
             else:
                 logger.debug(f"Skipping client {client_id} (crew filter: {client_crew_id}, current: {current_crew_id})")
         
-        # Clean up disconnected clients
+        # Clean up disconnected clients with thread-safe removal
         for client_id in disconnected_clients:
-            self.disconnect(client_id)
+            self._safe_disconnect(client_id)
+
+    def _safe_disconnect(self, client_id: str):
+        try:
+            if client_id in self.clients:
+                client = self.clients[client_id]
+                crew_id = client.get("crew_id")
+                del self.clients[client_id]
+                logger.info(
+                    f"WebSocket client {client_id} (crew: {crew_id}) disconnected. Remaining connections: {len(self.clients)}"
+                )
+        except Exception as e:
+            logger.error(f"Error during client {client_id} disconnect: {e}")
 
     def reset_state(self):
         """Reset the state when a new execution starts."""
@@ -498,13 +508,13 @@ class EventListener:
         if flow_id:
             self._schedule(self._handle_method_finished(flow_id, event))
 
-    async def handle_method_execution_failed(self, source, event):
+    def handle_method_execution_failed(self, source, event):
         """Handle method execution failed event."""
         flow_id = self._extract_execution_id(source, event)
         if flow_id:
-            await self._handle_method_failed(flow_id, event)
+            self._schedule(self._handle_method_failed(flow_id, event))
 
-    async def handle_crew_kickoff_started(self, source, event):
+    def handle_crew_kickoff_started(self, source, event):
         """Handle crew kickoff started event."""
         logger.info(f"Crew kickoff started event received: {event}")
         execution_id = self._extract_execution_id(source, event)
@@ -517,9 +527,9 @@ class EventListener:
         else:
             # This is a crew context
             logger.debug(f"Handling crew kickoff started in crew context: {execution_id}")
-            await self._handle_crew_kickoff_started_crew(execution_id, event)
+            self._schedule(self._handle_crew_kickoff_started_crew(execution_id, event))
 
-    async def handle_crew_kickoff_completed(self, source, event):
+    def handle_crew_kickoff_completed(self, source, event):
         """Handle crew kickoff completed event."""
         logger.info(f"Crew kickoff completed event received: {event}")
         execution_id = self._extract_execution_id(source, event)
@@ -532,16 +542,23 @@ class EventListener:
         else:
             # This is a crew context
             logger.debug(f"Handling crew kickoff completed in crew context: {execution_id}")
-            await self._handle_crew_kickoff_completed_crew(execution_id, event)
+            self._schedule(self._handle_crew_kickoff_completed_crew(execution_id, event))
 
-    async def handle_crew_kickoff_failed(self, source, event):
+    def handle_crew_kickoff_failed(self, source, event):
         """Handle crew kickoff failed event."""
         execution_id = self._extract_execution_id(source, event)
         if execution_id:
-            logger.info(f"Crew kickoff failed for execution: {execution_id}")
-            await self._handle_crew_kickoff_failed_crew(execution_id, event)
+            if self._is_flow_context(source, event):
+                logger.debug(
+                    f"Crew kickoff failed (flow context) for flow: {execution_id}"
+                )
+            else:
+                logger.info(
+                    f"Crew kickoff failed (crew context) for execution: {execution_id}"
+                )
+                self._schedule(self._handle_crew_kickoff_failed_crew(execution_id, event))
 
-    async def handle_agent_execution_started(self, source, event):
+    def handle_agent_execution_started(self, source, event):
         """Handle agent execution started event."""
         logger.info(f"Agent execution started event received: {event}")
         execution_id = self._extract_execution_id(source, event)
@@ -554,9 +571,9 @@ class EventListener:
         else:
             # This is a crew context
             logger.debug(f"Handling agent execution started in crew context: {execution_id}")
-            await self._handle_agent_execution_started_crew(execution_id, event)
+            self._schedule(self._handle_agent_execution_started_crew(execution_id, event))
 
-    async def handle_agent_execution_completed(self, source, event):
+    def handle_agent_execution_completed(self, source, event):
         """Handle agent execution completed event."""
         logger.info(f"Agent execution completed event received: {event}")
         execution_id = self._extract_execution_id(source, event)
@@ -569,9 +586,9 @@ class EventListener:
         else:
             # This is a crew context
             logger.debug(f"Handling agent execution completed in crew context: {execution_id}")
-            await self._handle_agent_execution_completed_crew(execution_id, event)
+            self._schedule(self._handle_agent_execution_completed_crew(execution_id, event))
 
-    async def handle_agent_execution_error(self, source, event):
+    def handle_agent_execution_error(self, source, event):
         """Handle agent execution error event."""
         logger.info(f"Agent execution error event received: {event}")
         execution_id = self._extract_execution_id(source, event)
@@ -584,15 +601,15 @@ class EventListener:
         else:
             # This is a crew context
             logger.debug(f"Handling agent execution error in crew context: {execution_id}")
-            await self._handle_agent_execution_error_crew(execution_id, event)
+            self._schedule(self._handle_agent_execution_error_crew(execution_id, event))
 
     # Additional Crew Event Handlers
-    async def handle_crew_test_started(self, source, event):
+    def handle_crew_test_started(self, source, event):
         """Handle crew test started event."""
         execution_id = self._extract_execution_id(source, event)
         if execution_id:
             logger.info(f"Crew test started for execution: {execution_id}")
-            await self._handle_crew_test_started_crew(execution_id, event)
+            self._schedule(self._handle_crew_test_started_crew(execution_id, event))
 
     def handle_crew_test_completed(self, source, event):
         """Handle crew test completed event."""

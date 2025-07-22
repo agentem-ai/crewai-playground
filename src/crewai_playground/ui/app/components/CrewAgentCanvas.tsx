@@ -682,7 +682,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
     }
   }, [crewId]);
 
-  // Reset state when crew ID changes
+  // Reset state when crew ID changes (WebSocket reconnection)
   useEffect(() => {
     // Reset state
     setState({
@@ -738,7 +738,21 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
         heartbeatIntervalRef.current = null;
       }
     };
-  }, [crewId, resetKey, connectWebSocket, initializeCrew]);
+  }, [crewId, connectWebSocket, initializeCrew]); // Removed resetKey from dependencies
+
+  // Reset state when resetKey changes (without WebSocket reconnection)
+  useEffect(() => {
+    // Only reset state, don't reconnect WebSocket
+    setState({
+      crew: null,
+      agents: [],
+      tasks: [],
+    });
+    setHasReceivedData(false);
+    setError(null);
+    
+    console.log(`State reset triggered by resetKey: ${resetKey}`);
+  }, [resetKey]);
 
   // Center the graph when nodes change or when a new crew is selected
   useEffect(() => {
