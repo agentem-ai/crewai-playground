@@ -1,42 +1,77 @@
-import logging
-from typing import Dict, List, Any, Optional
-import json
+"""
+Working Unified Event Listener for CrewAI Playground
+
+This module provides a unified event listener that handles both Flow and Crew events
+without inheriting from the problematic EventListener base class.
+"""
+
 import asyncio
+import logging
+import json
+from typing import Any, Dict, Optional
 from datetime import datetime
 from fastapi import WebSocket
+
 from crewai.utilities.events import (
+    # Flow Events
+    FlowStartedEvent,
+    FlowFinishedEvent,
+    MethodExecutionStartedEvent,
+    MethodExecutionFinishedEvent,
+    MethodExecutionFailedEvent,
+    # Crew Events
     CrewKickoffStartedEvent,
     CrewKickoffCompletedEvent,
+    CrewKickoffFailedEvent,
+    CrewTestStartedEvent,
+    CrewTestCompletedEvent,
+    CrewTestFailedEvent,
+    CrewTrainStartedEvent,
+    CrewTrainCompletedEvent,
+    CrewTrainFailedEvent,
+    # Agent Events
     AgentExecutionStartedEvent,
     AgentExecutionCompletedEvent,
+    AgentExecutionErrorEvent,
+    # Task Events
     TaskStartedEvent,
     TaskCompletedEvent,
+    # Tool Usage Events
+    ToolUsageStartedEvent,
+    ToolUsageFinishedEvent,
+    ToolUsageErrorEvent,
+    ToolValidateInputErrorEvent,
+    ToolExecutionErrorEvent,
+    ToolSelectionErrorEvent,
+    # LLM Events
     LLMCallStartedEvent,
     LLMCallCompletedEvent,
+    LLMCallFailedEvent,
+    LLMStreamChunkEvent,
 )
-from crewai_playground.events import (
-    CrewInitializationRequestedEvent,
-    CrewInitializationCompletedEvent,
-)
-from crewai_playground.telemetry import telemetry_service
-from crewai.utilities.events.base_event_listener import BaseEventListener
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+try:
+    from crewai_playground.events import (
+        CrewInitializationRequestedEvent,
+        CrewInitializationCompletedEvent,
+    )
+except ImportError:
+    # Custom events may not be available in all environments
+    CrewInitializationRequestedEvent = None
+    CrewInitializationCompletedEvent = None
+
+from .websocket_utils import broadcast_flow_update
+from .telemetry import telemetry_service
+
 logger = logging.getLogger(__name__)
 
 
-# Custom JSON encoder to handle datetime objects and other custom types
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
             return obj.isoformat()
-        # Handle TaskOutput objects
         if hasattr(obj, "__dict__"):
             return str(obj)
-        # Try to convert to string if all else fails
         try:
             return str(obj)
         except:
@@ -44,36 +79,129 @@ class CustomJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-class CrewVisualizationListener(BaseEventListener):
-    """Event listener for visualizing crew execution in the UI."""
+class EventListener:
+    """Unified event listener for both flow and crew execution events."""
 
     def __init__(self):
-        self._registered_buses = set()
-        super().__init__()
-        # Replace simple connection list with client dictionary
-        self.clients = {}  # client_id -> {websocket, crew_id, connected_at, last_ping}
+        # Flow-level state management
+        self.flow_states = {}
+
+        # Crew-level state management
         self.crew_state: Dict[str, Any] = {}
         self.agent_states: Dict[str, Dict[str, Any]] = {}
         self.task_states: Dict[str, Dict[str, Any]] = {}
 
+        # WebSocket client management
+        self.clients: Dict[str, Dict[str, Any]] = {}
+
+        # Event loop reference
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self._registered_buses = set()
+
+    def ensure_event_loop(self):
+        """Ensure event loop reference is available for scheduling."""
+        try:
+            if not self.loop or self.loop.is_closed():
+                self.loop = asyncio.get_running_loop()
+                logger.info("Event loop reference updated for unified event listener")
+        except RuntimeError:
+            logger.warning("No running event loop available for unified event listener")
+
+    def setup_listeners(self, crewai_event_bus):
+        """Set up event listeners for both flow and crew visualization."""
+        if id(crewai_event_bus) in self._registered_buses:
+            logger.info("Event listeners already registered for this bus")
+            return
+
+        logger.info("Setting up unified event listeners")
+
+        # Ensure we have an event loop reference
+        self.ensure_event_loop()
+
+        # Flow Events
+        crewai_event_bus.on(FlowStartedEvent)(self.handle_flow_started)
+        crewai_event_bus.on(FlowFinishedEvent)(self.handle_flow_finished)
+        crewai_event_bus.on(MethodExecutionStartedEvent)(
+            self.handle_method_execution_started
+        )
+        crewai_event_bus.on(MethodExecutionFinishedEvent)(
+            self.handle_method_execution_finished
+        )
+        crewai_event_bus.on(MethodExecutionFailedEvent)(
+            self.handle_method_execution_failed
+        )
+
+        # Crew Events
+        crewai_event_bus.on(CrewKickoffStartedEvent)(self.handle_crew_kickoff_started)
+        crewai_event_bus.on(CrewKickoffCompletedEvent)(
+            self.handle_crew_kickoff_completed
+        )
+        crewai_event_bus.on(CrewKickoffFailedEvent)(self.handle_crew_kickoff_failed)
+        crewai_event_bus.on(CrewTestStartedEvent)(self.handle_crew_test_started)
+        crewai_event_bus.on(CrewTestCompletedEvent)(self.handle_crew_test_completed)
+        crewai_event_bus.on(CrewTestFailedEvent)(self.handle_crew_test_failed)
+        crewai_event_bus.on(CrewTrainStartedEvent)(self.handle_crew_train_started)
+        crewai_event_bus.on(CrewTrainCompletedEvent)(self.handle_crew_train_completed)
+        crewai_event_bus.on(CrewTrainFailedEvent)(self.handle_crew_train_failed)
+
+        # Agent Events
+        crewai_event_bus.on(AgentExecutionStartedEvent)(
+            self.handle_agent_execution_started
+        )
+        crewai_event_bus.on(AgentExecutionCompletedEvent)(
+            self.handle_agent_execution_completed
+        )
+        crewai_event_bus.on(AgentExecutionErrorEvent)(self.handle_agent_execution_error)
+
+        # Task Events
+        crewai_event_bus.on(TaskStartedEvent)(self.handle_task_started)
+        crewai_event_bus.on(TaskCompletedEvent)(self.handle_task_completed)
+
+        # Tool Usage Events
+        crewai_event_bus.on(ToolUsageStartedEvent)(self.handle_tool_usage_started)
+        crewai_event_bus.on(ToolUsageFinishedEvent)(self.handle_tool_usage_finished)
+        crewai_event_bus.on(ToolUsageErrorEvent)(self.handle_tool_usage_error)
+        crewai_event_bus.on(ToolValidateInputErrorEvent)(
+            self.handle_tool_validate_input_error
+        )
+        crewai_event_bus.on(ToolExecutionErrorEvent)(self.handle_tool_execution_error)
+        crewai_event_bus.on(ToolSelectionErrorEvent)(self.handle_tool_selection_error)
+
+        # LLM Events
+        crewai_event_bus.on(LLMCallStartedEvent)(self.handle_llm_call_started)
+        crewai_event_bus.on(LLMCallCompletedEvent)(self.handle_llm_call_completed)
+        crewai_event_bus.on(LLMCallFailedEvent)(self.handle_llm_call_failed)
+        crewai_event_bus.on(LLMStreamChunkEvent)(self.handle_llm_stream_chunk)
+
+        # Custom Events (if available)
+        if CrewInitializationRequestedEvent:
+            crewai_event_bus.on(CrewInitializationRequestedEvent)(
+                self.handle_crew_initialization_requested
+            )
+        if CrewInitializationCompletedEvent:
+            crewai_event_bus.on(CrewInitializationCompletedEvent)(
+                self.handle_crew_initialization_completed
+            )
+
+        self._registered_buses.add(id(crewai_event_bus))
+        logger.info("Unified event listeners registered successfully")
+
+    # WebSocket Client Management
     async def connect(self, websocket: WebSocket, client_id: str, crew_id: str = None):
         """Connect a new WebSocket client."""
-        # Capture the running loop so we can schedule updates from sync event callbacks
         self.loop = asyncio.get_running_loop()
-
         await websocket.accept()
         self.clients[client_id] = {
             "websocket": websocket,
             "crew_id": crew_id,
             "connected_at": datetime.utcnow(),
-            "last_ping": datetime.utcnow()
+            "last_ping": datetime.utcnow(),
         }
         logger.info(
             f"WebSocket client {client_id} connected. Total connections: {len(self.clients)}"
         )
-        # If crew_id provided, send current state for that crew
-        if crew_id and self.crew_state and self.crew_state.get("id") == crew_id:
-            logger.info(f"Sending initial state to new client for crew {crew_id}")
+
+        if crew_id:
             await self.send_state_to_client(client_id)
 
     def disconnect(self, client_id: str):
@@ -83,51 +211,70 @@ class CrewVisualizationListener(BaseEventListener):
             logger.info(
                 f"WebSocket client {client_id} disconnected. Remaining connections: {len(self.clients)}"
             )
-            
+
     async def register_client_for_crew(self, client_id: str, crew_id: str):
         """Register a client for updates from a specific crew."""
         if client_id in self.clients:
             self.clients[client_id]["crew_id"] = crew_id
             logger.info(f"Client {client_id} registered for crew {crew_id}")
             await self.send_state_to_client(client_id)
-    
+
     async def send_state_to_client(self, client_id: str):
         """Send current state to a specific client."""
         if client_id not in self.clients:
             return
-            
+
         client = self.clients[client_id]
         websocket = client["websocket"]
         crew_id = client["crew_id"]
-        
-        # Only send state for the client's registered crew
-        if crew_id and self.crew_state and self.crew_state.get("id") == crew_id:
+
+        # Check if we have flow state for this crew
+        flow_state = None
+        for fid, state in self.flow_states.items():
+            if state.get("name") == crew_id or state.get("id") == crew_id:
+                flow_state = state
+                break
+
+        # Send flow state if available, otherwise send crew state
+        if flow_state:
+            try:
+                await websocket.send_text(
+                    json.dumps(
+                        {"type": "flow_state", "payload": flow_state},
+                        cls=CustomJSONEncoder,
+                    )
+                )
+                logger.debug(f"Sent flow state to client {client_id}")
+            except Exception as e:
+                logger.error(
+                    f"Error sending flow state to client {client_id}: {str(e)}"
+                )
+                self.disconnect(client_id)
+        elif crew_id and self.crew_state and self.crew_state.get("id") == crew_id:
             try:
                 state = {
                     "crew": self.crew_state,
                     "agents": list(self.agent_states.values()),
-                    "tasks": list(self.task_states.values())
+                    "tasks": list(self.task_states.values()),
                 }
-                # Use CustomJSONEncoder to handle datetime and other complex objects
                 json_data = json.dumps(state, cls=CustomJSONEncoder)
                 await websocket.send_text(json_data)
-                logger.debug(f"Sent state to client {client_id} for crew {crew_id}")
+                logger.debug(f"Sent crew state to client {client_id}")
             except Exception as e:
-                logger.error(f"Error sending state to client {client_id}: {str(e)}")
+                logger.error(
+                    f"Error sending crew state to client {client_id}: {str(e)}"
+                )
                 self.disconnect(client_id)
 
     async def broadcast_update(self):
         """Broadcast the current state to all connected WebSocket clients."""
         if not self.clients:
-            logger.info("No active connections to broadcast to")
             return
 
         crew_id = self.crew_state.get("id") if self.crew_state else None
-        logger.info(f"Broadcasting update for crew {crew_id} to {len(self.clients)} clients")
-        
+
         for client_id, client in list(self.clients.items()):
             client_crew_id = client.get("crew_id")
-            # Only broadcast to clients registered for this crew or with no specific crew
             if not client_crew_id or (crew_id and client_crew_id == crew_id):
                 try:
                     websocket = client["websocket"]
@@ -135,495 +282,777 @@ class CrewVisualizationListener(BaseEventListener):
                         "crew": self.crew_state,
                         "agents": list(self.agent_states.values()),
                         "tasks": list(self.task_states.values()),
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
-                    # Use CustomJSONEncoder to handle datetime and other complex objects
                     json_data = json.dumps(state, cls=CustomJSONEncoder)
                     await websocket.send_text(json_data)
-                    logger.debug(f"Sent update to client {client_id} for crew {crew_id}")
+                    logger.debug(f"Sent update to client {client_id}")
                 except Exception as e:
                     logger.error(f"Error broadcasting to client {client_id}: {str(e)}")
                     self.disconnect(client_id)
 
     def reset_state(self):
-        """Reset the state when a new crew execution starts."""
+        """Reset the state when a new execution starts."""
         self.crew_state = {}
         self.agent_states = {}
         self.task_states = {}
-        logger.info("State reset for new crew execution")
 
-    def setup_listeners(self, crewai_event_bus):
-        """Set up event listeners for crew visualization."""
-        bus_id = id(crewai_event_bus)
-        if bus_id in self._registered_buses:
-            logger.info(f"Listeners already set up for event bus {bus_id}.")
-            return
-
-        logger.info(f"Setting up new listeners for event bus {bus_id}")
-        self._registered_buses.add(bus_id)
-        
-        @crewai_event_bus.on(CrewInitializationRequestedEvent)
-        def on_crew_initialization_requested(source, event):
-            """Handle crew initialization request."""
-            crew_id = event.crew_id
-            logger.info(f"Crew initialization requested for {event.crew_name} (ID: {crew_id})")
-            
-            # Reset state for new initialization
-            self.reset_state()
-            
-            # Store crew information
-            self.crew_state = {
-                "id": crew_id,
-                "name": event.crew_name,
-                "status": "initializing",
-                "started_at": event.timestamp or datetime.utcnow(),
-            }
-            
-            # Schedule async broadcast
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
-        
-        @crewai_event_bus.on(CrewInitializationCompletedEvent)
-        def on_crew_initialization_completed(source, event):
-            """Handle crew initialization completion."""
-            crew_id = event.crew_id
-            logger.info(f"Crew initialization completed for {event.crew_name} (ID: {crew_id})")
-            
-            # Update crew state
-            self.crew_state = {
-                "id": crew_id,
-                "name": event.crew_name,
-                "status": "ready",
-                "initialized_at": event.timestamp or datetime.utcnow(),
-            }
-            
-            # Initialize agent states
-            for agent in event.agents:
-                agent_id = agent.get("id")
-                if agent_id:
-                    self.agent_states[agent_id] = agent
-                    logger.debug(f"Added agent {agent_id} to state")
-            
-            # Initialize task states
-            for task in event.tasks:
-                task_id = task.get("id")
-                if task_id:
-                    self.task_states[task_id] = task
-                    logger.debug(f"Added task {task_id} to state")
-            
-            # Schedule async broadcast
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
-
-        @crewai_event_bus.on(CrewKickoffStartedEvent)
-        def on_crew_kickoff_started(source, event):
-            logger.info(f"Crew '{event.crew_name}' execution started")
-
-            # Reset state for new execution
-            self.reset_state()
-
-            # Get crew ID - ensure it's a string and normalize it
-            crew_id = str(source.id) if hasattr(source, "id") else "unknown"
-
-            # Log the crew ID for debugging
-            logger.info(f"CrewKickoffStartedEvent - Using crew_id: {crew_id}")
-
-            # Store crew information
-            self.crew_state = {
-                "id": crew_id,
-                "name": event.crew_name,
-                "status": "running",
-                "started_at": (
-                    event.timestamp.isoformat()
-                    if isinstance(event.timestamp, datetime)
-                    else event.timestamp
-                ),
-            }
-
-            # Start a new trace in telemetry
-            telemetry_service.start_crew_trace(crew_id, event.crew_name)
-
-            # Store agent information
-            for agent in source.agents:
-                agent_id = (
-                    str(agent.id)
-                    if hasattr(agent, "id")
-                    else f"agent_{len(self.agent_states)}"
-                )
-                self.agent_states[agent_id] = {
-                    "id": agent_id,
-                    "role": agent.role,
-                    "name": agent.name if hasattr(agent, "name") else agent.role,
-                    "status": "waiting",
-                    "description": (
-                        agent.backstory[:100] + "..."
-                        if len(agent.backstory) > 100
-                        else agent.backstory
-                    ),
-                }
-
-            # Store task information if available and associate with agents
-            if hasattr(source, "tasks"):
-                # First, collect all agents by role for matching
-                agent_by_role = {}
-                agent_by_id = {}
-                for agent in source.agents:
-                    agent_id = str(agent.id) if hasattr(agent, "id") else None
-                    if agent_id:
-                        agent_by_id[agent_id] = agent
-                        role_key = agent.role.lower() if hasattr(agent, "role") else ""
-                        agent_by_role[role_key] = agent_id
-
-                # Process tasks and try to associate them with agents
-                for i, task in enumerate(source.tasks):
-                    task_id = str(task.id) if hasattr(task, "id") else f"task_{i}"
-                    task_desc = (
-                        task.description.lower() if hasattr(task, "description") else ""
-                    )
-
-                    # Try to find an agent for this task
-                    assigned_agent_id = None
-
-                    # First check if task already has an agent assigned
-                    if hasattr(task, "agent") and task.agent:
-                        agent_id = (
-                            str(task.agent.id) if hasattr(task.agent, "id") else None
-                        )
-                        if agent_id:
-                            assigned_agent_id = agent_id
-
-                    # If no agent is assigned, try to match based on task description and agent roles
-                    if not assigned_agent_id:
-                        # Try to match based on keywords in task description and agent roles
-                        best_match = None
-                        best_match_score = 0
-
-                        for role, agent_id in agent_by_role.items():
-                            # Skip empty roles
-                            if not role:
-                                continue
-
-                            # Calculate a simple matching score
-                            role_words = set(role.split())
-                            task_words = set(task_desc.split())
-
-                            # Count matching significant words (longer than 3 chars)
-                            match_score = sum(
-                                1 for word in role_words & task_words if len(word) > 3
-                            )
-
-                            # Special case handling for common patterns
-                            if "research" in role and "research" in task_desc:
-                                match_score += 3
-                            if "analyst" in role and any(
-                                kw in task_desc for kw in ["analyz", "review", "report"]
-                            ):
-                                match_score += 3
-
-                            if match_score > best_match_score:
-                                best_match_score = match_score
-                                best_match = agent_id
-
-                        # If we found a reasonable match, assign the task to this agent
-                        if best_match_score > 0:
-                            assigned_agent_id = best_match
-                        # If we still don't have a match but there's only one agent, assign to it
-                        elif len(agent_by_id) == 1:
-                            assigned_agent_id = next(iter(agent_by_id.keys()))
-                        # If we have exactly two agents and can identify researcher/analyst pattern
-                        elif len(agent_by_id) == 2:
-                            # For a research task, assign to the first agent
-                            if "research" in task_desc:
-                                assigned_agent_id = list(agent_by_id.keys())[0]
-                            # For a reporting/analysis task, assign to the second agent
-                            elif any(
-                                kw in task_desc
-                                for kw in ["report", "analyz", "review", "summarize"]
-                            ):
-                                assigned_agent_id = list(agent_by_id.keys())[1]
-
-                    # Store the task with its assigned agent (if any)
-                    self.task_states[task_id] = {
-                        "id": task_id,
-                        "description": (
-                            task.description if hasattr(task, "description") else ""
-                        ),
-                        "status": "pending",
-                        "agent_id": assigned_agent_id,
-                    }
-
-            # Broadcast the update asynchronously
-            # Schedule the broadcast on the main event loop
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
-
-        @crewai_event_bus.on(AgentExecutionStartedEvent)
-        def on_agent_execution_started(source, event):
-            agent = event.agent
-            agent_id = str(agent.id) if hasattr(agent, "id") else None
-
-            if agent_id and agent_id in self.agent_states:
-                logger.info(f"Agent '{agent.role}' started execution")
-
-                # Update agent status
-                self.agent_states[agent_id]["status"] = "running"
-
-                # Get crew ID
-                crew_id = self.crew_state.get("id")
-                if crew_id:
-                    # Record in telemetry
-                    telemetry_service.start_agent_execution(
-                        crew_id=crew_id,
-                        agent_id=agent_id,
-                        agent_name=agent.name if hasattr(agent, "name") else agent.role,
-                        agent_role=agent.role,
-                    )
-
-                # If there's a task associated with this execution, update it
-                if hasattr(event, "task"):
-                    task = event.task
-                    task_id = str(task.id) if hasattr(task, "id") else None
-
-                    if task_id and task_id in self.task_states:
-                        self.task_states[task_id]["status"] = "running"
-                        self.task_states[task_id]["agent_id"] = agent_id
-
-                # Broadcast the update asynchronously
-                # Schedule the broadcast on the main event loop
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
-
-        @crewai_event_bus.on(AgentExecutionCompletedEvent)
-        def on_agent_execution_completed(source, event):
-            agent = event.agent
-            agent_id = str(agent.id) if hasattr(agent, "id") else None
-
-            if agent_id and agent_id in self.agent_states:
-                logger.info(f"Agent '{agent.role}' completed execution")
-
-                # Update agent status
-                self.agent_states[agent_id]["status"] = "completed"
-
-                # Get crew ID
-                crew_id = self.crew_state.get("id")
-                if crew_id:
-                    # Record in telemetry
-                    telemetry_service.end_agent_execution(
-                        crew_id=crew_id,
-                        agent_id=agent_id,
-                        output=event.output if hasattr(event, "output") else None,
-                    )
-
-                # If there's a task associated with this execution, update it
-                if hasattr(event, "task"):
-                    task = event.task
-                    task_id = str(task.id) if hasattr(task, "id") else None
-
-                    if task_id and task_id in self.task_states:
-                        self.task_states[task_id]["status"] = "completed"
-
-                # Broadcast the update asynchronously
-                # Schedule the broadcast on the main event loop
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
-
-        @crewai_event_bus.on(TaskStartedEvent)
-        def on_task_started(source, event):
-            task = event.task
-            task_id = str(task.id) if hasattr(task, "id") else None
-
-            if task_id:
-                logger.info(f"Task '{task.description[:30]}...' started")
-
-                # Get crew ID
-                crew_id = self.crew_state.get("id")
-                if crew_id:
-                    # Get agent ID if available
-                    agent_id = None
-                    if hasattr(task, "agent") and task.agent:
-                        agent_id = (
-                            str(task.agent.id) if hasattr(task.agent, "id") else None
-                        )
-
-                    # Record in telemetry
-                    telemetry_service.start_task_execution(
-                        crew_id=crew_id,
-                        task_id=task_id,
-                        task_description=(
-                            task.description if hasattr(task, "description") else ""
-                        ),
-                        agent_id=agent_id,
-                    )
-
-                # Add task to state if it doesn't exist
-                if task_id not in self.task_states:
-                    self.task_states[task_id] = {
-                        "id": task_id,
-                        "description": (
-                            task.description if hasattr(task, "description") else ""
-                        ),
-                        "status": "running",
-                        "agent_id": None,
-                    }
+    # Utility Methods
+    def _schedule(self, coro):
+        """Schedule coroutine safely on an event loop."""
+        try:
+            # Try to get the current running loop
+            loop = asyncio.get_running_loop()
+            # Create task on the running loop
+            loop.create_task(coro)
+        except RuntimeError:
+            # No running loop, try to create a new one or use thread pool
+            try:
+                # Try to use the stored loop if available
+                if self.loop and not self.loop.is_closed():
+                    # Schedule on the stored loop using call_soon_threadsafe
+                    future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+                    # Don't wait for the result to avoid blocking
                 else:
-                    self.task_states[task_id]["status"] = "running"
-
-                # If there's an agent assigned to this task, update it
-                agent_id = None
-
-                # First check if task has an agent directly assigned
-                if hasattr(task, "agent") and task.agent:
-                    agent = task.agent
-                    agent_id = str(agent.id) if hasattr(agent, "id") else None
-
-                # If no agent is directly assigned, check if the source is an agent
-                if not agent_id and hasattr(source, "id") and hasattr(source, "role"):
-                    # The source might be the agent executing this task
-                    agent_id = str(source.id)
-
-                # If we found an agent ID, update the task and agent states
-                if agent_id:
-                    # Update task with agent ID
-                    self.task_states[task_id]["agent_id"] = agent_id
-
-                    # Also update agent status if it exists
-                    if agent_id in self.agent_states:
-                        self.agent_states[agent_id]["status"] = "running"
-
-                        # Log the association
-                        agent_name = self.agent_states[agent_id].get(
-                            "name", "Unknown agent"
-                        )
-                        logger.info(
-                            f"Associated task '{task_id}' with agent '{agent_name}' (ID: {agent_id})"
-                        )
-
-                # Broadcast the update asynchronously
-                # Schedule the broadcast on the main event loop
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
-
-        @crewai_event_bus.on(TaskCompletedEvent)
-        def on_task_completed(source, event):
-            task = event.task
-            task_id = str(task.id) if hasattr(task, "id") else None
-
-            if task_id and task_id in self.task_states:
-                logger.info(f"Task '{task.description[:30]}...' completed")
-
-                # Update task status
-                self.task_states[task_id]["status"] = "completed"
-
-                # Get crew ID
-                crew_id = self.crew_state.get("id")
-                if crew_id:
-                    # Record in telemetry
-                    telemetry_service.end_task_execution(
-                        crew_id=crew_id,
-                        task_id=task_id,
-                        output=event.output if hasattr(event, "output") else None,
+                    logger.warning(
+                        "No running event loop found and no stored loop available"
                     )
+            except Exception as e:
+                logger.error(f"Error scheduling coroutine: {e}")
 
-                # Broadcast the update asynchronously
-                # Schedule the broadcast on the main event loop
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
+    def _extract_execution_id(self, source, event) -> Optional[str]:
+        """Extract execution ID from source or event."""
+        if hasattr(source, "id") and source.id:
+            return str(source.id)
+        if hasattr(event, "crew_id") and event.crew_id:
+            return str(event.crew_id)
+        if hasattr(source, "crew_id") and source.crew_id:
+            return str(source.crew_id)
+        if source:
+            return str(source)
+        return None
 
-        @crewai_event_bus.on(CrewKickoffCompletedEvent)
-        def on_crew_kickoff_completed(source, event):
-            logger.info(f"Crew '{event.crew_name}' execution completed")
+    def _is_flow_context(self, source, event) -> bool:
+        """Determine if this event is in a flow context."""
+        if hasattr(source, "__class__") and "Flow" in source.__class__.__name__:
+            return True
+        if hasattr(source, "state") and hasattr(source, "id"):
+            return True
+        return False
 
-            output_text = (
-                event.output.raw if hasattr(event.output, "raw") else str(event.output)
+    def get_flow_state(self, flow_id: str):
+        """Get the current state of a flow."""
+        return self.flow_states.get(flow_id)
+
+    def _ensure_flow_state_exists(
+        self, flow_id: str, event_name: str, flow_name: str = None
+    ):
+        """Ensure flow state exists for the given flow ID."""
+        try:
+            from .flow_api import reverse_flow_id_mapping
+
+            api_flow_id = reverse_flow_id_mapping.get(flow_id)
+            broadcast_flow_id = api_flow_id if api_flow_id else flow_id
+        except ImportError:
+            broadcast_flow_id = flow_id
+
+        if broadcast_flow_id not in self.flow_states:
+            logger.info(
+                f"Creating new flow state for {broadcast_flow_id} (event: {event_name})"
+            )
+            self.flow_states[broadcast_flow_id] = {
+                "id": broadcast_flow_id,
+                "name": flow_name or f"Flow {broadcast_flow_id}",
+                "status": "running",
+                "steps": [],
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+
+        return broadcast_flow_id, self.flow_states[broadcast_flow_id]
+
+    # Event Handlers
+    def handle_flow_started(self, source, event):
+        """Handle flow started event."""
+        flow_id = self._extract_execution_id(source, event)
+        if flow_id:
+            self._schedule(self._handle_flow_started(flow_id, event, source))
+
+    def handle_flow_finished(self, source, event):
+        """Handle flow finished event."""
+        flow_id = self._extract_execution_id(source, event)
+        if flow_id:
+            self._schedule(self._handle_flow_finished(flow_id, event, source))
+
+    def handle_method_execution_started(self, source, event):
+        """Handle method execution started event."""
+        flow_id = self._extract_execution_id(source, event)
+        if flow_id:
+            self._schedule(self._handle_method_started(flow_id, event))
+
+    def handle_method_execution_finished(self, source, event):
+        """Handle method execution finished event."""
+        flow_id = self._extract_execution_id(source, event)
+        if flow_id:
+            self._schedule(self._handle_method_finished(flow_id, event))
+
+    def handle_method_execution_failed(self, source, event):
+        """Handle method execution failed event."""
+        flow_id = self._extract_execution_id(source, event)
+        if flow_id:
+            self._schedule(self._handle_method_failed(flow_id, event))
+
+    def handle_crew_kickoff_started(self, source, event):
+        """Handle crew kickoff started event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            if self._is_flow_context(source, event):
+                logger.debug(
+                    f"Crew kickoff started (flow context) for flow: {execution_id}"
+                )
+            else:
+                logger.info(
+                    f"Crew kickoff started (crew context) for execution: {execution_id}"
+                )
+                self._schedule(
+                    self._handle_crew_kickoff_started_crew(execution_id, event)
+                )
+
+    def handle_crew_kickoff_completed(self, source, event):
+        """Handle crew kickoff completed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            if self._is_flow_context(source, event):
+                logger.debug(
+                    f"Crew kickoff completed (flow context) for flow: {execution_id}"
+                )
+            else:
+                logger.info(
+                    f"Crew kickoff completed (crew context) for execution: {execution_id}"
+                )
+                self._schedule(
+                    self._handle_crew_kickoff_completed_crew(execution_id, event)
+                )
+
+    def handle_crew_kickoff_failed(self, source, event):
+        """Handle crew kickoff failed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew kickoff failed for execution: {execution_id}")
+            self._schedule(self._handle_crew_kickoff_failed_crew(execution_id, event))
+
+    def handle_agent_execution_started(self, source, event):
+        """Handle agent execution started event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id and not self._is_flow_context(source, event):
+            logger.info(
+                f"Agent execution started (crew context) for execution: {execution_id}"
+            )
+            self._schedule(
+                self._handle_agent_execution_started_crew(execution_id, event)
             )
 
-            # Update crew status
-            self.crew_state["status"] = "completed"
-            self.crew_state["completed_at"] = (
-                event.timestamp.isoformat()
-                if isinstance(event.timestamp, datetime)
-                else event.timestamp
+    def handle_agent_execution_completed(self, source, event):
+        """Handle agent execution completed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id and not self._is_flow_context(source, event):
+            logger.info(
+                f"Agent execution completed (crew context) for execution: {execution_id}"
             )
-            self.crew_state["output"] = output_text
-
-            # Get crew ID - first try from source, then from state
-            crew_id = (
-                str(source.id) if hasattr(source, "id") else self.crew_state.get("id")
+            self._schedule(
+                self._handle_agent_execution_completed_crew(execution_id, event)
             )
 
-            # Log the crew ID for debugging
-            logger.info(f"CrewKickoffCompletedEvent - Using crew_id: {crew_id}")
+    def handle_agent_execution_error(self, source, event):
+        """Handle agent execution error event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id and not self._is_flow_context(source, event):
+            logger.info(
+                f"Agent execution error (crew context) for execution: {execution_id}"
+            )
+            self._schedule(self._handle_agent_execution_error_crew(execution_id, event))
 
-            if crew_id:
-                # Record in telemetry
-                telemetry_service.end_crew_trace(crew_id=crew_id, output=output_text)
+    # Additional Crew Event Handlers
+    def handle_crew_test_started(self, source, event):
+        """Handle crew test started event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew test started for execution: {execution_id}")
+            self._schedule(self._handle_crew_test_started_crew(execution_id, event))
 
-            # Mark all agents and tasks as completed
-            for agent_id in self.agent_states:
-                self.agent_states[agent_id]["status"] = "completed"
+    def handle_crew_test_completed(self, source, event):
+        """Handle crew test completed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew test completed for execution: {execution_id}")
+            self._schedule(self._handle_crew_test_completed_crew(execution_id, event))
 
-            for task_id in self.task_states:
-                self.task_states[task_id]["status"] = "completed"
+    def handle_crew_test_failed(self, source, event):
+        """Handle crew test failed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew test failed for execution: {execution_id}")
+            self._schedule(self._handle_crew_test_failed_crew(execution_id, event))
 
-            # Broadcast the update asynchronously
-            # Schedule the broadcast on the main event loop
-            if hasattr(self, "loop"):
-                asyncio.run_coroutine_threadsafe(self.broadcast_update(), self.loop)
+    def handle_crew_train_started(self, source, event):
+        """Handle crew train started event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew train started for execution: {execution_id}")
+            self._schedule(self._handle_crew_train_started_crew(execution_id, event))
 
-        # Add handlers for LLM call events
+    def handle_crew_train_completed(self, source, event):
+        """Handle crew train completed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew train completed for execution: {execution_id}")
+            self._schedule(self._handle_crew_train_completed_crew(execution_id, event))
 
-        @crewai_event_bus.on(LLMCallStartedEvent)
-        def on_llm_call_started(source, event):
-            # Get the crew ID
-            crew_id = self.crew_state.get("id")
-            if not crew_id:
-                return
+    def handle_crew_train_failed(self, source, event):
+        """Handle crew train failed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew train failed for execution: {execution_id}")
+            self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
 
-            # Get the agent ID if available
-            agent_id = None
-            if hasattr(event, "agent") and event.agent:
-                agent_id = str(event.agent.id) if hasattr(event.agent, "id") else None
+    # Task Event Handlers
+    def handle_task_started(self, source, event):
+        """Handle task started event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id and not self._is_flow_context(source, event):
+            logger.info(f"Task started (crew context) for execution: {execution_id}")
+            self._schedule(self._handle_task_started_crew(execution_id, event))
 
-            # Log the event
-            logger.info(f"LLM call started")
+    def handle_task_completed(self, source, event):
+        """Handle task completed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id and not self._is_flow_context(source, event):
+            logger.info(f"Task completed (crew context) for execution: {execution_id}")
+            self._schedule(self._handle_task_completed_crew(execution_id, event))
 
-            # Add an event to telemetry
-            telemetry_service.add_event(
-                crew_id=crew_id,
-                event_type="llm.started",
-                event_data={
-                    "agent_id": agent_id,
-                    "prompt": event.prompt if hasattr(event, "prompt") else "",
+    # Tool Usage Event Handlers
+    def handle_tool_usage_started(self, source, event):
+        """Handle tool usage started event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.debug(f"Tool usage started for execution: {execution_id}")
+            # Tool events are usually logged but don't need state updates
+
+    def handle_tool_usage_finished(self, source, event):
+        """Handle tool usage finished event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.debug(f"Tool usage finished for execution: {execution_id}")
+
+    def handle_tool_usage_error(self, source, event):
+        """Handle tool usage error event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.warning(f"Tool usage error for execution: {execution_id}")
+
+    def handle_tool_validate_input_error(self, source, event):
+        """Handle tool validate input error event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.warning(f"Tool validate input error for execution: {execution_id}")
+
+    def handle_tool_execution_error(self, source, event):
+        """Handle tool execution error event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.warning(f"Tool execution error for execution: {execution_id}")
+
+    def handle_tool_selection_error(self, source, event):
+        """Handle tool selection error event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.warning(f"Tool selection error for execution: {execution_id}")
+
+    # LLM Event Handlers
+    def handle_llm_call_started(self, source, event):
+        """Handle LLM call started event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.debug(f"LLM call started for execution: {execution_id}")
+
+    def handle_llm_call_completed(self, source, event):
+        """Handle LLM call completed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.debug(f"LLM call completed for execution: {execution_id}")
+
+    def handle_llm_call_failed(self, source, event):
+        """Handle LLM call failed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.warning(f"LLM call failed for execution: {execution_id}")
+
+    def handle_llm_stream_chunk(self, source, event):
+        """Handle LLM stream chunk event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.debug(f"LLM stream chunk for execution: {execution_id}")
+
+    # Custom Event Handlers
+    def handle_crew_initialization_requested(self, source, event):
+        """Handle crew initialization requested event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew initialization requested for execution: {execution_id}")
+            self._schedule(
+                self._handle_crew_initialization_requested_crew(execution_id, event)
+            )
+
+    def handle_crew_initialization_completed(self, source, event):
+        """Handle crew initialization completed event."""
+        execution_id = self._extract_execution_id(source, event)
+        if execution_id:
+            logger.info(f"Crew initialization completed for execution: {execution_id}")
+            self._schedule(
+                self._handle_crew_initialization_completed_crew(execution_id, event)
+            )
+
+    # Async Implementation Methods
+    async def _handle_flow_started(self, flow_id: str, event, source=None):
+        """Handle flow started event asynchronously."""
+        logger.info(f"Flow started event handler for flow: {flow_id}")
+
+        flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
+        broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
+            flow_id, "flow_started", flow_name
+        )
+
+        flow_state.update(
+            {
+                "name": flow_name,
+                "status": "running",
+                "inputs": (
+                    getattr(event, "inputs", {}) if hasattr(event, "inputs") else {}
+                ),
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+        )
+
+        await broadcast_flow_update(
+            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        )
+
+    async def _handle_flow_finished(self, flow_id: str, event, source=None):
+        """Handle flow finished event asynchronously."""
+        logger.info(f"Flow finished event handler for flow: {flow_id}")
+
+        flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
+        broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
+            flow_id, "flow_finished", flow_name
+        )
+
+        # Extract result from source.state if available
+        result = None
+        if source and hasattr(source, "state"):
+            try:
+                state_dict = (
+                    source.state.__dict__ if hasattr(source.state, "__dict__") else {}
+                )
+                if "poem" in state_dict:
+                    result = state_dict["poem"]
+                elif "result" in state_dict:
+                    result = state_dict["result"]
+                elif "output" in state_dict:
+                    result = state_dict["output"]
+                else:
+                    filtered_state = {k: v for k, v in state_dict.items() if k != "id"}
+                    if filtered_state:
+                        result = json.dumps(filtered_state, indent=2)
+            except Exception as e:
+                logger.warning(f"Error extracting result from source.state: {e}")
+
+        if result is None and hasattr(event, "result") and event.result is not None:
+            result = event.result
+
+        flow_state.update(
+            {
+                "status": "completed",
+                "outputs": result,
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+        )
+
+        logger.info(f"Flow {broadcast_flow_id} finished with result: {result}")
+
+        await broadcast_flow_update(
+            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        )
+
+    async def _handle_method_started(self, flow_id: str, event):
+        """Handle method execution started event asynchronously."""
+        logger.info(f"Method started: {flow_id}, method: {event.method_name}")
+
+        broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
+            flow_id, "method_started"
+        )
+
+        step = {
+            "id": f"method_{event.method_name}_{id(event)}",
+            "name": event.method_name,
+            "status": "running",
+            "timestamp": asyncio.get_event_loop().time(),
+        }
+
+        flow_state["steps"].append(step)
+
+        await broadcast_flow_update(
+            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        )
+
+    async def _handle_method_finished(self, flow_id: str, event):
+        """Handle method execution finished event asynchronously."""
+        logger.info(f"Method finished: {flow_id}, method: {event.method_name}")
+
+        broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
+            flow_id, "method_finished"
+        )
+
+        for step in flow_state["steps"]:
+            if step["name"] == event.method_name and step["status"] == "running":
+                step["status"] = "completed"
+                step["timestamp"] = asyncio.get_event_loop().time()
+
+                if hasattr(event, "outputs") and event.outputs is not None:
+                    if hasattr(event.outputs, "raw"):
+                        step["outputs"] = event.outputs.raw
+                    else:
+                        step["outputs"] = str(event.outputs)
+                break
+
+        await broadcast_flow_update(
+            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        )
+
+    async def _handle_method_failed(self, flow_id: str, event):
+        """Handle method execution failed event asynchronously."""
+        logger.info(f"Method failed: {flow_id}, method: {event.method_name}")
+
+        broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
+            flow_id, "method_failed"
+        )
+
+        for step in flow_state["steps"]:
+            if step["name"] == event.method_name and step["status"] == "running":
+                step["status"] = "failed"
+                step["timestamp"] = asyncio.get_event_loop().time()
+
+                if hasattr(event, "error") and event.error is not None:
+                    step["error"] = str(event.error)
+                break
+
+        await broadcast_flow_update(
+            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        )
+
+    async def _handle_crew_kickoff_started_crew(self, execution_id: str, event):
+        """Handle crew kickoff started event in crew context."""
+        logger.info(
+            f"Crew kickoff started (crew context) for execution: {execution_id}"
+        )
+
+        self.crew_state = {
+            "id": execution_id,
+            "name": getattr(event, "crew_name", f"Crew {execution_id}"),
+            "status": "running",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        self.agent_states.clear()
+        self.task_states.clear()
+
+        await self.broadcast_update()
+
+    async def _handle_crew_kickoff_completed_crew(self, execution_id: str, event):
+        """Handle crew kickoff completed event in crew context."""
+        logger.info(
+            f"Crew kickoff completed (crew context) for execution: {execution_id}"
+        )
+
+        if self.crew_state.get("id") == execution_id:
+            self.crew_state.update(
+                {
+                    "status": "completed",
                     "timestamp": datetime.utcnow().isoformat(),
-                },
+                }
             )
 
-        @crewai_event_bus.on(LLMCallCompletedEvent)
-        def on_llm_call_completed(source, event):
-            # Get the crew ID
-            crew_id = self.crew_state.get("id")
-            if not crew_id:
-                return
+            if hasattr(event, "result") and event.result is not None:
+                if hasattr(event.result, "raw"):
+                    self.crew_state["result"] = event.result.raw
+                else:
+                    self.crew_state["result"] = str(event.result)
 
-            # Get the agent ID if available
-            agent_id = None
-            if hasattr(event, "agent") and event.agent:
-                agent_id = str(event.agent.id) if hasattr(event.agent, "id") else None
+            await self.broadcast_update()
 
-            # Log the event
-            logger.info(f"LLM call completed")
+    async def _handle_crew_kickoff_failed_crew(self, execution_id: str, event):
+        """Handle crew kickoff failed event in crew context."""
+        logger.info(f"Crew kickoff failed (crew context) for execution: {execution_id}")
 
-            # Add an event to telemetry
-            telemetry_service.add_event(
-                crew_id=crew_id,
-                event_type="llm.completed",
-                event_data={
-                    "agent_id": agent_id,
-                    "response": event.response if hasattr(event, "response") else "",
+        if self.crew_state.get("id") == execution_id:
+            self.crew_state.update(
+                {
+                    "status": "failed",
                     "timestamp": datetime.utcnow().isoformat(),
-                },
+                }
             )
 
+            if hasattr(event, "error") and event.error is not None:
+                self.crew_state["error"] = str(event.error)
 
-# Create a singleton instance
-crew_visualization_listener = CrewVisualizationListener()
+            await self.broadcast_update()
+
+    async def _handle_agent_execution_started_crew(self, execution_id: str, event):
+        """Handle agent execution started event in crew context."""
+        logger.info(
+            f"Agent execution started (crew context) for execution: {execution_id}"
+        )
+
+        agent_id = getattr(event, "agent_id", f"agent_{id(event)}")
+        agent_name = getattr(event, "agent_name", f"Agent {agent_id}")
+
+        self.agent_states[agent_id] = {
+            "id": agent_id,
+            "name": agent_name,
+            "role": getattr(event, "agent_role", "Unknown"),
+            "status": "running",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        await self.broadcast_update()
+
+    async def _handle_agent_execution_completed_crew(self, execution_id: str, event):
+        """Handle agent execution completed event in crew context."""
+        logger.info(
+            f"Agent execution completed (crew context) for execution: {execution_id}"
+        )
+
+        agent_id = getattr(event, "agent_id", f"agent_{id(event)}")
+
+        if agent_id in self.agent_states:
+            self.agent_states[agent_id].update(
+                {
+                    "status": "completed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "result") and event.result is not None:
+                self.agent_states[agent_id]["result"] = str(event.result)
+
+            await self.broadcast_update()
+
+    async def _handle_agent_execution_error_crew(self, execution_id: str, event):
+        """Handle agent execution error event in crew context."""
+        logger.info(
+            f"Agent execution error (crew context) for execution: {execution_id}"
+        )
+
+        agent_id = getattr(event, "agent_id", f"agent_{id(event)}")
+
+        if agent_id in self.agent_states:
+            self.agent_states[agent_id].update(
+                {
+                    "status": "failed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "error") and event.error is not None:
+                self.agent_states[agent_id]["error"] = str(event.error)
+
+            await self.broadcast_update()
+
+    # Additional async implementation methods for new event handlers
+    async def _handle_crew_test_started_crew(self, execution_id: str, event):
+        """Handle crew test started event in crew context."""
+        logger.info(f"Crew test started (crew context) for execution: {execution_id}")
+
+        self.crew_state = {
+            "id": execution_id,
+            "name": getattr(event, "crew_name", f"Crew Test {execution_id}"),
+            "status": "testing",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        await self.broadcast_update()
+
+    async def _handle_crew_test_completed_crew(self, execution_id: str, event):
+        """Handle crew test completed event in crew context."""
+        logger.info(f"Crew test completed (crew context) for execution: {execution_id}")
+
+        if self.crew_state.get("id") == execution_id:
+            self.crew_state.update(
+                {
+                    "status": "test_completed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "result") and event.result is not None:
+                self.crew_state["test_result"] = str(event.result)
+
+            await self.broadcast_update()
+
+    async def _handle_crew_test_failed_crew(self, execution_id: str, event):
+        """Handle crew test failed event in crew context."""
+        logger.info(f"Crew test failed (crew context) for execution: {execution_id}")
+
+        if self.crew_state.get("id") == execution_id:
+            self.crew_state.update(
+                {
+                    "status": "test_failed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "error") and event.error is not None:
+                self.crew_state["test_error"] = str(event.error)
+
+            await self.broadcast_update()
+
+    async def _handle_crew_train_started_crew(self, execution_id: str, event):
+        """Handle crew train started event in crew context."""
+        logger.info(f"Crew train started (crew context) for execution: {execution_id}")
+
+        self.crew_state = {
+            "id": execution_id,
+            "name": getattr(event, "crew_name", f"Crew Training {execution_id}"),
+            "status": "training",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        await self.broadcast_update()
+
+    async def _handle_crew_train_completed_crew(self, execution_id: str, event):
+        """Handle crew train completed event in crew context."""
+        logger.info(
+            f"Crew train completed (crew context) for execution: {execution_id}"
+        )
+
+        if self.crew_state.get("id") == execution_id:
+            self.crew_state.update(
+                {
+                    "status": "train_completed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "result") and event.result is not None:
+                self.crew_state["train_result"] = str(event.result)
+
+            await self.broadcast_update()
+
+    async def _handle_crew_train_failed_crew(self, execution_id: str, event):
+        """Handle crew train failed event in crew context."""
+        logger.info(f"Crew train failed (crew context) for execution: {execution_id}")
+
+        if self.crew_state.get("id") == execution_id:
+            self.crew_state.update(
+                {
+                    "status": "train_failed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "error") and event.error is not None:
+                self.crew_state["train_error"] = str(event.error)
+
+            await self.broadcast_update()
+
+    async def _handle_task_started_crew(self, execution_id: str, event):
+        """Handle task started event in crew context."""
+        logger.info(f"Task started (crew context) for execution: {execution_id}")
+
+        task_id = getattr(event, "task_id", f"task_{id(event)}")
+        task_name = getattr(event, "task_name", f"Task {task_id}")
+
+        self.task_states[task_id] = {
+            "id": task_id,
+            "name": task_name,
+            "description": getattr(event, "task_description", ""),
+            "status": "running",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        await self.broadcast_update()
+
+    async def _handle_task_completed_crew(self, execution_id: str, event):
+        """Handle task completed event in crew context."""
+        logger.info(f"Task completed (crew context) for execution: {execution_id}")
+
+        task_id = getattr(event, "task_id", f"task_{id(event)}")
+
+        if task_id in self.task_states:
+            self.task_states[task_id].update(
+                {
+                    "status": "completed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "result") and event.result is not None:
+                self.task_states[task_id]["result"] = str(event.result)
+
+            await self.broadcast_update()
+
+    async def _handle_crew_initialization_requested_crew(
+        self, execution_id: str, event
+    ):
+        """Handle crew initialization requested event in crew context."""
+        logger.info(
+            f"Crew initialization requested (crew context) for execution: {execution_id}"
+        )
+
+        self.crew_state = {
+            "id": execution_id,
+            "name": getattr(event, "crew_name", f"Crew {execution_id}"),
+            "status": "initializing",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        await self.broadcast_update()
+
+    async def _handle_crew_initialization_completed_crew(
+        self, execution_id: str, event
+    ):
+        """Handle crew initialization completed event in crew context."""
+        logger.info(
+            f"Crew initialization completed (crew context) for execution: {execution_id}"
+        )
+
+        if self.crew_state.get("id") == execution_id:
+            self.crew_state.update(
+                {
+                    "status": "initialized",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            await self.broadcast_update()
+
+
+# Create a singleton instance of the unified event listener
+logger.info("Creating working unified event listener")
+event_listener = EventListener()
+
+# Set up the listeners with the global event bus
+try:
+    from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+
+    # Try to capture the current event loop if available
+    try:
+        event_listener.loop = asyncio.get_running_loop()
+        logger.info("Captured running event loop for unified event listener")
+    except RuntimeError:
+        logger.info("No running event loop found during initialization")
+
+    event_listener.setup_listeners(crewai_event_bus)
+    logger.info("Working unified event listener setup completed")
+except ImportError as e:
+    logger.warning(f"Could not import crewai_event_bus: {e}")
+except Exception as e:
+    logger.error(f"Error setting up working unified event listener: {e}")

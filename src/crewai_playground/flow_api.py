@@ -48,7 +48,7 @@ from .websocket_utils import (
     unregister_websocket_queue,
     flow_websocket_queues,
 )
-from .flow_event_listener import flow_websocket_listener
+from .event_listener import event_listener as flow_websocket_listener
 
 
 class FlowExecuteRequest(BaseModel):
@@ -145,14 +145,14 @@ def _execute_flow_sync(flow_id: str, inputs: Dict[str, Any]):
         inputs: Input parameters for the flow
     """
     logger.info(f"Starting threaded execution of flow: {flow_id}")
-    
+
     # Create an event loop for this thread if needed
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
+
     # Run the async function in this thread's event loop
     try:
         return loop.run_until_complete(_execute_flow_async(flow_id, inputs))
@@ -474,9 +474,7 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
 
 
 @router.post("/{flow_id}/execute")
-async def execute_flow(
-    flow_id: str, request: FlowExecuteRequest
-) -> Dict[str, Any]:
+async def execute_flow(flow_id: str, request: FlowExecuteRequest) -> Dict[str, Any]:
     """
     Execute a flow with the provided inputs
 
@@ -523,7 +521,10 @@ async def execute_flow(
 
         # Start the flow execution in a separate thread to not block the API
         import threading
-        thread = threading.Thread(target=_execute_flow_sync, args=(flow_id, request.inputs))
+
+        thread = threading.Thread(
+            target=_execute_flow_sync, args=(flow_id, request.inputs)
+        )
         thread.daemon = True
         thread.start()
 
@@ -547,10 +548,10 @@ async def execute_flow(
 @router.get("/{flow_id}/traces")
 async def get_flow_traces_route(flow_id: str):
     """Get execution traces for a flow
-    
+
     Args:
         flow_id: ID of the flow
-    
+
     Returns:
         List of trace objects with spans structure for visualization
     """
@@ -560,7 +561,7 @@ async def get_flow_traces_route(flow_id: str):
 @router.post("/{flow_id}/events")
 def record_flow_event(flow_id: str, event_type: str, data: Dict[str, Any] = None):
     """Record an event in the flow trace.
-    
+
     Args:
         flow_id: The flow ID (API flow ID)
         event_type: The type of event (e.g., 'flow_started', 'method_started')
@@ -568,29 +569,31 @@ def record_flow_event(flow_id: str, event_type: str, data: Dict[str, Any] = None
     """
     if not data:
         data = {}
-    
+
     # Make sure flow_id is an API flow ID (not an internal flow ID)
     # If it's an internal flow ID, convert it to an API flow ID
     api_flow_id = reverse_flow_id_mapping.get(flow_id, flow_id)
-    
+
     # Check if there's a trace for this flow
     if api_flow_id not in flow_traces or not flow_traces[api_flow_id]:
-        logger.warning(f"No trace found for flow {api_flow_id}, cannot record event {event_type}")
+        logger.warning(
+            f"No trace found for flow {api_flow_id}, cannot record event {event_type}"
+        )
         return
-    
+
     # Get the latest trace for this flow
     trace = flow_traces[api_flow_id][-1]
-    
+
     # Add the event to the trace's events array
     event = {
         "type": event_type,
         "timestamp": asyncio.get_event_loop().time(),
-        "data": data
+        "data": data,
     }
-    
+
     if "events" not in trace:
         trace["events"] = []
-        
+
     trace["events"].append(event)
     logger.debug(f"Recorded {event_type} event in trace for flow {api_flow_id}")
 
@@ -606,16 +609,26 @@ async def get_flow_traces(flow_id: str):
         List of trace objects with spans structure for visualization
     """
     logger.info(f"Fetching traces for flow_id: {flow_id}")
-    
+
     # Check if flow exists in flows_cache
     if flow_id not in flows_cache:
         logger.warning(f"Flow ID {flow_id} not found in flows_cache")
-    
+
     # Check if flow has any traces
     if flow_id not in flow_traces:
         logger.info(f"No traces found for flow_id: {flow_id}")
         # Create an initializing trace if none exists
-        flow_name = flows_cache.get(flow_id, FlowInfo(id=flow_id, name="Unknown", description="", file_path="", class_name="", flow_class=None)).name
+        flow_name = flows_cache.get(
+            flow_id,
+            FlowInfo(
+                id=flow_id,
+                name="Unknown",
+                description="",
+                file_path="",
+                class_name="",
+                flow_class=None,
+            ),
+        ).name
         initial_trace = {
             "id": f"trace_{uuid.uuid4()}",
             "flow_id": flow_id,
@@ -623,32 +636,40 @@ async def get_flow_traces(flow_id: str):
             "status": "initializing",
             "start_time": datetime.now().timestamp(),
             "spans": [],  # Empty spans array for initialization
-            "events": []
+            "events": [],
         }
         flow_traces[flow_id] = [initial_trace]
         return {"status": "success", "traces": [initial_trace]}
-    
+
     # Get flow state to access steps information
     flow_state = flow_states.get(flow_id, {})
     steps = flow_state.get("steps", [])
-    
+
     # Format flow traces to match the structure expected by TraceTimeline
     formatted_traces = []
     current_time = datetime.now().timestamp()
-    
+
     for trace in flow_traces[flow_id]:
         try:
             # Create a copy of the trace to avoid modifying the original
             formatted_trace = dict(trace)
-            
+
             # Validate and fix timestamps
-            if formatted_trace.get("start_time") is None or formatted_trace.get("start_time") > current_time:
-                formatted_trace["start_time"] = current_time - 60  # Default to 1 minute ago
-                
+            if (
+                formatted_trace.get("start_time") is None
+                or formatted_trace.get("start_time") > current_time
+            ):
+                formatted_trace["start_time"] = (
+                    current_time - 60
+                )  # Default to 1 minute ago
+
             # Ensure we have a valid end_time for the trace
-            if formatted_trace.get("end_time") is None or formatted_trace.get("end_time") > current_time:
+            if (
+                formatted_trace.get("end_time") is None
+                or formatted_trace.get("end_time") > current_time
+            ):
                 formatted_trace["end_time"] = current_time
-            
+
             # Create a root span for the flow execution
             trace_id = formatted_trace.get("id", str(uuid.uuid4()))
             root_span = {
@@ -660,23 +681,25 @@ async def get_flow_traces(flow_id: str):
                 "children": [],
                 "attributes": {
                     "flow_id": flow_id,
-                    "inputs": formatted_trace.get("inputs", {})
-                }
+                    "inputs": formatted_trace.get("inputs", {}),
+                },
             }
-            
+
             # Create some dummy method steps if this is a completed trace with no steps
             # This ensures we have visualization data even for older traces
-            use_dummy_steps = (formatted_trace.get("status") == "completed" and 
-                            len(steps) == 0 and 
-                            formatted_trace.get("start_time") and 
-                            formatted_trace.get("end_time"))
-            
+            use_dummy_steps = (
+                formatted_trace.get("status") == "completed"
+                and len(steps) == 0
+                and formatted_trace.get("start_time")
+                and formatted_trace.get("end_time")
+            )
+
             if use_dummy_steps:
                 # Create dummy steps based on the flow start and end time
                 start_time = formatted_trace.get("start_time")
                 end_time = formatted_trace.get("end_time")
                 duration = end_time - start_time
-                
+
                 # Create some representative method steps
                 dummy_steps = [
                     {
@@ -685,15 +708,15 @@ async def get_flow_traces(flow_id: str):
                         "status": "completed",
                         "start_time": start_time + (duration * 0.05),
                         "end_time": start_time + (duration * 0.15),
-                        "outputs": "Flow initialized"
+                        "outputs": "Flow initialized",
                     },
                     {
                         "id": f"{trace_id}_method_2",
-                        "name": "process", 
+                        "name": "process",
                         "status": "completed",
                         "start_time": start_time + (duration * 0.2),
                         "end_time": start_time + (duration * 0.8),
-                        "outputs": "Flow processing complete"
+                        "outputs": "Flow processing complete",
                     },
                     {
                         "id": f"{trace_id}_method_3",
@@ -701,16 +724,16 @@ async def get_flow_traces(flow_id: str):
                         "status": "completed",
                         "start_time": start_time + (duration * 0.85),
                         "end_time": start_time + (duration * 0.95),
-                        "outputs": "Flow finalized"
-                    }
+                        "outputs": "Flow finalized",
+                    },
                 ]
-                
+
                 # Use these dummy steps instead of the empty flow state steps
                 steps = dummy_steps
-            
+
             # Process steps and events into spans
             spans = [root_span]  # Start with just the root span
-            
+
             # Add each step as a child span of the root span
             for step in steps:
                 # Use the step's actual timing information or generate meaningful defaults
@@ -718,7 +741,7 @@ async def get_flow_traces(flow_id: str):
                 if step_start is None or step_start > current_time:
                     # Default to 1ms after the root start if no timestamp
                     step_start = root_span["start_time"] + 0.001
-                
+
                 step_end = step.get("end_time")
                 if step_end is None or step_end > current_time:
                     # If we have a start but no end, use current time or root end
@@ -728,7 +751,7 @@ async def get_flow_traces(flow_id: str):
                     else:
                         # For running/pending steps, use current time
                         step_end = current_time
-                
+
                 step_span = {
                     "id": step.get("id", str(uuid.uuid4())),
                     "name": step.get("name", "Unknown Method"),
@@ -739,21 +762,21 @@ async def get_flow_traces(flow_id: str):
                     "children": [],
                     "attributes": {
                         "outputs": step.get("outputs"),
-                        "error": step.get("error")
-                    }
+                        "error": step.get("error"),
+                    },
                 }
                 spans.append(step_span)  # Add to flat spans list
                 root_span["children"].append(step_span)  # Add to hierarchy
-            
+
             # Add events as additional spans if they're not already represented
             for event in formatted_trace.get("events", []):
                 if event.get("type") == "status_change":
                     continue  # Skip status change events as they're already represented
-                
+
                 event_time = event.get("timestamp")
                 if event_time is None or event_time > current_time:
                     event_time = root_span["start_time"] + 0.0005
-                    
+
                 # Create a span for this event
                 event_id = f"{trace_id}_event_{uuid.uuid4().hex[:8]}"
                 event_span = {
@@ -764,25 +787,25 @@ async def get_flow_traces(flow_id: str):
                     "end_time": event_time + 0.0001,  # Very short duration for events
                     "status": "completed",
                     "children": [],
-                    "attributes": event.get("data", {})
+                    "attributes": event.get("data", {}),
                 }
                 spans.append(event_span)  # Add to flat spans list
                 root_span["children"].append(event_span)  # Add to hierarchy
-            
+
             # Replace nodes, edges with properly structured spans
             formatted_trace["spans"] = spans
-            
+
             # Remove fields that aren't used by the visualization
             if "nodes" in formatted_trace:
                 del formatted_trace["nodes"]
             if "edges" in formatted_trace:
                 del formatted_trace["edges"]
-                
+
             formatted_traces.append(formatted_trace)
         except Exception as e:
             logger.error(f"Error formatting trace: {e}", exc_info=True)
             # Skip this trace if there was an error
-    
+
     logger.info(f"Formatted {len(formatted_traces)} traces for flow_id: {flow_id}")
     return {"status": "success", "traces": formatted_traces}
 
@@ -908,7 +931,7 @@ def get_flow_state(flow_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Current state of the flow execution or None if not found
     """
-    # Use the flow_websocket_listener's flow state cache
-    from .flow_event_listener import flow_websocket_listener
+    # Use the event_listener's flow state cache
+    from .event_listener import event_listener as flow_websocket_listener
 
     return flow_websocket_listener.get_flow_state(flow_id)
