@@ -150,10 +150,10 @@ async def get_crew_traces(crew_id: str):
 
 
 # Get the directory containing the built React app
-ui_dir = Path(__file__).parent / "ui" / "build" / "client"
+ui_dir = Path(__file__).parent.parent.parent / "src" / "crewai_playground" / "ui" / "build" / "client"
 
 # Mount the static files from the React build
-app.mount("/assets", StaticFiles(directory=str(ui_dir / "assets")), name="assets")
+app.mount("/assets", StaticFiles(directory=str(ui_dir / "assets"), html=True), name="assets")
 
 # Global state
 chat_handler = None
