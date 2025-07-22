@@ -576,6 +576,24 @@ class EventListener:
             logger.info(
                 f"🎯 Processing crew kickoff started for execution: {execution_id}"
             )
+            # Add telemetry for crew kickoff started
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                crew_name = getattr(event, "crew_name", None)
+                
+                # If crew_name is not in event, try to get it from event.crew
+                if not crew_name and hasattr(event, "crew"):
+                    crew_name = getattr(event.crew, "name", None)
+                
+                # Fallback to a default name if still not found
+                if not crew_name:
+                    crew_name = f"Crew {crew_id}"
+                    
+                logger.info(f"📊 Starting telemetry trace for crew: {crew_id}, name: {crew_name}")
+                telemetry_service.start_crew_trace(crew_id, crew_name)
+            except Exception as e:
+                logger.error(f"Error starting telemetry trace: {e}")
+                
             logger.info(f"📡 Scheduling async handler for crew kickoff started")
             self._schedule(self._handle_crew_kickoff_started_crew(execution_id, event))
 
@@ -596,6 +614,15 @@ class EventListener:
             logger.info(
                 f"🎯 Processing crew kickoff completed for execution: {execution_id}"
             )
+            # Add telemetry for crew kickoff completed
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                output = getattr(event, "output", None)
+                logger.info(f"📊 Ending telemetry trace for crew: {crew_id}")
+                telemetry_service.end_crew_trace(crew_id, output)
+            except Exception as e:
+                logger.error(f"Error ending telemetry trace: {e}")
+                
             logger.info(f"📡 Scheduling async handler for crew kickoff completed")
             self._schedule(
                 self._handle_crew_kickoff_completed_crew(execution_id, event)
@@ -634,6 +661,26 @@ class EventListener:
             logger.debug(
                 f"Handling agent execution started in crew context: {execution_id}"
             )
+            # Add telemetry for agent execution started
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                agent_id = getattr(event, "agent_id", None)
+                agent_name = getattr(event, "agent_name", None)
+                agent_role = getattr(event, "agent_role", None)
+                
+                # If agent_role is not in event, try to get it from event.agent
+                if not agent_role and hasattr(event, "agent"):
+                    agent_role = getattr(event.agent, "role", None)
+                    
+                # If still not found, use agent_name or a default
+                if not agent_role:
+                    agent_role = agent_name if agent_name else "Unknown Role"
+                    
+                logger.info(f"📊 Starting telemetry for agent execution: {agent_name} ({agent_id}), role: {agent_role}")
+                telemetry_service.start_agent_execution(crew_id, agent_id, agent_name, agent_role)
+            except Exception as e:
+                logger.error(f"Error starting agent execution telemetry: {e}")
+                
             self._schedule(
                 self._handle_agent_execution_started_crew(execution_id, event)
             )
@@ -655,6 +702,16 @@ class EventListener:
             logger.debug(
                 f"Handling agent execution completed in crew context: {execution_id}"
             )
+            # Add telemetry for agent execution completed
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                agent_id = getattr(event, "agent_id", None)
+                output = getattr(event, "output", None)
+                logger.info(f"📊 Ending telemetry for agent execution: {agent_id}")
+                telemetry_service.end_agent_execution(crew_id, agent_id, output)
+            except Exception as e:
+                logger.error(f"Error ending agent execution telemetry: {e}")
+                
             self._schedule(
                 self._handle_agent_execution_completed_crew(execution_id, event)
             )
@@ -727,6 +784,28 @@ class EventListener:
         execution_id = self._extract_execution_id(source, event)
         if execution_id and not self._is_flow_context(source, event):
             logger.info(f"Task started (crew context) for execution: {execution_id}")
+            # Add telemetry for task started
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                task_id = getattr(event, "task_id", None)
+                agent_id = getattr(event, "agent_id", None)
+                
+                # Get task description from event
+                task_description = getattr(event, "task_description", None)
+                
+                # If task_description is not in event, try to get it from event.task
+                if not task_description and hasattr(event, "task"):
+                    task_description = getattr(event.task, "description", None)
+                    
+                # If still not found, use a default
+                if not task_description:
+                    task_description = f"Task {task_id}"
+                    
+                logger.info(f"📊 Starting telemetry for task execution: {task_id}, description: {task_description}")
+                telemetry_service.start_task_execution(crew_id, task_id, task_description, agent_id)
+            except Exception as e:
+                logger.error(f"Error starting task execution telemetry: {e}")
+                
             self._schedule(self._handle_task_started_crew(execution_id, event))
 
     def handle_task_completed(self, source, event):
@@ -734,6 +813,16 @@ class EventListener:
         execution_id = self._extract_execution_id(source, event)
         if execution_id and not self._is_flow_context(source, event):
             logger.info(f"Task completed (crew context) for execution: {execution_id}")
+            # Add telemetry for task completed
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                task_id = getattr(event, "task_id", None)
+                output = getattr(event, "output", None)
+                logger.info(f"📊 Ending telemetry for task execution: {task_id}")
+                telemetry_service.end_task_execution(crew_id, task_id, output)
+            except Exception as e:
+                logger.error(f"Error ending task execution telemetry: {e}")
+                
             self._schedule(self._handle_task_completed_crew(execution_id, event))
 
     # Tool Usage Event Handlers
@@ -780,12 +869,56 @@ class EventListener:
         execution_id = self._extract_execution_id(source, event)
         if execution_id:
             logger.debug(f"LLM call started for execution: {execution_id}")
+            # Add telemetry for LLM call started
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                # Extract additional data if available
+                model = getattr(event, "model", None)
+                prompt = getattr(event, "prompt", None)
+                agent_id = getattr(event, "agent_id", None)
+                task_id = getattr(event, "task_id", None)
+                
+                # Create event data
+                event_data = {
+                    "model": model,
+                    "prompt": prompt,
+                    "agent_id": agent_id,
+                    "task_id": task_id
+                }
+                
+                logger.debug(f"📊 Adding telemetry event for LLM call started")
+                telemetry_service.add_event(crew_id, "llm.started", event_data)
+            except Exception as e:
+                logger.error(f"Error adding LLM started telemetry event: {e}")
 
     def handle_llm_call_completed(self, source, event):
         """Handle LLM call completed event."""
         execution_id = self._extract_execution_id(source, event)
         if execution_id:
             logger.debug(f"LLM call completed for execution: {execution_id}")
+            # Add telemetry for LLM call completed
+            try:
+                crew_id = getattr(event, "crew_id", execution_id)
+                # Extract additional data if available
+                model = getattr(event, "model", None)
+                completion = getattr(event, "completion", None)
+                agent_id = getattr(event, "agent_id", None)
+                task_id = getattr(event, "task_id", None)
+                tokens = getattr(event, "tokens", None)
+                
+                # Create event data
+                event_data = {
+                    "model": model,
+                    "completion": completion,
+                    "agent_id": agent_id,
+                    "task_id": task_id,
+                    "tokens": tokens
+                }
+                
+                logger.debug(f"📊 Adding telemetry event for LLM call completed")
+                telemetry_service.add_event(crew_id, "llm.completed", event_data)
+            except Exception as e:
+                logger.error(f"Error adding LLM completed telemetry event: {e}")
 
     def handle_llm_call_failed(self, source, event):
         """Handle LLM call failed event."""
