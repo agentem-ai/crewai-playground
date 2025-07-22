@@ -1,8 +1,7 @@
 """
-Working Unified Event Listener for CrewAI Playground
+Event Listener for CrewAI Playground
 
-This module provides a unified event listener that handles both Flow and Crew events
-without inheriting from the problematic EventListener base class.
+This module provides a unified event listener that handles both Flow and Crew events.
 """
 
 import asyncio
