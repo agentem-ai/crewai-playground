@@ -310,12 +310,13 @@ class EventListener:
     async def broadcast_update(self):
         """Broadcast the current state to all connected WebSocket clients."""
         if not self.clients:
-            logger.debug("No WebSocket clients connected, skipping broadcast")
+            logger.debug("📡 No WebSocket clients connected, skipping broadcast")
             return
 
         # Get current crew ID from crew state
         current_crew_id = self.crew_state.get("id") if self.crew_state else None
-        logger.debug(f"Broadcasting update for crew_id: {current_crew_id}, clients: {len(self.clients)}")
+        logger.info(f"📡 BROADCASTING UPDATE - crew_id: {current_crew_id}, clients: {len(self.clients)}")
+        logger.info(f"📊 Current state summary: crew={bool(self.crew_state)}, agents={len(self.agent_states)}, tasks={len(self.task_states)}")
         
         # Prepare the state data
         state = {
@@ -516,32 +517,37 @@ class EventListener:
 
     def handle_crew_kickoff_started(self, source, event):
         """Handle crew kickoff started event."""
-        logger.info(f"Crew kickoff started event received: {event}")
+        logger.info(f"🚀 CREW KICKOFF STARTED - Event received: {event}")
+        logger.info(f"📊 Event source: {type(source).__name__}, Event type: {type(event).__name__}")
+        logger.info(f"🔍 Source details: {source}")
         execution_id = self._extract_execution_id(source, event)
+        logger.info(f"🆔 Extracted execution ID: {execution_id}")
         
         if self._is_flow_context(source, event):
             # This is a flow context - handle differently
-            logger.debug(f"Handling crew kickoff started in flow context: {execution_id}")
+            logger.debug(f"⏭️ Crew kickoff started (flow context) for flow: {execution_id}")
             # For flows, we don't need to do anything special here
             return
         else:
             # This is a crew context
-            logger.debug(f"Handling crew kickoff started in crew context: {execution_id}")
+            logger.info(f"🎯 Processing crew kickoff started for execution: {execution_id}")
+            logger.info(f"📡 Scheduling async handler for crew kickoff started")
             self._schedule(self._handle_crew_kickoff_started_crew(execution_id, event))
 
     def handle_crew_kickoff_completed(self, source, event):
         """Handle crew kickoff completed event."""
-        logger.info(f"Crew kickoff completed event received: {event}")
+        logger.info(f"🎉 CREW KICKOFF COMPLETED - Event received: {event}")
+        logger.info(f"📊 Event source: {type(source).__name__}, Event type: {type(event).__name__}")
+        logger.info(f"🔍 Source details: {source}")
         execution_id = self._extract_execution_id(source, event)
-        
+        logger.info(f"🆔 Extracted execution ID: {execution_id}")
         if self._is_flow_context(source, event):
-            # This is a flow context - handle differently
-            logger.debug(f"Handling crew kickoff completed in flow context: {execution_id}")
-            # For flows, we don't need to do anything special here
-            return
+            logger.debug(
+                f"⏭️ Crew kickoff completed (flow context) for flow: {execution_id}"
+            )
         else:
-            # This is a crew context
-            logger.debug(f"Handling crew kickoff completed in crew context: {execution_id}")
+            logger.info(f"🎯 Processing crew kickoff completed for execution: {execution_id}")
+            logger.info(f"📡 Scheduling async handler for crew kickoff completed")
             self._schedule(self._handle_crew_kickoff_completed_crew(execution_id, event))
 
     def handle_crew_kickoff_failed(self, source, event):
@@ -950,9 +956,10 @@ class EventListener:
 
             if hasattr(event, "result") and event.result is not None:
                 if hasattr(event.result, "raw"):
-                    self.crew_state["result"] = event.result.raw
+                    self.crew_state["output"] = event.result.raw
                 else:
-                    self.crew_state["result"] = str(event.result)
+                    self.crew_state["output"] = str(event.result)
+                logger.info(f"Crew result stored as output: {self.crew_state.get('output', 'No output')[:100]}...")
 
             await self.broadcast_update()
 

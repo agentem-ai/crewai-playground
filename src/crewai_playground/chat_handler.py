@@ -59,10 +59,10 @@ class ChatHandler:
         self.available_functions: Dict[str, Any] = {}
         self.is_initialized = False
 
-        # Register event listeners
-        from .event_listener import event_listener as crew_visualization_listener
+        # Register event listeners using the existing event listener
+        from .event_listener import event_listener
 
-        crew_visualization_listener.setup_listeners(crewai_event_bus)
+        event_listener.setup_listeners(crewai_event_bus)
 
         # Register agents with visualization listener immediately
         self._register_agents_with_visualization()
@@ -292,8 +292,8 @@ class ChatHandler:
     def run_crew(self, inputs: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Run the crew directly with the provided inputs.
 
-        This method allows running the crew without going through the chat interface.
-        It's useful for API calls that need to run the crew programmatically.
+        This method runs the crew using direct kickoff() to ensure proper event emission
+        for WebSocket visualization updates.
 
         Args:
             inputs: Dictionary of input values for the crew
@@ -310,9 +310,6 @@ class ChatHandler:
         else:
             logging.info(f"Using existing crew ID: {self.crew.id} in run_crew method")
 
-        if not self.is_initialized:
-            self.initialize()
-
         # Start loading indicator in a separate thread
         loading_complete = threading.Event()
         loading_thread = threading.Thread(
@@ -322,36 +319,28 @@ class ChatHandler:
         loading_thread.start()
 
         try:
-            # Ensure we have the crew tool schema
-            if not self.crew_tool_schema:
-                logging.warning("Crew tool schema not initialized, initializing now")
-                self.initialize()
+            # Ensure the event listener is properly set up for this crew's event bus
+            from .event_listener import event_listener
+            
+            # Set up event listeners on the crew's event bus (or global if not available)
+            if hasattr(self.crew, "get_event_bus"):
+                crew_event_bus = self.crew.get_event_bus()
+                event_listener.setup_listeners(crew_event_bus)
+                logging.info(f"Event listener set up on crew's event bus for crew {self.crew.id}")
+            else:
+                event_listener.setup_listeners(crewai_event_bus)
+                logging.info(f"Event listener set up on global event bus for crew {self.crew.id}")
 
-            # Get the function name from the tool schema
-            if not self.crew_tool_schema or not isinstance(self.crew_tool_schema, dict):
-                raise ValueError("Crew tool schema is not properly initialized")
-
-            function_info = self.crew_tool_schema.get("function", {})
-            if not isinstance(function_info, dict):
-                raise ValueError("Invalid function info in crew tool schema")
-
-            function_name = function_info.get("name")
-            if not function_name:
-                raise ValueError("Function name not found in crew tool schema")
-
-            # Get the function to call
-            if function_name not in self.available_functions:
-                raise ValueError(
-                    f"Function {function_name} not found in available functions"
-                )
-
-            function_to_call = self.available_functions[function_name]
-
-            # Run the crew with the provided inputs
+            # Run the crew directly using kickoff() to ensure proper event emission
             input_dict = {} if inputs is None else inputs
-            result = function_to_call(**input_dict)
-
+            logging.info(f"Starting crew kickoff with inputs: {list(input_dict.keys()) if input_dict else 'None'}")
+            
+            # Use direct crew kickoff for proper event emission
+            result = self.crew.kickoff(inputs=input_dict)
+            
+            logging.info(f"Crew kickoff completed successfully for crew {self.crew.id}")
             return {"status": "success", "result": result}
+            
         except Exception as e:
             error_message = f"Error running crew: {str(e)}"
             logging.error(error_message, exc_info=True)
