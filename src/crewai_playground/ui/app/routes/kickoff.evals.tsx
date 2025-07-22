@@ -78,11 +78,6 @@ interface AgentEvaluation {
 
 interface EvaluationResults {
   agent_results: Record<string, AgentEvaluation>;
-  summary: {
-    overall_score: number;
-    total_agents: number;
-    aggregation_strategy: string;
-  };
   overall_score: number;
   total_agents: number;
   aggregation_strategy: string;
@@ -323,9 +318,25 @@ export default function KickoffEvalsPage() {
     setResultsLoading(true);
     try {
       const response = await fetch(`/api/evaluations/${evalId}/results`);
+      
       if (response.ok) {
-        const data = await response.json();
-        setEvaluationResults(data);
+        const apiResponse = await response.json();
+        
+        // Extract the actual evaluation results from the nested structure
+        const rawData = apiResponse.status === 'success' ? apiResponse.data : null;
+        
+        if (rawData) {
+          // Transform the data structure to match UI expectations
+          const transformedData = {
+            overall_score: rawData.summary?.overall_score,
+            total_agents: rawData.summary?.total_agents,
+            aggregation_strategy: rawData.summary?.aggregation_strategy,
+            agent_results: rawData.results?.agent_results || {}
+          };
+          setEvaluationResults(transformedData);
+        } else {
+          setEvaluationResults(null);
+        }
       } else {
         setEvaluationResults(null);
       }
@@ -368,6 +379,7 @@ export default function KickoffEvalsPage() {
                 Detailed performance metrics and agent evaluations
               </SheetDescription>
             </SheetHeader>
+
 
             {resultsLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -438,81 +450,83 @@ export default function KickoffEvalsPage() {
                     Agent Performance
                   </h3>
                   <div className="space-y-4">
-                    {evaluationResults?.agent_results ? Object.entries(evaluationResults.agent_results).map(
-                      ([agentId, agentResult]) => (
-                        <div key={agentId} className="border rounded-lg p-4">
-                          <div className="flex justify-between items-center mb-3">
-                            <div>
-                              <h4 className="font-semibold">
-                                {agentResult.agent_role}
-                              </h4>
-                              <p className="text-sm text-gray-500">
-                                ID: {agentId}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <div
-                                className={`text-xl font-bold ${getScoreColor(
-                                  agentResult.overall_score
-                                )}`}
-                              >
-                                {agentResult.overall_score != null
-                                  ? agentResult?.overall_score?.toFixed(1)
-                                  : "N/A"}
-                              </div>
-                              <div className="text-sm text-gray-500">
-                                Overall Score
-                              </div>
-                            </div>
-                          </div>
-
-                          {agentResult.feedback && (
-                            <div className="mb-3">
-                              <p className="text-sm text-gray-600 dark:text-gray-300">
-                                {agentResult.feedback}
-                              </p>
-                            </div>
-                          )}
-
-                          {agentResult.metrics &&
-                            Object.keys(agentResult.metrics).length > 0 && (
+                    {evaluationResults?.agent_results ? (
+                      Object.entries(evaluationResults.agent_results).map(
+                        ([agentId, agentResult]) => (
+                          <div key={agentId} className="border rounded-lg p-4">
+                            <div className="flex justify-between items-center mb-3">
                               <div>
-                                <h5 className="font-medium mb-2 text-sm">
-                                  Metric Breakdown:
-                                </h5>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {Object.entries(agentResult.metrics).map(
-                                    ([metricName, metric]) => (
-                                      <div
-                                        key={metricName}
-                                        className="bg-gray-50 dark:bg-gray-800 rounded p-2"
-                                      >
-                                        <div className="flex justify-between items-center mb-1">
-                                          <span className="text-sm font-medium capitalize">
-                                            {metricName?.replace("_", " ")}
-                                          </span>
-                                          <span
-                                            className={`text-sm font-bold ${getScoreColor(
-                                              metric.score
-                                            )}`}
-                                          >
-                                            {metric.score != null
-                                              ? metric?.score?.toFixed(1)
-                                              : "N/A"}
-                                          </span>
-                                        </div>
-                                        {metric.feedback && (
-                                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                                            {metric.feedback}
-                                          </p>
-                                        )}
-                                      </div>
-                                    )
-                                   )}
+                                <h4 className="font-semibold">
+                                  {agentResult.agent_role}
+                                </h4>
+                                <p className="text-sm text-gray-500">
+                                  ID: {agentId}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <div
+                                  className={`text-xl font-bold ${getScoreColor(
+                                    agentResult.overall_score
+                                  )}`}
+                                >
+                                  {agentResult.overall_score != null
+                                    ? agentResult?.overall_score?.toFixed(1)
+                                    : "N/A"}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  Overall Score
                                 </div>
                               </div>
+                            </div>
+
+                            {agentResult.feedback && (
+                              <div className="mb-3">
+                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                                  {agentResult.feedback}
+                                </p>
+                              </div>
                             )}
-                        </div>
+
+                            {agentResult.metrics &&
+                              Object.keys(agentResult.metrics).length > 0 && (
+                                <div>
+                                  <h5 className="font-medium mb-2 text-sm">
+                                    Metric Breakdown:
+                                  </h5>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {Object.entries(agentResult.metrics).map(
+                                      ([metricName, metric]) => (
+                                        <div
+                                          key={metricName}
+                                          className="bg-gray-50 dark:bg-gray-800 rounded p-2"
+                                        >
+                                          <div className="flex justify-between items-center mb-1">
+                                            <span className="text-sm font-medium capitalize">
+                                              {metricName?.replace("_", " ")}
+                                            </span>
+                                            <span
+                                              className={`text-sm font-bold ${getScoreColor(
+                                                metric.score
+                                              )}`}
+                                            >
+                                              {metric.score != null
+                                                ? metric?.score?.toFixed(1)
+                                                : "N/A"}
+                                            </span>
+                                          </div>
+                                          {metric.feedback && (
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                              {metric.feedback}
+                                            </p>
+                                          )}
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        )
                       )
                     ) : (
                       <div className="text-center py-4 text-gray-500">
