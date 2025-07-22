@@ -382,7 +382,7 @@ export default function KickoffEvalsPage() {
     <Layout>
       <div className="w-full">
         {/* Navigation */}
-        <KickoffNavigation />
+        <KickoffNavigation crewId={crewId || undefined} />
 
         {/* Evaluation Results Drawer */}
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
