@@ -421,7 +421,7 @@ export default function KickoffEvalsPage() {
                         Aggregation Strategy
                       </div>
                       <div className="text-sm font-medium capitalize">
-                        {evaluationResults.aggregation_strategy.replace(
+                        {evaluationResults?.aggregation_strategy?.replace(
                           "_",
                           " "
                         )}
@@ -438,7 +438,7 @@ export default function KickoffEvalsPage() {
                     Agent Performance
                   </h3>
                   <div className="space-y-4">
-                    {Object.entries(evaluationResults.agent_results).map(
+                    {evaluationResults?.agent_results ? Object.entries(evaluationResults.agent_results).map(
                       ([agentId, agentResult]) => (
                         <div key={agentId} className="border rounded-lg p-4">
                           <div className="flex justify-between items-center mb-3">
@@ -489,7 +489,7 @@ export default function KickoffEvalsPage() {
                                       >
                                         <div className="flex justify-between items-center mb-1">
                                           <span className="text-sm font-medium capitalize">
-                                            {metricName.replace("_", " ")}
+                                            {metricName?.replace("_", " ")}
                                           </span>
                                           <span
                                             className={`text-sm font-bold ${getScoreColor(
@@ -508,12 +508,16 @@ export default function KickoffEvalsPage() {
                                         )}
                                       </div>
                                     )
-                                  )}
+                                   )}
                                 </div>
                               </div>
                             )}
                         </div>
                       )
+                    ) : (
+                      <div className="text-center py-4 text-gray-500">
+                        No agent performance data available
+                      </div>
                     )}
                   </div>
                 </div>
@@ -703,12 +707,18 @@ export default function KickoffEvalsPage() {
                               <div className="flex items-center">
                                 <span className="font-medium mr-2">
                                   {evaluation.iterations}{" "}
-                                  {evaluation.iterations === 1 ? "Iteration" : "Iterations"}
+                                  {evaluation.iterations === 1
+                                    ? "Iteration"
+                                    : "Iterations"}
                                 </span>
                                 {getStatusBadge(evaluation.status)}
                               </div>
                               <div className="text-sm text-muted-foreground mt-1">
-                                {evaluation.agentCount} agents • {formatDuration(evaluation.startTime, evaluation.endTime)}
+                                {evaluation.agentCount} agents •{" "}
+                                {formatDuration(
+                                  evaluation.startTime,
+                                  evaluation.endTime
+                                )}
                               </div>
                             </div>
                           </div>
@@ -742,11 +752,7 @@ export default function KickoffEvalsPage() {
                               </div>
                             )}
 
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="ml-2"
-                            >
+                            <Button variant="ghost" size="sm" className="ml-2">
                               <ChevronRight className="h-5 w-5" />
                             </Button>
                           </div>
