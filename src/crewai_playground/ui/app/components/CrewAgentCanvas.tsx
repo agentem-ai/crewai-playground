@@ -546,19 +546,20 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
           else if (data.type === "pong") {
             console.log("Heartbeat pong received");
           }
-          // Handle state update
-          else if (data.crew || data.agents || data.tasks) {
-            console.log("Received state update:", data);
+          // Handle state update - check for crew visualization data
+          else if (data.crew !== undefined || data.agents !== undefined || data.tasks !== undefined) {
+            console.log("Received crew visualization data:", data);
 
             // Merge new state with existing state
             setState((prevState) => {
               const newState = { ...prevState };
 
-              if (data.crew) {
+              if (data.crew !== undefined) {
                 newState.crew = data.crew;
+                console.log("Updated crew state:", data.crew);
               }
 
-              if (data.agents) {
+              if (data.agents !== undefined) {
                 // Create a map of existing agents for efficient lookup
                 const agentMap = new Map(
                   prevState.agents.map((agent) => [agent.id, agent])
@@ -570,9 +571,10 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
                 });
 
                 newState.agents = Array.from(agentMap.values());
+                console.log("Updated agents:", newState.agents.length);
               }
 
-              if (data.tasks) {
+              if (data.tasks !== undefined) {
                 // Create a map of existing tasks for efficient lookup
                 const taskMap = new Map(
                   prevState.tasks.map((task) => [task.id, task])
@@ -584,6 +586,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
                 });
 
                 newState.tasks = Array.from(taskMap.values());
+                console.log("Updated tasks:", newState.tasks.length);
               }
 
               if (data.timestamp) {
@@ -593,7 +596,37 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
               return newState;
             });
 
+            // Always set hasReceivedData to true when we get crew visualization data
+            console.log("Setting hasReceivedData to true");
             setHasReceivedData(true);
+          }
+          // Fallback: if data has any crew-related properties, treat as state update
+          else if (typeof data === 'object' && data !== null && 
+                   ('crew' in data || 'agents' in data || 'tasks' in data || 'timestamp' in data)) {
+            console.log("Fallback: Received potential crew data:", data);
+            
+            // Set received data flag even for fallback case
+            setHasReceivedData(true);
+            
+            // Try to update state with available data
+            setState((prevState) => {
+              const newState = { ...prevState };
+              
+              if ('crew' in data && data.crew) {
+                newState.crew = data.crew as any;
+              }
+              if ('agents' in data && data.agents) {
+                newState.agents = data.agents as any;
+              }
+              if ('tasks' in data && data.tasks) {
+                newState.tasks = data.tasks as any;
+              }
+              if ('timestamp' in data && data.timestamp) {
+                newState.timestamp = data.timestamp as any;
+              }
+              
+              return newState;
+            });
           }
         } catch (err) {
           console.error("Error processing WebSocket message:", err);
