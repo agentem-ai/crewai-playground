@@ -19,6 +19,23 @@ import {
   TabsTrigger,
 } from "../components/ui/tabs";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Textarea } from "../components/ui/textarea";
+import {
   ArrowLeft,
   BarChart3,
   Clock,
@@ -28,6 +45,9 @@ import {
   Loader2,
   RefreshCw,
   TrendingUp,
+  Plus,
+  Play,
+  X,
 } from "lucide-react";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Separator } from "../components/ui/separator";
@@ -176,6 +196,106 @@ export default function KickoffEvalsPage() {
   const [resultsLoading, setResultsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [refreshKey, setRefreshKey] = useState(0);
+  
+  // Modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [newEvaluation, setNewEvaluation] = useState({
+    iterations: 1,
+    aggregation_strategy: "simple_average",
+    test_inputs: {}
+  });
+  const [testInputsJson, setTestInputsJson] = useState(
+    JSON.stringify(
+      {
+        query: "Evaluate agent performance on this task"
+      },
+      null,
+      2
+    )
+  );
+  const [aggregationStrategies, setAggregationStrategies] = useState([
+    {
+      id: "simple_average",
+      name: "Simple Average",
+      description: "Equal weight to all tasks"
+    },
+    {
+      id: "weighted_by_complexity",
+      name: "Weighted by Complexity",
+      description: "Weight by task complexity"
+    },
+    {
+      id: "best_performance",
+      name: "Best Performance",
+      description: "Use best scores across tasks"
+    },
+    {
+      id: "worst_performance",
+      name: "Worst Performance",
+      description: "Use worst scores across tasks"
+    }
+  ]);
+
+  // Create a new evaluation
+  const createEvaluation = async () => {
+    // Parse and validate test inputs JSON
+    let parsedTestInputs = {};
+    try {
+      parsedTestInputs = JSON.parse(testInputsJson);
+    } catch (error) {
+      alert("Invalid JSON in test inputs. Please check the format.");
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      // Create evaluation with the current crew ID
+      const evaluationData = {
+        name: `Evaluation for ${crewId}`, // Auto-generate a name based on crew ID
+        crew_ids: [crewId], // Use the current crew ID
+        iterations: newEvaluation.iterations,
+        aggregation_strategy: newEvaluation.aggregation_strategy,
+        test_inputs: parsedTestInputs,
+        // No metric_categories means all metrics will be used
+      };
+
+      const response = await fetch("/api/evaluations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(evaluationData),
+      });
+
+      const data = await response.json();
+      if (data.status === "success") {
+        setShowCreateModal(false);
+        // Reset form
+        setNewEvaluation({
+          iterations: 1,
+          aggregation_strategy: "simple_average",
+          test_inputs: {}
+        });
+        setTestInputsJson(
+          JSON.stringify(
+            { query: "Evaluate agent performance on this task" },
+            null,
+            2
+          )
+        );
+        // Refresh evaluations list
+        setRefreshKey(prev => prev + 1);
+      } else {
+        alert("Error creating evaluation: " + data.detail);
+      }
+    } catch (error) {
+      console.error("Error creating evaluation:", error);
+      alert("Error creating evaluation");
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   // Fetch evaluations for the crew
   useEffect(() => {
@@ -254,9 +374,128 @@ export default function KickoffEvalsPage() {
   return (
     <Layout>
       <div className="w-full">
-        {/* Navigation Menu */}
-        <KickoffNavigation crewId={crewId || undefined} />
+        {/* Create Evaluation Modal */}
+        <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Create New Evaluation</DialogTitle>
+              <DialogDescription>
+                Configure and start a new agent evaluation for this crew
+              </DialogDescription>
+            </DialogHeader>
 
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="iterations">Number of Iterations</Label>
+                <Input
+                  id="iterations"
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={newEvaluation.iterations}
+                  onChange={(e) =>
+                    setNewEvaluation((prev) => ({
+                      ...prev,
+                      iterations: parseInt(e.target.value) || 1,
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Higher iterations provide more reliable results but take longer to complete
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Aggregation Strategy</Label>
+                <Select
+                  value={newEvaluation.aggregation_strategy}
+                  onValueChange={(value) =>
+                    setNewEvaluation((prev) => ({
+                      ...prev,
+                      aggregation_strategy: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {aggregationStrategies.map((strategy) => (
+                      <SelectItem key={strategy.id} value={strategy.id}>
+                        <div className="flex flex-col">
+                          <span>{strategy.name}</span>
+                          <span className="text-xs text-muted-foreground">{strategy.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Test Inputs Section */}
+              <div className="space-y-2">
+                <Label htmlFor="test-inputs">Test Inputs (JSON)</Label>
+                <p className="text-sm text-muted-foreground">
+                  Define the inputs that will be passed to the crew during
+                  evaluation.
+                </p>
+                <Textarea
+                  id="test-inputs"
+                  placeholder="Enter test inputs as JSON..."
+                  value={testInputsJson}
+                  onChange={(e) => setTestInputsJson(e.target.value)}
+                  rows={8}
+                  className="font-mono text-sm"
+                />
+                <div className="text-xs text-muted-foreground">
+                  <strong>Example:</strong>{" "}
+                  {`{"query": "Analyze market trends", "topic": "AI technology"}`}
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    // Reset form
+                    setNewEvaluation({
+                      iterations: 1,
+                      aggregation_strategy: "simple_average",
+                      test_inputs: {},
+                    });
+                    setTestInputsJson(
+                      JSON.stringify(
+                        {
+                          query: "Evaluate agent performance on this task",
+                        },
+                        null,
+                        2
+                      )
+                    );
+                  }}
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Cancel
+                </Button>
+                <Button onClick={createEvaluation} disabled={isCreating}>
+                  {isCreating ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4 mr-2" />
+                      Start Evaluation
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+        
         {loading ? (
           <Card className="mb-6">
             <CardContent className="flex items-center justify-center py-12">
@@ -275,10 +514,9 @@ export default function KickoffEvalsPage() {
                 <p className="text-gray-500 mb-4">
                   There are no evaluations for this crew yet.
                 </p>
-                <Button
-                  onClick={() => navigate(`/evaluations/new?crew_id=${crewId}`)}
-                >
-                  Create Evaluation
+                <Button onClick={() => setShowCreateModal(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Evaluation
                 </Button>
               </div>
             </CardContent>
@@ -287,11 +525,17 @@ export default function KickoffEvalsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Evaluations List */}
             <Card className="md:col-span-1">
-              <CardHeader>
-                <CardTitle>Evaluations</CardTitle>
-                <CardDescription>
-                  Select an evaluation to view details
-                </CardDescription>
+              <CardHeader className="flex justify-between items-start">
+                <div>
+                  <CardTitle>Evaluations</CardTitle>
+                  <CardDescription>
+                    Select an evaluation to view details
+                  </CardDescription>
+                </div>
+                <Button size="sm" onClick={() => setShowCreateModal(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Evaluation
+                </Button>
               </CardHeader>
               <CardContent>
                 <ScrollArea className="h-[500px] pr-4">
