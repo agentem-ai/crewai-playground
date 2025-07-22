@@ -198,15 +198,32 @@ async def get_crew_traces(crew_id: str):
     return crew_traces
 
 
-# Get the directory containing the built React app
-ui_dir = Path(__file__).parent.parent.parent / "src" / "crewai_playground" / "ui" / "build" / "client"
+import importlib.resources
+from fastapi.responses import FileResponse
 
-# Mount the static files from the React build only if the directory exists
-if ui_dir.exists() and (ui_dir / "assets").exists():
-    app.mount("/assets", StaticFiles(directory=str(ui_dir / "assets"), html=True), name="assets")
-    logger.info(f"Mounted static assets from {ui_dir / 'assets'}")
-else:
-    logger.warning(f"UI assets directory not found at {ui_dir / 'assets'} - static files not mounted")
+# Use importlib.resources to get a handle to the packaged UI directory
+try:
+    # This gets a traversable object representing the 'client' directory
+    ui_dir_trav = importlib.resources.files('crewai_playground').joinpath('ui/build/client')
+
+    # The actual filesystem path can be obtained by treating it as a context manager
+    with importlib.resources.as_file(ui_dir_trav) as ui_dir:
+
+        ui_dir = Path(ui_dir) # Ensure it's a Path object
+        assets_dir = ui_dir / "assets"
+        
+        # Mount the static files from the React build only if the directory exists
+        if ui_dir.exists() and assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir), html=True), name="assets")
+            logger.info(f"Mounted static assets from {assets_dir}")
+            
+
+
+        else:
+            logger.warning(f"UI assets directory not found at {assets_dir} - static files not mounted")
+
+except (ModuleNotFoundError, FileNotFoundError):
+    logger.warning("UI package data not found. The UI will not be available.")
 
 # Global state
 chat_handler = None
