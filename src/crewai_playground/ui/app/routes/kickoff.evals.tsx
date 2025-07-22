@@ -303,15 +303,29 @@ export default function KickoffEvalsPage() {
     }
 
     fetchEvaluations();
+  }, [crewId, refreshKey]);
 
+  // Auto-refresh running evaluations
+  useEffect(() => {
     const interval = setInterval(() => {
-      if (evaluations.some((e) => e.status === "running")) {
-        fetchEvaluations();
+      const hasRunningEvaluations = evaluations.some(
+        (evaluation) => evaluation.status === "running"
+      );
+      if (hasRunningEvaluations) {
+        // Refresh evaluations when there are running ones
+        fetch(`/api/evaluations?crew_id=${crewId}`)
+          .then(response => response.json())
+          .then(data => {
+            if (data.data?.runs) {
+              setEvaluations(data.data.runs);
+            }
+          })
+          .catch(error => console.error("Error refreshing evaluations:", error));
       }
-    }, 5000);
+    }, 5000); // Refresh every 5 seconds
 
     return () => clearInterval(interval);
-  }, [crewId, refreshKey]);
+  }, [evaluations, crewId]);
 
   // Fetch results for selected evaluation
   async function fetchEvaluationResults(evalId: string) {
