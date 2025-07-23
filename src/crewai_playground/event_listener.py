@@ -763,10 +763,67 @@ class EventListener:
 
         # Get current crew ID from crew state
         current_crew_id = self.crew_state.get("id") if self.crew_state else None
-        logger.info(
-            f"📡 BROADCASTING UPDATE - crew_id: {current_crew_id}, clients: {len(self.clients)}"
+        current_crew_name = self.crew_state.get("name") if self.crew_state else None
+
+        # Try to map internal crew ID to API crew ID if needed
+        broadcast_crew_id = current_crew_id
+        mapped_ids = []
+
+        try:
+            from .flow_api import flow_id_mapping, reverse_flow_id_mapping
+
+            # Check if we have a mapping for this crew ID
+            api_crew_id = reverse_flow_id_mapping.get(current_crew_id)
+            if api_crew_id:
+                broadcast_crew_id = api_crew_id
+                mapped_ids.append(api_crew_id)
+                logger.debug(
+                    f"Mapped internal crew ID {current_crew_id} to API crew ID {broadcast_crew_id}"
+                )
+
+            # Also check if current_crew_id is an API ID that maps to an internal ID
+            internal_crew_id = flow_id_mapping.get(current_crew_id)
+            if internal_crew_id:
+                mapped_ids.append(internal_crew_id)
+                logger.debug(
+                    f"Found reverse mapping: API crew ID {current_crew_id} maps to internal ID {internal_crew_id}"
+                )
+        except ImportError:
+            # If import fails, use the original crew ID
+            logger.debug(
+                "Could not import flow_id_mapping/reverse_flow_id_mapping, using original crew ID"
+            )
+        except Exception as e:
+            logger.debug(f"Error accessing flow ID mappings: {str(e)}")
+
+        # Add string versions of IDs to our matching list
+        if current_crew_id:
+            mapped_ids.append(str(current_crew_id))
+        if broadcast_crew_id:
+            mapped_ids.append(str(broadcast_crew_id))
+
+        # Add crew name as another possible match
+        if current_crew_name:
+            mapped_ids.append(current_crew_name)
+            mapped_ids.append(str(current_crew_name))
+
+        # Add "crew_X" format IDs if the current ID is a UUID
+        if current_crew_id and len(str(current_crew_id)) > 30:  # Likely a UUID
+            for i in range(10):  # Check crew_0 through crew_9
+                mapped_ids.append(f"crew_{i}")
+
+        # Remove duplicates while preserving order
+        unique_mapped_ids = []
+        for id in mapped_ids:
+            if id not in unique_mapped_ids:
+                unique_mapped_ids.append(id)
+        mapped_ids = unique_mapped_ids
+
+        logger.debug(
+            f"📡 BROADCASTING UPDATE - crew_id: {current_crew_id}, name: {current_crew_name}, broadcast_id: {broadcast_crew_id}"
         )
-        logger.info(
+        logger.debug(f"📡 Potential matching IDs: {mapped_ids}")
+        logger.debug(
             f"📊 Current state summary: crew={bool(self.crew_state)}, agents={len(self.agent_states)}, tasks={len(self.task_states)}"
         )
 
@@ -778,15 +835,20 @@ class EventListener:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-        logger.debug(
-            f"Broadcasting state: crew={bool(self.crew_state)}, agents={len(self.agent_states)}, tasks={len(self.task_states)}"
-        )
+        # Add debug info to help troubleshoot
+        if self.crew_state:
+            logger.debug(
+                f"Crew state ID: {self.crew_state.get('id')}, Name: {self.crew_state.get('name')}"
+            )
 
-        # Send to all connected clients (remove restrictive filtering)
+        # Send to all connected clients
         disconnected_clients = []
         clients_snapshot = list(
             self.clients.items()
         )  # Create snapshot to avoid concurrent modification
+
+        # Count how many clients we'll send to
+        matching_clients = 0
 
         for client_id, client in clients_snapshot:
             # Check if client still exists (might have been removed by another thread)
@@ -794,30 +856,53 @@ class EventListener:
                 continue
 
             client_crew_id = client.get("crew_id")
+            logger.debug(f"Checking client {client_id} with crew_id: {client_crew_id}")
 
-            # Send to clients that match the crew or have no specific crew filter
-            should_send = (
-                not client_crew_id  # Client has no crew filter
-                or not current_crew_id  # No current crew (send to all)
-                or client_crew_id == current_crew_id  # Exact crew match
-                or client_crew_id == str(current_crew_id)  # String comparison fallback
-            )
+            # More flexible matching logic
+            should_send = False
+
+            # Case 1: Client has no crew filter or there's no current crew
+            if not client_crew_id or not current_crew_id:
+                should_send = True
+                logger.debug(
+                    f"Client {client_id} has no crew filter or no current crew - will send update"
+                )
+            # Case 2: Direct match with any of our potential IDs
+            elif client_crew_id in mapped_ids:
+                should_send = True
+                logger.debug(
+                    f"Client {client_id} has direct match with {client_crew_id} - will send update"
+                )
+            # Case 3: Special case for numeric crew IDs (crew_0, crew_1, etc.)
+            elif client_crew_id and client_crew_id.startswith("crew_"):
+                # Always send updates to crew_0, crew_1, etc. clients during development
+                should_send = True
+                logger.debug(
+                    f"Client {client_id} has special crew ID {client_crew_id} - will send update"
+                )
 
             if should_send:
+                matching_clients += 1
                 try:
                     websocket = client["websocket"]
                     json_data = json.dumps(state, cls=CustomJSONEncoder)
                     await websocket.send_text(json_data)
                     logger.debug(
-                        f"Successfully sent update to client {client_id} for crew {client_crew_id}"
+                        f"✅ Successfully sent update to client {client_id} for crew {client_crew_id}"
                     )
                 except Exception as e:
-                    logger.error(f"Error broadcasting to client {client_id}: {str(e)}")
+                    logger.debug(
+                        f"❌ Error broadcasting to client {client_id}: {str(e)}"
+                    )
                     disconnected_clients.append(client_id)
             else:
                 logger.debug(
-                    f"Skipping client {client_id} (crew filter: {client_crew_id}, current: {current_crew_id})"
+                    f"⏭️ Skipping client {client_id} (crew filter: {client_crew_id}, current: {current_crew_id})"
                 )
+
+        logger.debug(
+            f"📊 Broadcast summary: sent to {matching_clients}/{len(clients_snapshot)} clients"
+        )
 
         # Clean up disconnected clients with thread-safe removal
         for client_id in disconnected_clients:
@@ -829,11 +914,11 @@ class EventListener:
                 client = self.clients[client_id]
                 crew_id = client.get("crew_id")
                 del self.clients[client_id]
-                print(
+                logger.debug(
                     f"WebSocket client {client_id} (crew: {crew_id}) disconnected. Remaining connections: {len(self.clients)}"
                 )
         except Exception as e:
-            print(f"Error during client {client_id} disconnect: {e}")
+            logger.debug(f"Error during client {client_id} disconnect: {e}")
 
     def reset_state(self):
         """Reset the state when a new execution starts."""
