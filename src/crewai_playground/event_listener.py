@@ -59,7 +59,7 @@ except ImportError:
     CrewInitializationRequestedEvent = None
     CrewInitializationCompletedEvent = None
 
-from .websocket_utils import broadcast_flow_update
+# broadcast_flow_update functionality is now integrated into broadcast_update method
 from .telemetry import telemetry_service
 
 logger = logging.getLogger(__name__)
@@ -755,10 +755,23 @@ class EventListener:
                 f"No matching state to send to client {client_id} (client_crew_id: {client_crew_id}, current_crew_id: {current_crew_id})"
             )
 
-    async def broadcast_update(self):
-        """Broadcast the current state to all connected WebSocket clients."""
+    async def broadcast_update(
+        self, flow_id=None, flow_state=None, update_type="crew_state"
+    ):
+        """Broadcast updates to all connected WebSocket clients.
+
+        Args:
+            flow_id: Optional flow ID for flow updates
+            flow_state: Optional flow state data for flow updates
+            update_type: Type of update - "crew_state" or "flow_state"
+        """
+        # Handle flow updates
+        if update_type == "flow_state" and flow_id and flow_state:
+            await self._broadcast_flow_update(flow_id, flow_state)
+            return
+
+        # Handle crew updates (existing logic)
         if not self.clients:
-            print("📡 No WebSocket clients connected, skipping broadcast")
             return
 
         # Get current crew ID from crew state
@@ -908,6 +921,93 @@ class EventListener:
         for client_id in disconnected_clients:
             self._safe_disconnect(client_id)
 
+    async def _broadcast_flow_update(self, flow_id: str, flow_state: dict):
+        """Handle flow-specific broadcasting logic."""
+        from .websocket_utils import flow_websocket_queues
+
+        # Debug: Check if flow_id is actually an object ID instead of the API flow ID
+        if isinstance(flow_id, int) or (isinstance(flow_id, str) and flow_id.isdigit()):
+            # Try to find the correct API flow ID from the mapping
+            try:
+                from .flow_api import reverse_flow_id_mapping
+
+                api_flow_id = reverse_flow_id_mapping.get(str(flow_id))
+                if api_flow_id:
+                    flow_id = api_flow_id  # Use the API flow ID for broadcasting
+                else:
+                    pass
+            except ImportError as e:
+                pass
+
+        flow_clients_updated = 0
+
+        # Broadcast to flow WebSocket queues (existing flow system)
+        if flow_id in flow_websocket_queues:
+            connection_count = len(flow_websocket_queues[flow_id])
+
+            message = {"type": "flow_state", "payload": flow_state}
+            for connection_id, queue in flow_websocket_queues[flow_id].items():
+                try:
+                    await queue.put(message)
+                    flow_clients_updated += 1
+                except Exception as e:
+                    pass
+        else:
+            pass
+
+        # Also broadcast to crew clients if they might be interested in flow updates
+        crew_clients_updated = 0
+        if self.clients:
+            logger.info(
+                f"📡 Broadcasting flow update to {len(self.clients)} crew WebSocket clients"
+            )
+
+            # Prepare flow update message for crew clients
+            flow_message = {
+                "type": "flow_state",
+                "flow_id": flow_id,
+                "flow_state": flow_state,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+
+            disconnected_clients = []
+            clients_snapshot = list(self.clients.items())
+
+            for client_id, client in clients_snapshot:
+                if client_id not in self.clients:
+                    continue
+
+                try:
+                    websocket = client["websocket"]
+                    json_data = json.dumps(flow_message, cls=CustomJSONEncoder)
+                    await websocket.send_text(json_data)
+                    logger.info(
+                        f"✅ Successfully sent flow update to crew client {client_id}"
+                    )
+                    crew_clients_updated += 1
+                except Exception as e:
+                    logger.error(
+                        f"❌ Error broadcasting flow update to crew client {client_id}: {str(e)}"
+                    )
+                    disconnected_clients.append(client_id)
+
+            # Clean up disconnected clients
+            for client_id in disconnected_clients:
+                self._safe_disconnect(client_id)
+        else:
+            logger.info(f"📡 No crew WebSocket clients connected for flow updates")
+
+        # Summary logging
+        total_clients_updated = flow_clients_updated + crew_clients_updated
+        logger.info(
+            f"📊 Flow broadcast summary: {total_clients_updated} total clients updated (flow: {flow_clients_updated}, crew: {crew_clients_updated})"
+        )
+
+        if total_clients_updated == 0:
+            logger.warning(
+                f"⚠️ No WebSocket clients received flow update for flow {flow_id}"
+            )
+
     def _safe_disconnect(self, client_id: str):
         try:
             if client_id in self.clients:
@@ -1009,13 +1109,23 @@ class EventListener:
         self, flow_id: str, event_name: str, flow_name: str = None
     ):
         """Ensure flow state exists for the given flow ID."""
-        try:
-            from .flow_api import reverse_flow_id_mapping
+        # Convert flow_id to string if it's not already
+        flow_id_str = str(flow_id)
 
-            api_flow_id = reverse_flow_id_mapping.get(flow_id)
-            broadcast_flow_id = api_flow_id if api_flow_id else flow_id
-        except ImportError:
-            broadcast_flow_id = flow_id
+        try:
+            from .flow_api import reverse_flow_id_mapping, flow_id_mapping
+
+            api_flow_id = reverse_flow_id_mapping.get(flow_id_str)
+            if not api_flow_id:
+                api_flow_id = reverse_flow_id_mapping.get(flow_id)
+
+            broadcast_flow_id = api_flow_id if api_flow_id else flow_id_str
+
+            if (isinstance(flow_id, int) or flow_id_str.isdigit()) and not api_flow_id:
+                pass
+
+        except ImportError as e:
+            broadcast_flow_id = flow_id_str
 
         if broadcast_flow_id not in self.flow_states:
             logger.info(
@@ -1028,6 +1138,8 @@ class EventListener:
                 "steps": [],
                 "timestamp": asyncio.get_event_loop().time(),
             }
+        else:
+            logger.info(f"🔍 Using existing flow state for {broadcast_flow_id}")
 
         return broadcast_flow_id, self.flow_states[broadcast_flow_id]
 
@@ -1052,8 +1164,8 @@ class EventListener:
             }
         )
 
-        await broadcast_flow_update(
-            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        await self.broadcast_update(
+            flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
     async def _handle_flow_finished(self, flow_id: str, event, source=None):
@@ -1098,8 +1210,8 @@ class EventListener:
 
         logger.info(f"Flow {broadcast_flow_id} finished with result: {result}")
 
-        await broadcast_flow_update(
-            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        await self.broadcast_update(
+            flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
     async def _handle_method_started(self, flow_id: str, event):
@@ -1136,8 +1248,8 @@ class EventListener:
         # Refresh flow timestamp
         flow_state["timestamp"] = current_time
 
-        await broadcast_flow_update(
-            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        await self.broadcast_update(
+            flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
     async def _handle_method_finished(self, flow_id: str, event):
@@ -1177,8 +1289,8 @@ class EventListener:
 
         flow_state["timestamp"] = current_time
 
-        await broadcast_flow_update(
-            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        await self.broadcast_update(
+            flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
     async def _handle_method_failed(self, flow_id: str, event):
@@ -1217,8 +1329,8 @@ class EventListener:
 
         flow_state["timestamp"] = current_time
 
-        await broadcast_flow_update(
-            broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
+        await self.broadcast_update(
+            flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
     async def _handle_crew_kickoff_started_crew(self, execution_id: str, event):

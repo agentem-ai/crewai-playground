@@ -1023,10 +1023,14 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
 
         # Register this connection with the API flow ID (for UI compatibility)
         connection_id = str(uuid.uuid4())
+
         register_websocket_queue(flow_id, connection_id, queue)
-        logging.info(
-            f"Registered WebSocket connection {connection_id} for flow {flow_id}"
-        )
+
+        # Also register with internal flow ID if different (for event compatibility)
+        if internal_flow_id != flow_id:
+            register_websocket_queue(
+                internal_flow_id, f"{connection_id}_internal", queue
+            )
 
         try:
             # Send initial state using the API flow ID (where states are now stored)
@@ -1065,6 +1069,12 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
         finally:
             # Unregister this connection
             unregister_websocket_queue(flow_id, connection_id)
+
+            # Also unregister internal flow ID if it was registered
+            if internal_flow_id != flow_id:
+                unregister_websocket_queue(
+                    internal_flow_id, f"{connection_id}_internal"
+                )
     except Exception as e:
         logging.error(f"Flow WebSocket error: {str(e)}", exc_info=True)
     finally:

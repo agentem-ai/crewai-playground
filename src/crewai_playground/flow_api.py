@@ -351,6 +351,14 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                 )
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
+                
+            # Also create mapping for Python object ID (used in events)
+            python_object_id = str(id(flow))
+            logger.info(
+                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
+            )
+            flow_id_mapping[flow_id] = python_object_id
+            reverse_flow_id_mapping[python_object_id] = flow_id
         elif hasattr(flow, "kickoff_async"):
             logger.info(f"Executing flow via kickoff_async method")
             result = await emit_method_events("kickoff_async", flow.kickoff_async)
@@ -363,6 +371,14 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                 )
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
+                
+            # Also create mapping for Python object ID (used in events)
+            python_object_id = str(id(flow))
+            logger.info(
+                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
+            )
+            flow_id_mapping[flow_id] = python_object_id
+            reverse_flow_id_mapping[python_object_id] = flow_id
         elif hasattr(flow, "run"):
             logger.info(f"Executing flow via run method")
             result = await emit_method_events("run", flow.run)
@@ -375,6 +391,14 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                 )
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
+                
+            # Also create mapping for Python object ID (used in events)
+            python_object_id = str(id(flow))
+            logger.info(
+                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
+            )
+            flow_id_mapping[flow_id] = python_object_id
+            reverse_flow_id_mapping[python_object_id] = flow_id
         elif hasattr(flow, "kickoff"):
             logger.info(f"Executing flow via kickoff method")
             result = await emit_method_events("kickoff", flow.kickoff)
@@ -387,6 +411,14 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
                 )
                 flow_id_mapping[flow_id] = internal_flow_id
                 reverse_flow_id_mapping[internal_flow_id] = flow_id
+                
+            # Also create mapping for Python object ID (used in events)
+            python_object_id = str(id(flow))
+            logger.info(
+                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
+            )
+            flow_id_mapping[flow_id] = python_object_id
+            reverse_flow_id_mapping[python_object_id] = flow_id
         else:
             raise AttributeError(
                 f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method"
