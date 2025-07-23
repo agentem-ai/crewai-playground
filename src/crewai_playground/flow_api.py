@@ -37,9 +37,28 @@ flows_cache: Dict[str, FlowInfo] = {}
 active_flows: Dict[str, Dict[str, Any]] = {}
 flow_traces: Dict[str, List[Dict[str, Any]]] = {}
 flow_states: Dict[str, Dict[str, Any]] = {}
-# Mapping between API flow IDs and internal CrewAI flow IDs
-flow_id_mapping: Dict[str, str] = {}  # api_flow_id -> internal_flow_id
-reverse_flow_id_mapping: Dict[str, str] = {}  # internal_flow_id -> api_flow_id
+# Entity service for ID management (replaces local mappings)
+from .entities import entity_service
+
+
+def register_flow_entity(flow, flow_id: str):
+    """Register a flow entity with the entity service."""
+    internal_flow_id = getattr(flow, "id", None)
+    python_object_id = str(id(flow))
+    flow_name = getattr(flow, "name", getattr(flow.__class__, "__name__", "Unknown Flow"))
+    
+    # Register with entity service
+    entity_service.register_entity(
+        primary_id=flow_id,
+        internal_id=internal_flow_id if internal_flow_id != flow_id else None,
+        entity_type="flow",
+        name=flow_name,
+        aliases=[python_object_id] if python_object_id != flow_id else None
+    )
+    
+    logger.info(
+        f"Registered flow entity: API {flow_id} -> Internal {internal_flow_id}, Object ID {python_object_id}"
+    )
 
 # Import after defining the above to avoid circular imports
 from .websocket_utils import (
@@ -339,86 +358,20 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
 
         if hasattr(flow, "run_async"):
             logger.info(f"Executing flow via run_async method")
-
-            # Capture internal flow ID after execution starts
             result = await emit_method_events("run_async", flow.run_async)
-
-            # Check if flow has an internal ID and create mapping
-            internal_flow_id = getattr(flow, "id", None)
-            if internal_flow_id and internal_flow_id != flow_id:
-                logger.info(
-                    f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}"
-                )
-                flow_id_mapping[flow_id] = internal_flow_id
-                reverse_flow_id_mapping[internal_flow_id] = flow_id
-                
-            # Also create mapping for Python object ID (used in events)
-            python_object_id = str(id(flow))
-            logger.info(
-                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
-            )
-            flow_id_mapping[flow_id] = python_object_id
-            reverse_flow_id_mapping[python_object_id] = flow_id
+            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "kickoff_async"):
             logger.info(f"Executing flow via kickoff_async method")
             result = await emit_method_events("kickoff_async", flow.kickoff_async)
-
-            # Check if flow has an internal ID and create mapping
-            internal_flow_id = getattr(flow, "id", None)
-            if internal_flow_id and internal_flow_id != flow_id:
-                logger.info(
-                    f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}"
-                )
-                flow_id_mapping[flow_id] = internal_flow_id
-                reverse_flow_id_mapping[internal_flow_id] = flow_id
-                
-            # Also create mapping for Python object ID (used in events)
-            python_object_id = str(id(flow))
-            logger.info(
-                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
-            )
-            flow_id_mapping[flow_id] = python_object_id
-            reverse_flow_id_mapping[python_object_id] = flow_id
+            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "run"):
             logger.info(f"Executing flow via run method")
             result = await emit_method_events("run", flow.run)
-
-            # Check if flow has an internal ID and create mapping
-            internal_flow_id = getattr(flow, "id", None)
-            if internal_flow_id and internal_flow_id != flow_id:
-                logger.info(
-                    f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}"
-                )
-                flow_id_mapping[flow_id] = internal_flow_id
-                reverse_flow_id_mapping[internal_flow_id] = flow_id
-                
-            # Also create mapping for Python object ID (used in events)
-            python_object_id = str(id(flow))
-            logger.info(
-                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
-            )
-            flow_id_mapping[flow_id] = python_object_id
-            reverse_flow_id_mapping[python_object_id] = flow_id
+            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "kickoff"):
             logger.info(f"Executing flow via kickoff method")
             result = await emit_method_events("kickoff", flow.kickoff)
-
-            # Check if flow has an internal ID and create mapping
-            internal_flow_id = getattr(flow, "id", None)
-            if internal_flow_id and internal_flow_id != flow_id:
-                logger.info(
-                    f"Creating flow ID mapping: API {flow_id} -> Internal {internal_flow_id}"
-                )
-                flow_id_mapping[flow_id] = internal_flow_id
-                reverse_flow_id_mapping[internal_flow_id] = flow_id
-                
-            # Also create mapping for Python object ID (used in events)
-            python_object_id = str(id(flow))
-            logger.info(
-                f"Creating Python object ID mapping: API {flow_id} -> Object ID {python_object_id}"
-            )
-            flow_id_mapping[flow_id] = python_object_id
-            reverse_flow_id_mapping[python_object_id] = flow_id
+            register_flow_entity(flow, flow_id)
         else:
             raise AttributeError(
                 f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method"
@@ -603,8 +556,8 @@ def record_flow_event(flow_id: str, event_type: str, data: Dict[str, Any] = None
         data = {}
 
     # Make sure flow_id is an API flow ID (not an internal flow ID)
-    # If it's an internal flow ID, convert it to an API flow ID
-    api_flow_id = reverse_flow_id_mapping.get(flow_id, flow_id)
+    # If it's an internal flow ID, convert it to an API flow ID using entity service
+    api_flow_id = entity_service.get_primary_id(flow_id) or flow_id
 
     # Check if there's a trace for this flow
     if api_flow_id not in flow_traces or not flow_traces[api_flow_id]:

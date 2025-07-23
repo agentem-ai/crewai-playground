@@ -980,9 +980,9 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
 
     try:
         # Check if this is an API flow ID that needs to be mapped to internal flow ID
-        from .flow_api import flow_id_mapping
+        from .entities import entity_service
 
-        internal_flow_id = flow_id_mapping.get(flow_id, flow_id)
+        internal_flow_id = entity_service.get_internal_id(flow_id) or flow_id
 
         # Check if flow execution exists using the API flow ID (since active flows are stored with API flow ID)
         execution = get_active_execution(flow_id)
