@@ -833,7 +833,7 @@ class EventListener:
             except Exception as e:
                 logger.error(f"Error scheduling coroutine: {e}")
 
-    def _extract_execution_id(source, event):
+    def _extract_execution_id(self, source, event):
         """Extract execution ID from source or event."""
         # Try to get from event first (more reliable for crew events)
         if hasattr(event, "execution_id"):
@@ -872,7 +872,7 @@ class EventListener:
         )
         return execution_id
 
-    def _is_flow_context(source, event) -> bool:
+    def _is_flow_context(self, source, event) -> bool:
         """Determine if this event is in a flow context."""
         # Check if source is a Flow object
         if hasattr(source, "__class__") and "Flow" in source.__class__.__name__:
