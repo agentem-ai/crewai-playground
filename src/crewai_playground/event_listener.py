@@ -91,7 +91,7 @@ class EventListener:
         self.task_states: Dict[str, Dict[str, Any]] = {}
 
         # WebSocket client management
-        self.clients: Dict[str, Dict[str, Any]] = {}
+        self.clients: Dict[str, Dict[str, Any]] = {}  # Store the original crew ID
 
         # Event loop reference
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -251,13 +251,31 @@ class EventListener:
                         self._handle_crew_kickoff_failed_crew(execution_id, event)
                     )
 
-        @crewai_event_bus.on(CrewTestFailedEvent)
-        def handle_crew_train_failed(source, event):
-            """Handle crew train failed event."""
+        @crewai_event_bus.on(CrewTestStartedEvent)
+        def handle_crew_test_started(source, event):
+            """Handle crew test started event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
-                logger.info(f"Crew train failed for execution: {execution_id}")
-                self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
+                logger.info(f"Crew test started for execution: {execution_id}")
+                self._schedule(self._handle_crew_test_started_crew(execution_id, event))
+
+        @crewai_event_bus.on(CrewTestCompletedEvent)
+        def handle_crew_test_completed(source, event):
+            """Handle crew test completed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(f"Crew test completed for execution: {execution_id}")
+                self._schedule(
+                    self._handle_crew_test_completed_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(CrewTestFailedEvent)
+        def handle_crew_test_failed(source, event):
+            """Handle crew test failed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(f"Crew test failed for execution: {execution_id}")
+                self._schedule(self._handle_crew_test_failed_crew(execution_id, event))
 
         @crewai_event_bus.on(CrewTrainStartedEvent)
         def handle_crew_train_started(source, event):
@@ -288,10 +306,10 @@ class EventListener:
                 self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
 
         # Agent Events
-        @crewai_event_bus.on(CrewTestStartedEvent)
+        @crewai_event_bus.on(AgentExecutionStartedEvent)
         def handle_agent_execution_started(source, event):
             """Handle agent execution started event."""
-            logger.info(f"Agent execution started event received: {event}")
+            logger.debug(f"Agent execution started event received: {event}")
             execution_id = self._extract_execution_id(source, event)
 
             if self._is_flow_context(source, event):
@@ -334,7 +352,7 @@ class EventListener:
                     self._handle_agent_execution_started_crew(execution_id, event)
                 )
 
-        @crewai_event_bus.on(CrewTestCompletedEvent)
+        @crewai_event_bus.on(AgentExecutionCompletedEvent)
         def handle_agent_execution_completed(source, event):
             """Handle agent execution completed event."""
             logger.info(f"Agent execution completed event received: {event}")
@@ -428,8 +446,21 @@ class EventListener:
         def handle_task_completed(source, event):
             """Handle task completed event."""
             execution_id = self._extract_execution_id(source, event)
-            if execution_id:
-                logger.debug(f"Task completed for execution: {execution_id}")
+            if execution_id and not self._is_flow_context(source, event):
+                logger.info(
+                    f"Task completed (crew context) for execution: {execution_id}"
+                )
+                # Add telemetry for task completed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    task_id = getattr(event, "task_id", None)
+                    output = getattr(event, "output", None)
+                    logger.info(f"📊 Ending telemetry for task execution: {task_id}")
+                    telemetry_service.end_task_execution(crew_id, task_id, output)
+                except Exception as e:
+                    logger.error(f"Error ending task execution telemetry: {e}")
+
+                self._schedule(self._handle_task_completed_crew(execution_id, event))
 
         # Tool Usage Events
         @crewai_event_bus.on(ToolUsageStartedEvent)
@@ -727,7 +758,7 @@ class EventListener:
     async def broadcast_update(self):
         """Broadcast the current state to all connected WebSocket clients."""
         if not self.clients:
-            logger.debug("📡 No WebSocket clients connected, skipping broadcast")
+            print("📡 No WebSocket clients connected, skipping broadcast")
             return
 
         # Get current crew ID from crew state
@@ -798,11 +829,11 @@ class EventListener:
                 client = self.clients[client_id]
                 crew_id = client.get("crew_id")
                 del self.clients[client_id]
-                logger.info(
+                print(
                     f"WebSocket client {client_id} (crew: {crew_id}) disconnected. Remaining connections: {len(self.clients)}"
                 )
         except Exception as e:
-            logger.error(f"Error during client {client_id} disconnect: {e}")
+            print(f"Error during client {client_id} disconnect: {e}")
 
     def reset_state(self):
         """Reset the state when a new execution starts."""
@@ -994,14 +1025,31 @@ class EventListener:
             flow_id, "method_started"
         )
 
-        step = {
-            "id": f"method_{event.method_name}_{id(event)}",
-            "name": event.method_name,
-            "status": "running",
-            "timestamp": asyncio.get_event_loop().time(),
-        }
+        current_time = asyncio.get_event_loop().time()
+        step_id = (
+            event.method_name
+        )  # Use method name to keep step consistent across events
 
-        flow_state["steps"].append(step)
+        # Check if step already exists (e.g. re-emitted event)
+        for step in flow_state["steps"]:
+            if step["id"] == step_id:
+                # Update status and start_time if needed
+                step["status"] = "running"
+                step.setdefault("start_time", current_time)
+                break
+        else:
+            # Create new step entry
+            step = {
+                "id": step_id,
+                "name": event.method_name,
+                "status": "running",
+                "start_time": current_time,
+                "outputs": None,
+            }
+            flow_state["steps"].append(step)
+
+        # Refresh flow timestamp
+        flow_state["timestamp"] = current_time
 
         await broadcast_flow_update(
             broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
@@ -1015,17 +1063,34 @@ class EventListener:
             flow_id, "method_finished"
         )
 
-        for step in flow_state["steps"]:
-            if step["name"] == event.method_name and step["status"] == "running":
-                step["status"] = "completed"
-                step["timestamp"] = asyncio.get_event_loop().time()
+        current_time = asyncio.get_event_loop().time()
+        step_id = event.method_name
+        outputs = getattr(event, "result", None)
 
-                if hasattr(event, "outputs") and event.outputs is not None:
-                    if hasattr(event.outputs, "raw"):
-                        step["outputs"] = event.outputs.raw
-                    else:
-                        step["outputs"] = str(event.outputs)
+        # Locate existing step
+        for step in flow_state["steps"]:
+            if step["id"] == step_id and step.get("status") in {"running", "failed"}:
+                step.update(
+                    {
+                        "status": "completed",
+                        "end_time": current_time,
+                        "outputs": outputs,
+                    }
+                )
                 break
+        else:
+            # Step missing (edge case) – add completed step
+            step = {
+                "id": step_id,
+                "name": event.method_name,
+                "status": "completed",
+                "start_time": current_time,
+                "end_time": current_time,
+                "outputs": outputs,
+            }
+            flow_state["steps"].append(step)
+
+        flow_state["timestamp"] = current_time
 
         await broadcast_flow_update(
             broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
@@ -1039,14 +1104,33 @@ class EventListener:
             flow_id, "method_failed"
         )
 
-        for step in flow_state["steps"]:
-            if step["name"] == event.method_name and step["status"] == "running":
-                step["status"] = "failed"
-                step["timestamp"] = asyncio.get_event_loop().time()
+        current_time = asyncio.get_event_loop().time()
+        step_id = event.method_name
+        error_msg = getattr(event, "error", None)
 
-                if hasattr(event, "error") and event.error is not None:
-                    step["error"] = str(event.error)
+        for step in flow_state["steps"]:
+            if step["id"] == step_id and step.get("status") == "running":
+                step.update(
+                    {
+                        "status": "failed",
+                        "end_time": current_time,
+                        "error": str(error_msg) if error_msg else "Unknown error",
+                    }
+                )
                 break
+        else:
+            # Missing step – add failed step entry
+            step = {
+                "id": step_id,
+                "name": event.method_name,
+                "status": "failed",
+                "start_time": current_time,
+                "end_time": current_time,
+                "error": str(error_msg) if error_msg else "Unknown error",
+            }
+            flow_state["steps"].append(step)
+
+        flow_state["timestamp"] = current_time
 
         await broadcast_flow_update(
             broadcast_flow_id, {"type": "flow_state", "payload": flow_state}
@@ -1106,7 +1190,8 @@ class EventListener:
                     }
 
         logger.info(
-            f"Initialized crew state: {len(self.agent_states)} agents, {len(self.task_states)} tasks"
+            f"Initialized crew state: {len(self.agent_states)} agents, "
+            f"{len(self.task_states)} tasks"
         )
         await self.broadcast_update()
 
@@ -1343,6 +1428,27 @@ class EventListener:
 
             if hasattr(event, "result") and event.result is not None:
                 self.task_states[task_id]["result"] = str(event.result)
+
+            await self.broadcast_update()
+
+    async def _handle_task_completed_crew(self, execution_id: str, event):
+        """Handle task completed event in crew context."""
+        logger.info(f"Task completed (crew context) for execution: {execution_id}")
+
+        task_id = getattr(event, "task_id", f"task_{id(event)}")
+
+        if task_id in self.task_states:
+            self.task_states[task_id].update(
+                {
+                    "status": "completed",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
+            if hasattr(event, "result") and event.result is not None:
+                self.task_states[task_id]["result"] = str(event.result)
+            elif hasattr(event, "output") and event.output is not None:
+                self.task_states[task_id]["result"] = str(event.output)
 
             await self.broadcast_update()
 
