@@ -257,6 +257,25 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.info(f"Crew test started for execution: {execution_id}")
+                # Add telemetry for crew test started
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_name = getattr(event, "crew_name", f"Crew {crew_id}")
+                    logger.info(f"📊 Starting telemetry trace for crew test: {crew_id}")
+                    telemetry_service.start_crew_trace(crew_id, crew_name)
+                    # Add specific event for test started
+                    telemetry_service.add_event(
+                        crew_id,
+                        "crew.test.started",
+                        {
+                            "crew_id": crew_id,
+                            "crew_name": crew_name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"Error starting telemetry trace for crew test: {e}")
+                
                 self._schedule(self._handle_crew_test_started_crew(execution_id, event))
 
         @crewai_event_bus.on(CrewTestCompletedEvent)
@@ -265,6 +284,26 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.info(f"Crew test completed for execution: {execution_id}")
+                # Add telemetry for crew test completed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    output = getattr(event, "output", None)
+                    results = getattr(event, "results", None)
+                    logger.info(f"📊 Ending telemetry trace for crew test: {crew_id}")
+                    # Add specific event for test completed
+                    telemetry_service.add_event(
+                        crew_id,
+                        "crew.test.completed",
+                        {
+                            "crew_id": crew_id,
+                            "results": results,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    telemetry_service.end_crew_trace(crew_id, output)
+                except Exception as e:
+                    logger.error(f"Error ending telemetry trace for crew test: {e}")
+                
                 self._schedule(
                     self._handle_crew_test_completed_crew(execution_id, event)
                 )
@@ -275,6 +314,26 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.info(f"Crew test failed for execution: {execution_id}")
+                # Add telemetry for crew test failed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    error = getattr(event, "error", "Unknown error")
+                    error_str = str(error) if error else "Unknown error"
+                    logger.info(f"📊 Adding error event and ending telemetry trace for crew test: {crew_id}")
+                    # Add specific event for test failed
+                    telemetry_service.add_event(
+                        crew_id,
+                        "crew.test.failed",
+                        {
+                            "crew_id": crew_id,
+                            "error": error_str,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    telemetry_service.end_crew_trace(crew_id, {"error": error_str})
+                except Exception as e:
+                    logger.error(f"Error ending telemetry trace for crew test: {e}")
+                
                 self._schedule(self._handle_crew_test_failed_crew(execution_id, event))
 
         @crewai_event_bus.on(CrewTrainStartedEvent)
@@ -283,6 +342,25 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.info(f"Crew train started for execution: {execution_id}")
+                # Add telemetry for crew train started
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_name = getattr(event, "crew_name", f"Crew {crew_id}")
+                    logger.info(f"📊 Starting telemetry trace for crew train: {crew_id}")
+                    telemetry_service.start_crew_trace(crew_id, crew_name)
+                    # Add specific event for train started
+                    telemetry_service.add_event(
+                        crew_id,
+                        "crew.train.started",
+                        {
+                            "crew_id": crew_id,
+                            "crew_name": crew_name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"Error starting telemetry trace for crew train: {e}")
+                
                 self._schedule(
                     self._handle_crew_train_started_crew(execution_id, event)
                 )
@@ -293,6 +371,26 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.info(f"Crew train completed for execution: {execution_id}")
+                # Add telemetry for crew train completed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    output = getattr(event, "output", None)
+                    results = getattr(event, "results", None)
+                    logger.info(f"📊 Ending telemetry trace for crew train: {crew_id}")
+                    # Add specific event for train completed
+                    telemetry_service.add_event(
+                        crew_id,
+                        "crew.train.completed",
+                        {
+                            "crew_id": crew_id,
+                            "results": results,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    telemetry_service.end_crew_trace(crew_id, output)
+                except Exception as e:
+                    logger.error(f"Error ending telemetry trace for crew train: {e}")
+                
                 self._schedule(
                     self._handle_crew_train_completed_crew(execution_id, event)
                 )
@@ -303,6 +401,26 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.info(f"Crew train failed for execution: {execution_id}")
+                # Add telemetry for crew train failed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    error = getattr(event, "error", "Unknown error")
+                    error_str = str(error) if error else "Unknown error"
+                    logger.info(f"📊 Adding error event and ending telemetry trace for crew train: {crew_id}")
+                    # Add specific event for train failed
+                    telemetry_service.add_event(
+                        crew_id,
+                        "crew.train.failed",
+                        {
+                            "crew_id": crew_id,
+                            "error": error_str,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+                    telemetry_service.end_crew_trace(crew_id, {"error": error_str})
+                except Exception as e:
+                    logger.error(f"Error ending telemetry trace for crew train: {e}")
+                
                 self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
 
         # Agent Events
@@ -469,7 +587,24 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.debug(f"Tool usage started for execution: {execution_id}")
-                # Tool events are usually logged but don't need state updates
+                # Extract agent ID if available
+                agent_id = self._extract_agent_id(event, source)
+                # Extract tool information
+                tool_name = getattr(event, "tool_name", "unknown_tool")
+                inputs = getattr(event, "inputs", {})
+                
+                # Add telemetry for tool usage started
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    # We don't have output yet, so pass None
+                    telemetry_service.trace_tool_execution(
+                        crew_id=crew_id,
+                        agent_id=agent_id,
+                        tool_name=tool_name,
+                        inputs=inputs
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding tool usage started telemetry: {e}")
 
         @crewai_event_bus.on(ToolUsageFinishedEvent)
         def handle_tool_usage_finished(source, event):
@@ -477,6 +612,25 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.debug(f"Tool usage finished for execution: {execution_id}")
+                # Extract agent ID if available
+                agent_id = self._extract_agent_id(event, source)
+                # Extract tool information
+                tool_name = getattr(event, "tool_name", "unknown_tool")
+                inputs = getattr(event, "inputs", {})
+                output = getattr(event, "output", None)
+                
+                # Add telemetry for tool usage finished
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    telemetry_service.trace_tool_execution(
+                        crew_id=crew_id,
+                        agent_id=agent_id,
+                        tool_name=tool_name,
+                        inputs=inputs,
+                        output=output
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding tool usage finished telemetry: {e}")
 
         @crewai_event_bus.on(ToolUsageErrorEvent)
         def handle_tool_usage_error(source, event):
@@ -484,6 +638,36 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.warning(f"Tool usage error for execution: {execution_id}")
+                # Extract agent ID if available
+                agent_id = self._extract_agent_id(event, source)
+                # Extract tool information
+                tool_name = getattr(event, "tool_name", "unknown_tool")
+                inputs = getattr(event, "inputs", {})
+                error = getattr(event, "error", "Unknown error")
+                
+                # Add telemetry for tool usage error
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    telemetry_service.trace_tool_execution(
+                        crew_id=crew_id,
+                        agent_id=agent_id,
+                        tool_name=f"{tool_name}:error",
+                        inputs=inputs,
+                        output=str(error)
+                    )
+                    # Also add as an event
+                    telemetry_service.add_event(
+                        crew_id=crew_id,
+                        event_type="tool.error",
+                        event_data={
+                            "tool_name": tool_name,
+                            "agent_id": agent_id,
+                            "error": str(error),
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding tool usage error telemetry: {e}")
 
         @crewai_event_bus.on(ToolValidateInputErrorEvent)
         def handle_tool_validate_input_error(source, event):
@@ -493,6 +677,36 @@ class EventListener:
                 logger.warning(
                     f"Tool validate input error for execution: {execution_id}"
                 )
+                # Extract agent ID if available
+                agent_id = self._extract_agent_id(event, source)
+                # Extract tool information
+                tool_name = getattr(event, "tool_name", "unknown_tool")
+                inputs = getattr(event, "inputs", {})
+                error = getattr(event, "error", "Input validation error")
+                
+                # Add telemetry for tool validation error
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    telemetry_service.trace_tool_execution(
+                        crew_id=crew_id,
+                        agent_id=agent_id,
+                        tool_name=f"{tool_name}:validate_error",
+                        inputs=inputs,
+                        output=str(error)
+                    )
+                    # Also add as an event
+                    telemetry_service.add_event(
+                        crew_id=crew_id,
+                        event_type="tool.validate_error",
+                        event_data={
+                            "tool_name": tool_name,
+                            "agent_id": agent_id,
+                            "error": str(error),
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding tool validation error telemetry: {e}")
 
         @crewai_event_bus.on(ToolExecutionErrorEvent)
         def handle_tool_execution_error(source, event):
@@ -500,6 +714,36 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.warning(f"Tool execution error for execution: {execution_id}")
+                # Extract agent ID if available
+                agent_id = self._extract_agent_id(event, source)
+                # Extract tool information
+                tool_name = getattr(event, "tool_name", "unknown_tool")
+                inputs = getattr(event, "inputs", {})
+                error = getattr(event, "error", "Execution error")
+                
+                # Add telemetry for tool execution error
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    telemetry_service.trace_tool_execution(
+                        crew_id=crew_id,
+                        agent_id=agent_id,
+                        tool_name=f"{tool_name}:execution_error",
+                        inputs=inputs,
+                        output=str(error)
+                    )
+                    # Also add as an event
+                    telemetry_service.add_event(
+                        crew_id=crew_id,
+                        event_type="tool.execution_error",
+                        event_data={
+                            "tool_name": tool_name,
+                            "agent_id": agent_id,
+                            "error": str(error),
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding tool execution error telemetry: {e}")
 
         @crewai_event_bus.on(ToolSelectionErrorEvent)
         def handle_tool_selection_error(source, event):
@@ -507,6 +751,33 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.warning(f"Tool selection error for execution: {execution_id}")
+                # Extract agent ID if available
+                agent_id = self._extract_agent_id(event, source)
+                # Extract tool information
+                error = getattr(event, "error", "Tool selection error")
+                
+                # Add telemetry for tool selection error
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    telemetry_service.trace_tool_execution(
+                        crew_id=crew_id,
+                        agent_id=agent_id,
+                        tool_name="tool_selection:error",
+                        inputs={"error_message": str(error)},
+                        output=str(error)
+                    )
+                    # Also add as an event
+                    telemetry_service.add_event(
+                        crew_id=crew_id,
+                        event_type="tool.selection_error",
+                        event_data={
+                            "agent_id": agent_id,
+                            "error": str(error),
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding tool selection error telemetry: {e}")
 
         # LLM Events
         @crewai_event_bus.on(LLMCallStartedEvent)
@@ -573,6 +844,28 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.warning(f"LLM call failed for execution: {execution_id}")
+                # Add telemetry for LLM call failed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    # Extract additional data if available
+                    model = getattr(event, "model", None)
+                    error = getattr(event, "error", "LLM call failed")
+                    agent_id = getattr(event, "agent_id", None)
+                    task_id = getattr(event, "task_id", None)
+
+                    # Create event data
+                    event_data = {
+                        "model": model,
+                        "error": str(error),
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+
+                    logger.debug(f"📊 Adding telemetry event for LLM call failed")
+                    telemetry_service.add_event(crew_id, "llm.failed", event_data)
+                except Exception as e:
+                    logger.error(f"Error adding LLM failed telemetry event: {e}")
 
         @crewai_event_bus.on(LLMStreamChunkEvent)
         def handle_llm_stream_chunk(source, event):
@@ -580,6 +873,8 @@ class EventListener:
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.debug(f"LLM stream chunk for execution: {execution_id}")
+                # We don't add telemetry for every stream chunk to avoid overwhelming the system
+                # Only log at debug level for visibility
 
         @crewai_event_bus.on(CrewInitializationRequestedEvent)
         def handle_crew_initialization_requested(source, event):

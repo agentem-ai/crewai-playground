@@ -304,10 +304,6 @@ class ChatHandler:
         Returns:
             Dictionary containing the crew execution results
         """
-        print("Running crew with inputs:", inputs)
-        print("Crew ID:", self.crew.id)
-        print("self.crew:", self.crew)
-        print("crew_id:", crew_id)
 
         # add a mapping from crew_id to crew using the entities service
         entity_service.register_entity(
