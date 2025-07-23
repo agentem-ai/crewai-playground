@@ -765,6 +765,8 @@ class EventListener:
             flow_state: Optional flow state data for flow updates
             update_type: Type of update - "crew_state" or "flow_state"
         """
+        from .entities import entity_service
+        
         # Handle flow updates
         if update_type == "flow_state" and flow_id and flow_state:
             await self._broadcast_flow_update(flow_id, flow_state)
@@ -778,59 +780,13 @@ class EventListener:
         current_crew_id = self.crew_state.get("id") if self.crew_state else None
         current_crew_name = self.crew_state.get("name") if self.crew_state else None
 
-        # Try to map internal crew ID to API crew ID if needed
-        broadcast_crew_id = current_crew_id
-        mapped_ids = []
-
-        try:
-            from .flow_api import flow_id_mapping, reverse_flow_id_mapping
-
-            # Check if we have a mapping for this crew ID
-            api_crew_id = reverse_flow_id_mapping.get(current_crew_id)
-            if api_crew_id:
-                broadcast_crew_id = api_crew_id
-                mapped_ids.append(api_crew_id)
-                logger.debug(
-                    f"Mapped internal crew ID {current_crew_id} to API crew ID {broadcast_crew_id}"
-                )
-
-            # Also check if current_crew_id is an API ID that maps to an internal ID
-            internal_crew_id = flow_id_mapping.get(current_crew_id)
-            if internal_crew_id:
-                mapped_ids.append(internal_crew_id)
-                logger.debug(
-                    f"Found reverse mapping: API crew ID {current_crew_id} maps to internal ID {internal_crew_id}"
-                )
-        except ImportError:
-            # If import fails, use the original crew ID
-            logger.debug(
-                "Could not import flow_id_mapping/reverse_flow_id_mapping, using original crew ID"
-            )
-        except Exception as e:
-            logger.debug(f"Error accessing flow ID mappings: {str(e)}")
-
-        # Add string versions of IDs to our matching list
+        # Use entity service to get all broadcast IDs
         if current_crew_id:
-            mapped_ids.append(str(current_crew_id))
-        if broadcast_crew_id:
-            mapped_ids.append(str(broadcast_crew_id))
-
-        # Add crew name as another possible match
-        if current_crew_name:
-            mapped_ids.append(current_crew_name)
-            mapped_ids.append(str(current_crew_name))
-
-        # Add "crew_X" format IDs if the current ID is a UUID
-        if current_crew_id and len(str(current_crew_id)) > 30:  # Likely a UUID
-            for i in range(10):  # Check crew_0 through crew_9
-                mapped_ids.append(f"crew_{i}")
-
-        # Remove duplicates while preserving order
-        unique_mapped_ids = []
-        for id in mapped_ids:
-            if id not in unique_mapped_ids:
-                unique_mapped_ids.append(id)
-        mapped_ids = unique_mapped_ids
+            mapped_ids = entity_service.resolve_broadcast_ids(current_crew_id)
+            broadcast_crew_id = entity_service.get_primary_id(current_crew_id) or current_crew_id
+        else:
+            mapped_ids = []
+            broadcast_crew_id = None
 
         logger.debug(
             f"📡 BROADCASTING UPDATE - crew_id: {current_crew_id}, name: {current_crew_name}, broadcast_id: {broadcast_crew_id}"
@@ -871,29 +827,9 @@ class EventListener:
             client_crew_id = client.get("crew_id")
             logger.debug(f"Checking client {client_id} with crew_id: {client_crew_id}")
 
-            # More flexible matching logic
-            should_send = False
-
-            # Case 1: Client has no crew filter or there's no current crew
-            if not client_crew_id or not current_crew_id:
-                should_send = True
-                logger.debug(
-                    f"Client {client_id} has no crew filter or no current crew - will send update"
-                )
-            # Case 2: Direct match with any of our potential IDs
-            elif client_crew_id in mapped_ids:
-                should_send = True
-                logger.debug(
-                    f"Client {client_id} has direct match with {client_crew_id} - will send update"
-                )
-            # Case 3: Special case for numeric crew IDs (crew_0, crew_1, etc.)
-            elif client_crew_id and client_crew_id.startswith("crew_"):
-                # Always send updates to crew_0, crew_1, etc. clients during development
-                should_send = True
-                logger.debug(
-                    f"Client {client_id} has special crew ID {client_crew_id} - will send update"
-                )
-
+            # Use entity service for broadcast decision
+            should_send = entity_service.should_broadcast_to_client(current_crew_id, client_crew_id)
+            
             if should_send:
                 matching_clients += 1
                 try:
@@ -927,11 +863,11 @@ class EventListener:
 
         # Debug: Check if flow_id is actually an object ID instead of the API flow ID
         if isinstance(flow_id, int) or (isinstance(flow_id, str) and flow_id.isdigit()):
-            # Try to find the correct API flow ID from the mapping
+            # Try to find the correct API flow ID from the entity service
             try:
-                from .flow_api import reverse_flow_id_mapping
+                from .entities import entity_service
 
-                api_flow_id = reverse_flow_id_mapping.get(str(flow_id))
+                api_flow_id = entity_service.get_primary_id(str(flow_id))
                 if api_flow_id:
                     flow_id = api_flow_id  # Use the API flow ID for broadcasting
                 else:
@@ -1244,11 +1180,11 @@ class EventListener:
         flow_id_str = str(flow_id)
 
         try:
-            from .flow_api import reverse_flow_id_mapping, flow_id_mapping
+            from .entities import entity_service
 
-            api_flow_id = reverse_flow_id_mapping.get(flow_id_str)
+            api_flow_id = entity_service.get_primary_id(flow_id_str)
             if not api_flow_id:
-                api_flow_id = reverse_flow_id_mapping.get(flow_id)
+                api_flow_id = entity_service.get_primary_id(flow_id)
 
             broadcast_flow_id = api_flow_id if api_flow_id else flow_id_str
 
@@ -1465,23 +1401,30 @@ class EventListener:
         )
 
     async def _handle_crew_kickoff_started_crew(self, execution_id: str, event):
-        """Handle crew kickoff started event in crew context."""
-        logger.info(
-            f"Crew kickoff started (crew context) for execution: {execution_id}"
+        """Handle crew kickoff started event for crew context."""
+        from .entities import entity_service
+        
+        logger.info(f"🚀 Crew kickoff started - execution_id: {execution_id}")
+
+        # Extract crew information from the event
+        crew_id = getattr(event, "crew_id", execution_id)
+        crew_name = getattr(event, "crew_name", "Unknown Crew")
+        
+        # Register the crew entity with the entity service
+        entity_service.register_entity(
+            primary_id=execution_id,  # Use execution_id as primary
+            internal_id=crew_id if crew_id != execution_id else None,
+            entity_type="crew",
+            name=crew_name
         )
+        logger.debug(f"Registered crew entity: primary_id={execution_id}, internal_id={crew_id}, name={crew_name}")
 
-        # Extract crew information from event or source
-        crew_name = getattr(event, "crew_name", None)
-        if not crew_name and hasattr(event, "crew"):
-            crew_name = getattr(event.crew, "name", None)
-        if not crew_name:
-            crew_name = f"Crew {execution_id}"
-
+        # Initialize crew state
         self.crew_state = {
-            "id": execution_id,
+            "id": crew_id,
             "name": crew_name,
             "status": "running",
-            "timestamp": datetime.utcnow().isoformat(),
+            "started_at": datetime.utcnow().isoformat(),
             "type": getattr(event, "process", "sequential"),
         }
 
