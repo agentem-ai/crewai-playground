@@ -118,69 +118,461 @@ class EventListener:
         self.ensure_event_loop()
 
         # Flow Events
-        crewai_event_bus.on(FlowStartedEvent)(self.handle_flow_started)
-        crewai_event_bus.on(FlowFinishedEvent)(self.handle_flow_finished)
-        crewai_event_bus.on(MethodExecutionStartedEvent)(
-            self.handle_method_execution_started
-        )
-        crewai_event_bus.on(MethodExecutionFinishedEvent)(
-            self.handle_method_execution_finished
-        )
-        crewai_event_bus.on(MethodExecutionFailedEvent)(
-            self.handle_method_execution_failed
-        )
+        @crewai_event_bus.on(FlowStartedEvent)
+        def handle_flow_started(self, source, event):
+            """Handle flow started event."""
+            flow_id = self._extract_execution_id(source, event)
+            if flow_id:
+                self._schedule(self._handle_flow_started(flow_id, event, source))
+
+        @crewai_event_bus.on(FlowFinishedEvent)
+        def handle_flow_finished(self, source, event):
+            """Handle flow finished event."""
+            flow_id = self._extract_execution_id(source, event)
+            if flow_id:
+                self._schedule(self._handle_flow_finished(flow_id, event, source))
+
+        @crewai_event_bus.on(MethodExecutionStartedEvent)
+        def handle_method_execution_started(self, source, event):
+            """Handle method execution started event."""
+            flow_id = self._extract_execution_id(source, event)
+            if flow_id:
+                self._schedule(self._handle_method_started(flow_id, event))
+
+        @crewai_event_bus.on(MethodExecutionFinishedEvent)
+        def handle_method_execution_finished(self, source, event):
+            """Handle method execution finished event."""
+            flow_id = self._extract_execution_id(source, event)
+            if flow_id:
+                self._schedule(self._handle_method_finished(flow_id, event))
+
+        @crewai_event_bus.on(MethodExecutionFailedEvent)
+        def handle_method_execution_failed(self, source, event):
+            """Handle method execution failed event."""
+            flow_id = self._extract_execution_id(source, event)
+            if flow_id:
+                self._schedule(self._handle_method_failed(flow_id, event))
 
         # Crew Events
-        crewai_event_bus.on(CrewKickoffStartedEvent)(self.handle_crew_kickoff_started)
-        crewai_event_bus.on(CrewKickoffCompletedEvent)(
-            self.handle_crew_kickoff_completed
-        )
-        crewai_event_bus.on(CrewKickoffFailedEvent)(self.handle_crew_kickoff_failed)
-        crewai_event_bus.on(CrewTestStartedEvent)(self.handle_crew_test_started)
-        crewai_event_bus.on(CrewTestCompletedEvent)(self.handle_crew_test_completed)
-        crewai_event_bus.on(CrewTestFailedEvent)(self.handle_crew_test_failed)
-        crewai_event_bus.on(CrewTrainStartedEvent)(self.handle_crew_train_started)
-        crewai_event_bus.on(CrewTrainCompletedEvent)(self.handle_crew_train_completed)
-        crewai_event_bus.on(CrewTrainFailedEvent)(self.handle_crew_train_failed)
+        @crewai_event_bus.on(CrewKickoffStartedEvent)
+        def handle_crew_kickoff_started(self, source, event):
+            """Handle crew kickoff started event."""
+            logger.info(f"🚀 CREW KICKOFF STARTED - Event received: {event}")
+            logger.info(
+                f"📊 Event source: {type(source).__name__}, Event type: {type(event).__name__}"
+            )
+            logger.info(f"🔍 Source details: {source}")
+            execution_id = self._extract_execution_id(source, event)
+            logger.info(f"🆔 Extracted execution ID: {execution_id}")
+
+            if self._is_flow_context(source, event):
+                # This is a flow context - handle differently
+                logger.debug(
+                    f"⏭️ Crew kickoff started (flow context) for flow: {execution_id}"
+                )
+                # For flows, we don't need to do anything special here
+                return
+            else:
+                # This is a crew context
+                logger.info(
+                    f"🎯 Processing crew kickoff started for execution: {execution_id}"
+                )
+                # Add telemetry for crew kickoff started
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_name = getattr(event, "crew_name", None)
+
+                    # If crew_name is not in event, try to get it from event.crew
+                    if not crew_name and hasattr(event, "crew"):
+                        crew_name = getattr(event.crew, "name", None)
+
+                    # Fallback to a default name if still not found
+                    if not crew_name:
+                        crew_name = f"Crew {crew_id}"
+
+                    logger.info(
+                        f"📊 Starting telemetry trace for crew: {crew_id}, name: {crew_name}"
+                    )
+                    telemetry_service.start_crew_trace(crew_id, crew_name)
+                except Exception as e:
+                    logger.error(f"Error starting telemetry trace: {e}")
+
+                logger.info(f"📡 Scheduling async handler for crew kickoff started")
+                self._schedule(
+                    self._handle_crew_kickoff_started_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(CrewKickoffCompletedEvent)
+        def handle_crew_kickoff_completed(self, source, event):
+            """Handle crew kickoff completed event."""
+            logger.info(f"🎉 CREW KICKOFF COMPLETED - Event received: {event}")
+            logger.info(
+                f"📊 Event source: {type(source).__name__}, Event type: {type(event).__name__}"
+            )
+            logger.info(f"🔍 Source details: {source}")
+            execution_id = self._extract_execution_id(source, event)
+            logger.info(f"🆔 Extracted execution ID: {execution_id}")
+            if self._is_flow_context(source, event):
+                logger.debug(
+                    f"⏭️ Crew kickoff completed (flow context) for flow: {execution_id}"
+                )
+            else:
+                logger.info(
+                    f"🎯 Processing crew kickoff completed for execution: {execution_id}"
+                )
+                # Add telemetry for crew kickoff completed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    output = getattr(event, "output", None)
+                    logger.info(f"📊 Ending telemetry trace for crew: {crew_id}")
+                    telemetry_service.end_crew_trace(crew_id, output)
+                except Exception as e:
+                    logger.error(f"Error ending telemetry trace: {e}")
+
+                logger.info(f"📡 Scheduling async handler for crew kickoff completed")
+                self._schedule(
+                    self._handle_crew_kickoff_completed_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(CrewKickoffFailedEvent)
+        def handle_crew_kickoff_failed(self, source, event):
+            """Handle crew kickoff failed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                if self._is_flow_context(source, event):
+                    logger.debug(
+                        f"Crew kickoff failed (flow context) for flow: {execution_id}"
+                    )
+                else:
+                    logger.info(
+                        f"Crew kickoff failed (crew context) for execution: {execution_id}"
+                    )
+                    self._schedule(
+                        self._handle_crew_kickoff_failed_crew(execution_id, event)
+                    )
+
+        @crewai_event_bus.on(CrewTestFailedEvent)
+        def handle_crew_train_failed(self, source, event):
+            """Handle crew train failed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(f"Crew train failed for execution: {execution_id}")
+                self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
+
+        @crewai_event_bus.on(CrewTrainStartedEvent)
+        def handle_crew_train_started(self, source, event):
+            """Handle crew train started event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(f"Crew train started for execution: {execution_id}")
+                self._schedule(
+                    self._handle_crew_train_started_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(CrewTrainCompletedEvent)
+        def handle_crew_train_completed(self, source, event):
+            """Handle crew train completed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(f"Crew train completed for execution: {execution_id}")
+                self._schedule(
+                    self._handle_crew_train_completed_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(CrewTrainFailedEvent)
+        def handle_crew_train_failed(self, source, event):
+            """Handle crew train failed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(f"Crew train failed for execution: {execution_id}")
+                self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
 
         # Agent Events
-        crewai_event_bus.on(AgentExecutionStartedEvent)(
-            self.handle_agent_execution_started
-        )
-        crewai_event_bus.on(AgentExecutionCompletedEvent)(
-            self.handle_agent_execution_completed
-        )
-        crewai_event_bus.on(AgentExecutionErrorEvent)(self.handle_agent_execution_error)
+        @crewai_event_bus.on(CrewTestStartedEvent)
+        def handle_agent_execution_started(self, source, event):
+            """Handle agent execution started event."""
+            logger.info(f"Agent execution started event received: {event}")
+            execution_id = self._extract_execution_id(source, event)
 
-        # Task Events
-        crewai_event_bus.on(TaskStartedEvent)(self.handle_task_started)
-        crewai_event_bus.on(TaskCompletedEvent)(self.handle_task_completed)
+            if self._is_flow_context(source, event):
+                # This is a flow context - handle differently
+                logger.debug(
+                    f"Handling agent execution started in flow context: {execution_id}"
+                )
+                # For flows, we don't need to do anything special here
+                return
+            else:
+                # This is a crew context
+                logger.debug(
+                    f"Handling agent execution started in crew context: {execution_id}"
+                )
+                # Add telemetry for agent execution started
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    agent_id = getattr(event, "agent_id", None)
+                    agent_name = getattr(event, "agent_name", None)
+                    agent_role = getattr(event, "agent_role", None)
+
+                    # If agent_role is not in event, try to get it from event.agent
+                    if not agent_role and hasattr(event, "agent"):
+                        agent_role = getattr(event.agent, "role", None)
+
+                    # If still not found, use agent_name or a default
+                    if not agent_role:
+                        agent_role = agent_name if agent_name else "Unknown Role"
+
+                    logger.info(
+                        f"📊 Starting telemetry for agent execution: {agent_name} ({agent_id}), role: {agent_role}"
+                    )
+                    telemetry_service.start_agent_execution(
+                        crew_id, agent_id, agent_name, agent_role
+                    )
+                except Exception as e:
+                    logger.error(f"Error starting agent execution telemetry: {e}")
+
+                self._schedule(
+                    self._handle_agent_execution_started_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(CrewTestCompletedEvent)
+        def handle_agent_execution_completed(self, source, event):
+            """Handle agent execution completed event."""
+            logger.info(f"Agent execution completed event received: {event}")
+            execution_id = self._extract_execution_id(source, event)
+
+            if self._is_flow_context(source, event):
+                # This is a flow context - handle differently
+                logger.debug(
+                    f"Handling agent execution completed in flow context: {execution_id}"
+                )
+                # For flows, we don't need to do anything special here
+                return
+            else:
+                # This is a crew context
+                logger.debug(
+                    f"Handling agent execution completed in crew context: {execution_id}"
+                )
+                # Add telemetry for agent execution completed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    agent_id = getattr(event, "agent_id", None)
+                    output = getattr(event, "output", None)
+                    logger.info(f"📊 Ending telemetry for agent execution: {agent_id}")
+                    telemetry_service.end_agent_execution(crew_id, agent_id, output)
+                except Exception as e:
+                    logger.error(f"Error ending agent execution telemetry: {e}")
+
+                self._schedule(
+                    self._handle_agent_execution_completed_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(AgentExecutionErrorEvent)
+        def handle_agent_execution_error(self, source, event):
+            """Handle agent execution error event."""
+            logger.info(f"Agent execution error event received: {event}")
+            execution_id = self._extract_execution_id(source, event)
+
+            if self._is_flow_context(source, event):
+                # This is a flow context - handle differently
+                logger.debug(
+                    f"Handling agent execution error in flow context: {execution_id}"
+                )
+                # For flows, we don't need to do anything special here
+                return
+            else:
+                # This is a crew context
+                logger.debug(
+                    f"Handling agent execution error in crew context: {execution_id}"
+                )
+                self._schedule(
+                    self._handle_agent_execution_error_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(TaskStartedEvent)
+        def handle_task_started(self, source, event):
+            """Handle task started event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id and not self._is_flow_context(source, event):
+                logger.info(
+                    f"Task started (crew context) for execution: {execution_id}"
+                )
+                # Add telemetry for task started
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    task_id = getattr(event, "task_id", None)
+                    agent_id = getattr(event, "agent_id", None)
+
+                    # Get task description from event
+                    task_description = getattr(event, "task_description", None)
+
+                    # If task_description is not in event, try to get it from event.task
+                    if not task_description and hasattr(event, "task"):
+                        task_description = getattr(event.task, "description", None)
+
+                    # If still not found, use a default
+                    if not task_description:
+                        task_description = f"Task {task_id}"
+
+                    logger.info(
+                        f"📊 Starting telemetry for task execution: {task_id}, description: {task_description}"
+                    )
+                    telemetry_service.start_task_execution(
+                        crew_id, task_id, task_description, agent_id
+                    )
+                except Exception as e:
+                    logger.error(f"Error starting task execution telemetry: {e}")
+
+                self._schedule(self._handle_task_started_crew(execution_id, event))
+
+        @crewai_event_bus.on(TaskCompletedEvent)
+        def handle_task_completed(self, source, event):
+            """Handle task completed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.debug(f"Task completed for execution: {execution_id}")
 
         # Tool Usage Events
-        crewai_event_bus.on(ToolUsageStartedEvent)(self.handle_tool_usage_started)
-        crewai_event_bus.on(ToolUsageFinishedEvent)(self.handle_tool_usage_finished)
-        crewai_event_bus.on(ToolUsageErrorEvent)(self.handle_tool_usage_error)
-        crewai_event_bus.on(ToolValidateInputErrorEvent)(
-            self.handle_tool_validate_input_error
-        )
-        crewai_event_bus.on(ToolExecutionErrorEvent)(self.handle_tool_execution_error)
-        crewai_event_bus.on(ToolSelectionErrorEvent)(self.handle_tool_selection_error)
+        @crewai_event_bus.on(ToolUsageStartedEvent)
+        def handle_tool_usage_started(self, source, event):
+            """Handle tool usage started event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.debug(f"Tool usage started for execution: {execution_id}")
+                # Tool events are usually logged but don't need state updates
+
+        @crewai_event_bus.on(ToolUsageFinishedEvent)
+        def handle_tool_usage_finished(self, source, event):
+            """Handle tool usage finished event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.debug(f"Tool usage finished for execution: {execution_id}")
+
+        @crewai_event_bus.on(ToolUsageErrorEvent)
+        def handle_tool_usage_error(self, source, event):
+            """Handle tool usage error event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.warning(f"Tool usage error for execution: {execution_id}")
+
+        @crewai_event_bus.on(ToolValidateInputErrorEvent)
+        def handle_tool_validate_input_error(self, source, event):
+            """Handle tool validate input error event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.warning(
+                    f"Tool validate input error for execution: {execution_id}"
+                )
+
+        @crewai_event_bus.on(ToolExecutionErrorEvent)
+        def handle_tool_execution_error(self, source, event):
+            """Handle tool execution error event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.warning(f"Tool execution error for execution: {execution_id}")
+
+        @crewai_event_bus.on(ToolSelectionErrorEvent)
+        def handle_tool_selection_error(self, source, event):
+            """Handle tool selection error event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.warning(f"Tool selection error for execution: {execution_id}")
 
         # LLM Events
-        crewai_event_bus.on(LLMCallStartedEvent)(self.handle_llm_call_started)
-        crewai_event_bus.on(LLMCallCompletedEvent)(self.handle_llm_call_completed)
-        crewai_event_bus.on(LLMCallFailedEvent)(self.handle_llm_call_failed)
-        crewai_event_bus.on(LLMStreamChunkEvent)(self.handle_llm_stream_chunk)
+        @crewai_event_bus.on(LLMCallStartedEvent)
+        def handle_llm_call_started(self, source, event):
+            """Handle LLM call started event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.debug(f"LLM call started for execution: {execution_id}")
+                # Add telemetry for LLM call started
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    # Extract additional data if available
+                    model = getattr(event, "model", None)
+                    prompt = getattr(event, "prompt", None)
+                    agent_id = getattr(event, "agent_id", None)
+                    task_id = getattr(event, "task_id", None)
 
-        # Custom Events (if available)
-        if CrewInitializationRequestedEvent:
-            crewai_event_bus.on(CrewInitializationRequestedEvent)(
-                self.handle_crew_initialization_requested
-            )
-        if CrewInitializationCompletedEvent:
-            crewai_event_bus.on(CrewInitializationCompletedEvent)(
-                self.handle_crew_initialization_completed
-            )
+                    # Create event data
+                    event_data = {
+                        "model": model,
+                        "prompt": prompt,
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                    }
+
+                    logger.debug(f"📊 Adding telemetry event for LLM call started")
+                    telemetry_service.add_event(crew_id, "llm.started", event_data)
+                except Exception as e:
+                    logger.error(f"Error adding LLM started telemetry event: {e}")
+
+        @crewai_event_bus.on(LLMCallCompletedEvent)
+        def handle_llm_call_completed(self, source, event):
+            """Handle LLM call completed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.debug(f"LLM call completed for execution: {execution_id}")
+                # Add telemetry for LLM call completed
+                try:
+                    crew_id = getattr(event, "crew_id", execution_id)
+                    # Extract additional data if available
+                    model = getattr(event, "model", None)
+                    completion = getattr(event, "completion", None)
+                    agent_id = getattr(event, "agent_id", None)
+                    task_id = getattr(event, "task_id", None)
+                    tokens = getattr(event, "tokens", None)
+
+                    # Create event data
+                    event_data = {
+                        "model": model,
+                        "completion": completion,
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "tokens": tokens,
+                    }
+
+                    logger.debug(f"📊 Adding telemetry event for LLM call completed")
+                    telemetry_service.add_event(crew_id, "llm.completed", event_data)
+                except Exception as e:
+                    logger.error(f"Error adding LLM completed telemetry event: {e}")
+
+        @crewai_event_bus.on(LLMCallFailedEvent)
+        def handle_llm_call_failed(self, source, event):
+            """Handle LLM call failed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.warning(f"LLM call failed for execution: {execution_id}")
+
+        @crewai_event_bus.on(LLMStreamChunkEvent)
+        def handle_llm_stream_chunk(self, source, event):
+            """Handle LLM stream chunk event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.debug(f"LLM stream chunk for execution: {execution_id}")
+
+        @crewai_event_bus.on(CrewInitializationRequestedEvent)
+        def handle_crew_initialization_requested(self, source, event):
+            """Handle crew initialization requested event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(
+                    f"Crew initialization requested for execution: {execution_id}"
+                )
+                self._schedule(
+                    self._handle_crew_initialization_requested_crew(execution_id, event)
+                )
+
+        @crewai_event_bus.on(CrewInitializationCompletedEvent)
+        def handle_crew_initialization_completed(self, source, event):
+            """Handle crew initialization completed event."""
+            execution_id = self._extract_execution_id(source, event)
+            if execution_id:
+                logger.info(
+                    f"Crew initialization completed for execution: {execution_id}"
+                )
+                self._schedule(
+                    self._handle_crew_initialization_completed_crew(execution_id, event)
+                )
 
         self._registered_buses.add(id(crewai_event_bus))
         logger.info("Unified event listeners registered successfully")
@@ -522,434 +914,6 @@ class EventListener:
             }
 
         return broadcast_flow_id, self.flow_states[broadcast_flow_id]
-
-    # Event Handlers
-    def handle_flow_started(self, source, event):
-        """Handle flow started event."""
-        flow_id = self._extract_execution_id(source, event)
-        if flow_id:
-            self._schedule(self._handle_flow_started(flow_id, event, source))
-
-    def handle_flow_finished(self, source, event):
-        """Handle flow finished event."""
-        flow_id = self._extract_execution_id(source, event)
-        if flow_id:
-            self._schedule(self._handle_flow_finished(flow_id, event, source))
-
-    def handle_method_execution_started(self, source, event):
-        """Handle method execution started event."""
-        flow_id = self._extract_execution_id(source, event)
-        if flow_id:
-            self._schedule(self._handle_method_started(flow_id, event))
-
-    def handle_method_execution_finished(self, source, event):
-        """Handle method execution finished event."""
-        flow_id = self._extract_execution_id(source, event)
-        if flow_id:
-            self._schedule(self._handle_method_finished(flow_id, event))
-
-    def handle_method_execution_failed(self, source, event):
-        """Handle method execution failed event."""
-        flow_id = self._extract_execution_id(source, event)
-        if flow_id:
-            self._schedule(self._handle_method_failed(flow_id, event))
-
-    def handle_crew_kickoff_started(self, source, event):
-        """Handle crew kickoff started event."""
-        logger.info(f"🚀 CREW KICKOFF STARTED - Event received: {event}")
-        logger.info(
-            f"📊 Event source: {type(source).__name__}, Event type: {type(event).__name__}"
-        )
-        logger.info(f"🔍 Source details: {source}")
-        execution_id = self._extract_execution_id(source, event)
-        logger.info(f"🆔 Extracted execution ID: {execution_id}")
-
-        if self._is_flow_context(source, event):
-            # This is a flow context - handle differently
-            logger.debug(
-                f"⏭️ Crew kickoff started (flow context) for flow: {execution_id}"
-            )
-            # For flows, we don't need to do anything special here
-            return
-        else:
-            # This is a crew context
-            logger.info(
-                f"🎯 Processing crew kickoff started for execution: {execution_id}"
-            )
-            # Add telemetry for crew kickoff started
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                crew_name = getattr(event, "crew_name", None)
-                
-                # If crew_name is not in event, try to get it from event.crew
-                if not crew_name and hasattr(event, "crew"):
-                    crew_name = getattr(event.crew, "name", None)
-                
-                # Fallback to a default name if still not found
-                if not crew_name:
-                    crew_name = f"Crew {crew_id}"
-                    
-                logger.info(f"📊 Starting telemetry trace for crew: {crew_id}, name: {crew_name}")
-                telemetry_service.start_crew_trace(crew_id, crew_name)
-            except Exception as e:
-                logger.error(f"Error starting telemetry trace: {e}")
-                
-            logger.info(f"📡 Scheduling async handler for crew kickoff started")
-            self._schedule(self._handle_crew_kickoff_started_crew(execution_id, event))
-
-    def handle_crew_kickoff_completed(self, source, event):
-        """Handle crew kickoff completed event."""
-        logger.info(f"🎉 CREW KICKOFF COMPLETED - Event received: {event}")
-        logger.info(
-            f"📊 Event source: {type(source).__name__}, Event type: {type(event).__name__}"
-        )
-        logger.info(f"🔍 Source details: {source}")
-        execution_id = self._extract_execution_id(source, event)
-        logger.info(f"🆔 Extracted execution ID: {execution_id}")
-        if self._is_flow_context(source, event):
-            logger.debug(
-                f"⏭️ Crew kickoff completed (flow context) for flow: {execution_id}"
-            )
-        else:
-            logger.info(
-                f"🎯 Processing crew kickoff completed for execution: {execution_id}"
-            )
-            # Add telemetry for crew kickoff completed
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                output = getattr(event, "output", None)
-                logger.info(f"📊 Ending telemetry trace for crew: {crew_id}")
-                telemetry_service.end_crew_trace(crew_id, output)
-            except Exception as e:
-                logger.error(f"Error ending telemetry trace: {e}")
-                
-            logger.info(f"📡 Scheduling async handler for crew kickoff completed")
-            self._schedule(
-                self._handle_crew_kickoff_completed_crew(execution_id, event)
-            )
-
-    def handle_crew_kickoff_failed(self, source, event):
-        """Handle crew kickoff failed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            if self._is_flow_context(source, event):
-                logger.debug(
-                    f"Crew kickoff failed (flow context) for flow: {execution_id}"
-                )
-            else:
-                logger.info(
-                    f"Crew kickoff failed (crew context) for execution: {execution_id}"
-                )
-                self._schedule(
-                    self._handle_crew_kickoff_failed_crew(execution_id, event)
-                )
-
-    def handle_agent_execution_started(self, source, event):
-        """Handle agent execution started event."""
-        logger.info(f"Agent execution started event received: {event}")
-        execution_id = self._extract_execution_id(source, event)
-
-        if self._is_flow_context(source, event):
-            # This is a flow context - handle differently
-            logger.debug(
-                f"Handling agent execution started in flow context: {execution_id}"
-            )
-            # For flows, we don't need to do anything special here
-            return
-        else:
-            # This is a crew context
-            logger.debug(
-                f"Handling agent execution started in crew context: {execution_id}"
-            )
-            # Add telemetry for agent execution started
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                agent_id = getattr(event, "agent_id", None)
-                agent_name = getattr(event, "agent_name", None)
-                agent_role = getattr(event, "agent_role", None)
-                
-                # If agent_role is not in event, try to get it from event.agent
-                if not agent_role and hasattr(event, "agent"):
-                    agent_role = getattr(event.agent, "role", None)
-                    
-                # If still not found, use agent_name or a default
-                if not agent_role:
-                    agent_role = agent_name if agent_name else "Unknown Role"
-                    
-                logger.info(f"📊 Starting telemetry for agent execution: {agent_name} ({agent_id}), role: {agent_role}")
-                telemetry_service.start_agent_execution(crew_id, agent_id, agent_name, agent_role)
-            except Exception as e:
-                logger.error(f"Error starting agent execution telemetry: {e}")
-                
-            self._schedule(
-                self._handle_agent_execution_started_crew(execution_id, event)
-            )
-
-    def handle_agent_execution_completed(self, source, event):
-        """Handle agent execution completed event."""
-        logger.info(f"Agent execution completed event received: {event}")
-        execution_id = self._extract_execution_id(source, event)
-
-        if self._is_flow_context(source, event):
-            # This is a flow context - handle differently
-            logger.debug(
-                f"Handling agent execution completed in flow context: {execution_id}"
-            )
-            # For flows, we don't need to do anything special here
-            return
-        else:
-            # This is a crew context
-            logger.debug(
-                f"Handling agent execution completed in crew context: {execution_id}"
-            )
-            # Add telemetry for agent execution completed
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                agent_id = getattr(event, "agent_id", None)
-                output = getattr(event, "output", None)
-                logger.info(f"📊 Ending telemetry for agent execution: {agent_id}")
-                telemetry_service.end_agent_execution(crew_id, agent_id, output)
-            except Exception as e:
-                logger.error(f"Error ending agent execution telemetry: {e}")
-                
-            self._schedule(
-                self._handle_agent_execution_completed_crew(execution_id, event)
-            )
-
-    def handle_agent_execution_error(self, source, event):
-        """Handle agent execution error event."""
-        logger.info(f"Agent execution error event received: {event}")
-        execution_id = self._extract_execution_id(source, event)
-
-        if self._is_flow_context(source, event):
-            # This is a flow context - handle differently
-            logger.debug(
-                f"Handling agent execution error in flow context: {execution_id}"
-            )
-            # For flows, we don't need to do anything special here
-            return
-        else:
-            # This is a crew context
-            logger.debug(
-                f"Handling agent execution error in crew context: {execution_id}"
-            )
-            self._schedule(self._handle_agent_execution_error_crew(execution_id, event))
-
-    # Additional Crew Event Handlers
-    def handle_crew_test_started(self, source, event):
-        """Handle crew test started event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew test started for execution: {execution_id}")
-            self._schedule(self._handle_crew_test_started_crew(execution_id, event))
-
-    def handle_crew_test_completed(self, source, event):
-        """Handle crew test completed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew test completed for execution: {execution_id}")
-            self._schedule(self._handle_crew_test_completed_crew(execution_id, event))
-
-    def handle_crew_test_failed(self, source, event):
-        """Handle crew test failed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew test failed for execution: {execution_id}")
-            self._schedule(self._handle_crew_test_failed_crew(execution_id, event))
-
-    def handle_crew_train_started(self, source, event):
-        """Handle crew train started event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew train started for execution: {execution_id}")
-            self._schedule(self._handle_crew_train_started_crew(execution_id, event))
-
-    def handle_crew_train_completed(self, source, event):
-        """Handle crew train completed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew train completed for execution: {execution_id}")
-            self._schedule(self._handle_crew_train_completed_crew(execution_id, event))
-
-    def handle_crew_train_failed(self, source, event):
-        """Handle crew train failed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew train failed for execution: {execution_id}")
-            self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
-
-    # Task Event Handlers
-    def handle_task_started(self, source, event):
-        """Handle task started event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id and not self._is_flow_context(source, event):
-            logger.info(f"Task started (crew context) for execution: {execution_id}")
-            # Add telemetry for task started
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                task_id = getattr(event, "task_id", None)
-                agent_id = getattr(event, "agent_id", None)
-                
-                # Get task description from event
-                task_description = getattr(event, "task_description", None)
-                
-                # If task_description is not in event, try to get it from event.task
-                if not task_description and hasattr(event, "task"):
-                    task_description = getattr(event.task, "description", None)
-                    
-                # If still not found, use a default
-                if not task_description:
-                    task_description = f"Task {task_id}"
-                    
-                logger.info(f"📊 Starting telemetry for task execution: {task_id}, description: {task_description}")
-                telemetry_service.start_task_execution(crew_id, task_id, task_description, agent_id)
-            except Exception as e:
-                logger.error(f"Error starting task execution telemetry: {e}")
-                
-            self._schedule(self._handle_task_started_crew(execution_id, event))
-
-    def handle_task_completed(self, source, event):
-        """Handle task completed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id and not self._is_flow_context(source, event):
-            logger.info(f"Task completed (crew context) for execution: {execution_id}")
-            # Add telemetry for task completed
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                task_id = getattr(event, "task_id", None)
-                output = getattr(event, "output", None)
-                logger.info(f"📊 Ending telemetry for task execution: {task_id}")
-                telemetry_service.end_task_execution(crew_id, task_id, output)
-            except Exception as e:
-                logger.error(f"Error ending task execution telemetry: {e}")
-                
-            self._schedule(self._handle_task_completed_crew(execution_id, event))
-
-    # Tool Usage Event Handlers
-    def handle_tool_usage_started(self, source, event):
-        """Handle tool usage started event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.debug(f"Tool usage started for execution: {execution_id}")
-            # Tool events are usually logged but don't need state updates
-
-    def handle_tool_usage_finished(self, source, event):
-        """Handle tool usage finished event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.debug(f"Tool usage finished for execution: {execution_id}")
-
-    def handle_tool_usage_error(self, source, event):
-        """Handle tool usage error event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.warning(f"Tool usage error for execution: {execution_id}")
-
-    def handle_tool_validate_input_error(self, source, event):
-        """Handle tool validate input error event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.warning(f"Tool validate input error for execution: {execution_id}")
-
-    def handle_tool_execution_error(self, source, event):
-        """Handle tool execution error event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.warning(f"Tool execution error for execution: {execution_id}")
-
-    def handle_tool_selection_error(self, source, event):
-        """Handle tool selection error event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.warning(f"Tool selection error for execution: {execution_id}")
-
-    # LLM Event Handlers
-    def handle_llm_call_started(self, source, event):
-        """Handle LLM call started event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.debug(f"LLM call started for execution: {execution_id}")
-            # Add telemetry for LLM call started
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                # Extract additional data if available
-                model = getattr(event, "model", None)
-                prompt = getattr(event, "prompt", None)
-                agent_id = getattr(event, "agent_id", None)
-                task_id = getattr(event, "task_id", None)
-                
-                # Create event data
-                event_data = {
-                    "model": model,
-                    "prompt": prompt,
-                    "agent_id": agent_id,
-                    "task_id": task_id
-                }
-                
-                logger.debug(f"📊 Adding telemetry event for LLM call started")
-                telemetry_service.add_event(crew_id, "llm.started", event_data)
-            except Exception as e:
-                logger.error(f"Error adding LLM started telemetry event: {e}")
-
-    def handle_llm_call_completed(self, source, event):
-        """Handle LLM call completed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.debug(f"LLM call completed for execution: {execution_id}")
-            # Add telemetry for LLM call completed
-            try:
-                crew_id = getattr(event, "crew_id", execution_id)
-                # Extract additional data if available
-                model = getattr(event, "model", None)
-                completion = getattr(event, "completion", None)
-                agent_id = getattr(event, "agent_id", None)
-                task_id = getattr(event, "task_id", None)
-                tokens = getattr(event, "tokens", None)
-                
-                # Create event data
-                event_data = {
-                    "model": model,
-                    "completion": completion,
-                    "agent_id": agent_id,
-                    "task_id": task_id,
-                    "tokens": tokens
-                }
-                
-                logger.debug(f"📊 Adding telemetry event for LLM call completed")
-                telemetry_service.add_event(crew_id, "llm.completed", event_data)
-            except Exception as e:
-                logger.error(f"Error adding LLM completed telemetry event: {e}")
-
-    def handle_llm_call_failed(self, source, event):
-        """Handle LLM call failed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.warning(f"LLM call failed for execution: {execution_id}")
-
-    def handle_llm_stream_chunk(self, source, event):
-        """Handle LLM stream chunk event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.debug(f"LLM stream chunk for execution: {execution_id}")
-
-    # Custom Event Handlers
-    def handle_crew_initialization_requested(self, source, event):
-        """Handle crew initialization requested event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew initialization requested for execution: {execution_id}")
-            self._schedule(
-                self._handle_crew_initialization_requested_crew(execution_id, event)
-            )
-
-    def handle_crew_initialization_completed(self, source, event):
-        """Handle crew initialization completed event."""
-        execution_id = self._extract_execution_id(source, event)
-        if execution_id:
-            logger.info(f"Crew initialization completed for execution: {execution_id}")
-            self._schedule(
-                self._handle_crew_initialization_completed_crew(execution_id, event)
-            )
 
     # Async Implementation Methods
     async def _handle_flow_started(self, flow_id: str, event, source=None):
