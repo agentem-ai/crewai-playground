@@ -156,8 +156,9 @@ export default function TracesPage() {
     };
     spans.push(crewSpan);
 
-    // Add agent spans
-    Object.values(selectedTrace.agents).forEach((agent) => {
+    // Add agent spans - ensure agents is an object before iterating
+    if (selectedTrace.agents && typeof selectedTrace.agents === 'object') {
+      Object.values(selectedTrace.agents).forEach((agent) => {
       const agentStartTime = new Date(agent.start_time);
       const agentEndTime = agent.end_time ? new Date(agent.end_time) : null;
       const agentDuration = agentEndTime
@@ -178,10 +179,12 @@ export default function TracesPage() {
         children: [],
       };
       spans.push(agentSpan);
-    });
+      });
+    }
 
-    // Add task spans
-    Object.values(selectedTrace.tasks).forEach((task) => {
+    // Add task spans - ensure tasks is an object before iterating
+    if (selectedTrace.tasks && typeof selectedTrace.tasks === 'object') {
+      Object.values(selectedTrace.tasks).forEach((task) => {
       const taskStartTime = new Date(task.start_time);
       const taskEndTime = task.end_time ? new Date(task.end_time) : null;
       const taskDuration = taskEndTime
@@ -205,7 +208,8 @@ export default function TracesPage() {
         children: [],
       };
       spans.push(taskSpan);
-    });
+      });
+    }
 
     // Build parent-child relationships
     const spanMap = new Map<string, TimelineSpan>();
@@ -323,12 +327,21 @@ export default function TracesPage() {
           throw new Error(`Failed to fetch traces: ${response.statusText}`);
         }
         const data = await response.json();
-        setTraces(data);
+        
+        // Ensure agents and tasks are objects if they're null or undefined
+        const processedData = data.map((trace: any) => ({
+          ...trace,
+          agents: trace.agents || {},
+          tasks: trace.tasks || {}
+        }));
+        
+        setTraces(processedData);
         // Select the first trace by default
-        if (data.length > 0) {
-          setSelectedTrace(data[0]);
+        if (processedData.length > 0) {
+          setSelectedTrace(processedData[0]);
         }
       } catch (err) {
+        console.error('Error fetching traces:', err);
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setLoading(false);
@@ -440,9 +453,9 @@ export default function TracesPage() {
               <div>{formatTime(trace.start_time)}</div>
               <div className="flex items-center gap-2">
                 <span>
-                  {Object.keys(trace.agents).length} agents
+                  {trace.agents && typeof trace.agents === 'object' ? Object.keys(trace.agents).length : 0} agents
                 </span>
-                <span>{Object.keys(trace.tasks).length} tasks</span>
+                <span>{trace.tasks && typeof trace.tasks === 'object' ? Object.keys(trace.tasks).length : 0} tasks</span>
               </div>
             </div>
           </div>
@@ -571,7 +584,10 @@ export default function TracesPage() {
   const renderAgents = () => {
     if (!selectedTrace) return null;
 
-    const agents = Object.values(selectedTrace.agents);
+    // Ensure agents is an object before calling Object.values
+    const agents = selectedTrace.agents && typeof selectedTrace.agents === 'object' 
+      ? Object.values(selectedTrace.agents) 
+      : [];
 
     if (agents.length === 0) {
       return (
@@ -677,7 +693,10 @@ export default function TracesPage() {
   const renderTasks = () => {
     if (!selectedTrace) return null;
 
-    const tasks = Object.values(selectedTrace.tasks);
+    // Ensure tasks is an object before calling Object.values
+    const tasks = selectedTrace.tasks && typeof selectedTrace.tasks === 'object' 
+      ? Object.values(selectedTrace.tasks) 
+      : [];
 
     if (tasks.length === 0) {
       return (
@@ -790,8 +809,11 @@ export default function TracesPage() {
   // Render events tab
   const renderEvents = () => {
     if (!selectedTrace) return null;
-
-    if (selectedTrace.events.length === 0) {
+    
+    // Ensure events is an array before checking length
+    const events = Array.isArray(selectedTrace.events) ? selectedTrace.events : [];
+    
+    if (events.length === 0) {
       return (
         <div className="p-4 text-gray-500 dark:text-gray-400">
           No event data available.
@@ -802,7 +824,7 @@ export default function TracesPage() {
     return (
       <div className="space-y-4">
         <div className="border rounded-md divide-y dark:divide-gray-700">
-          {selectedTrace.events.map((event, idx) => (
+          {events.map((event, idx) => (
             <div
               key={idx}
               className="p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50"
