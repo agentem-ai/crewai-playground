@@ -91,7 +91,7 @@ class EventListener:
         self.task_states: Dict[str, Dict[str, Any]] = {}
 
         # WebSocket client management
-        self.clients: Dict[str, Dict[str, Any]] = {}  # Store the original crew ID
+        self.clients: Dict[str, Dict[str, Any]] = {}
 
         # Event loop reference
         self.loop: Optional[asyncio.AbstractEventLoop] = None
