@@ -870,7 +870,7 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
         inputs = request.inputs or {}
 
         # Run the crew kickoff in a separate thread to not block the API
-        thread = threading.Thread(target=handler.run_crew, args=(inputs,))
+        thread = threading.Thread(target=handler.run_crew, args=(inputs, crew_id))
         thread.start()
 
         return JSONResponse(

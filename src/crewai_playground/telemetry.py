@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
 import uuid
 
+from crewai_playground.entities import entity_service
+
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
@@ -94,12 +96,28 @@ class CrewAITelemetry:
             if not prefer_running or traces_storage[cached]["status"] != "completed":
                 return cached
 
-        # 2. Scan storage to find all traces for this crew
-        candidates = [
-            (tid, tdata)
-            for tid, tdata in traces_storage.items()
-            if str(tdata.get("crew_id")) == str(crew_id)
-        ]
+        # 2. Use entity service to resolve all possible crew IDs
+        possible_crew_ids = entity_service.resolve_broadcast_ids(crew_id)
+        logger.info(f"Looking for traces with possible crew IDs: {possible_crew_ids}")
+
+        # Scan storage to find all traces for any of the possible crew IDs
+        candidates = []
+        for tid, tdata in traces_storage.items():
+            stored_crew_id = str(tdata.get("crew_id", ""))
+            if stored_crew_id in possible_crew_ids:
+                candidates.append((tid, tdata))
+                logger.info(f"Found matching trace with crew_id {stored_crew_id}")
+
+        # Fallback to direct string comparison if entity service doesn't have mappings
+        if not candidates:
+            logger.info(
+                f"No matches found with entity service, falling back to direct comparison"
+            )
+            candidates = [
+                (tid, tdata)
+                for tid, tdata in traces_storage.items()
+                if str(tdata.get("crew_id")) == str(crew_id)
+            ]
         if not candidates:
             return None
 
@@ -134,6 +152,21 @@ class CrewAITelemetry:
 
         logger.info(f"Starting trace for crew_id: {crew_id}, crew_name: {crew_name}")
         logger.info(f"Current traces in storage: {len(traces_storage)}")
+
+        # Register entity mapping for this crew to ensure proper ID resolution
+        try:
+            entity_service.register_entity(
+                primary_id=crew_id,
+                internal_id=crew_id,  # Use same ID as both primary and internal for now
+                entity_type="crew",
+                name=crew_name,
+            )
+            logger.info(
+                f"Registered entity mapping for crew: {crew_id}, name: {crew_name}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to register entity mapping: {e}")
+            # Continue even if registration fails
 
         trace_id = str(uuid.uuid4())
         with self.tracer.start_as_current_span(
@@ -600,58 +633,76 @@ class CrewAITelemetry:
         Returns:
             A list of traces for the crew
         """
-        logger.info(f"Looking for traces with crew_id: {crew_id}")
-        logger.info(f"Current traces in storage: {len(traces_storage)}")
+        print(f"Looking for traces with crew_id: {crew_id}")
+        print(f"Current traces in storage: {len(traces_storage)}")
 
         # Normalize the crew ID for comparison
         normalized_crew_id = str(crew_id).strip().lower()
 
         # Debug: Log all crew IDs in storage
         all_crew_ids = set(trace.get("crew_id") for trace in traces_storage.values())
-        logger.info(f"Available crew IDs in storage: {all_crew_ids}")
+        print(f"Available crew IDs in storage: {all_crew_ids}")
 
-        # Try exact match first
-        traces = [
-            trace
-            for trace in traces_storage.values()
-            if trace.get("crew_id") == crew_id
-        ]
+        # Use entity service to resolve all possible crew IDs
+        possible_crew_ids = entity_service.resolve_broadcast_ids(crew_id)
+        print(f"Looking for traces with possible crew IDs: {possible_crew_ids}")
 
-        # If no exact matches, try case-insensitive comparison
+        # Find traces that match any of the possible crew IDs
+        traces = []
+        for trace in traces_storage.values():
+            stored_crew_id = str(trace.get("crew_id", ""))
+            if stored_crew_id in possible_crew_ids:
+                traces.append(trace)
+                print(f"Found matching trace with crew_id {stored_crew_id}")
+
+        # If no matches found with entity service, fall back to original methods
         if not traces:
-            logger.info(
-                f"No exact matches found, trying case-insensitive comparison for: {crew_id}"
+            print(
+                f"No matches found with entity service, falling back to direct comparison"
             )
+
+            # Try exact match first
             traces = [
                 trace
                 for trace in traces_storage.values()
-                if trace.get("crew_id")
-                and str(trace.get("crew_id")).strip().lower() == normalized_crew_id
+                if trace.get("crew_id") == crew_id
             ]
 
-        # If still no matches and crew_id looks like a simple name (e.g., "crew_0"), try to find any trace
-        # that might contain this as part of the crew name
-        if not traces and ("_" in crew_id or crew_id.isalnum()):
-            logger.info(
-                f"No matches found, trying to match by crew name pattern: {crew_id}"
-            )
-            traces = [
-                trace
-                for trace in traces_storage.values()
-                if trace.get("crew_name")
-                and crew_id.lower() in str(trace.get("crew_name")).lower()
-            ]
+            # If no exact matches, try case-insensitive comparison
+            if not traces:
+                print(
+                    f"No exact matches found, trying case-insensitive comparison for: {crew_id}"
+                )
+                traces = [
+                    trace
+                    for trace in traces_storage.values()
+                    if trace.get("crew_id")
+                    and str(trace.get("crew_id")).strip().lower() == normalized_crew_id
+                ]
+
+            # If still no matches and crew_id looks like a simple name (e.g., "crew_0"), try to find any trace
+            # that might contain this as part of the crew name
+            if not traces and ("_" in crew_id or crew_id.isalnum()):
+                print(
+                    f"No matches found, trying to match by crew name pattern: {crew_id}"
+                )
+                traces = [
+                    trace
+                    for trace in traces_storage.values()
+                    if trace.get("crew_name")
+                    and crew_id.lower() in str(trace.get("crew_name")).lower()
+                ]
 
             # If we found traces by name pattern, log this information
             if traces:
-                logger.info(
+                print(
                     f"Found {len(traces)} traces by matching crew name pattern: {crew_id}"
                 )
                 # Log the actual crew IDs that were matched
                 matched_ids = set(trace.get("crew_id") for trace in traces)
-                logger.info(f"Matched crew IDs: {matched_ids}")
+                print(f"Matched crew IDs: {matched_ids}")
 
-        logger.info(f"Found {len(traces)} traces for crew_id: {crew_id}")
+        print(f"Found {len(traces)} traces for crew_id: {crew_id}")
         return traces
 
 
