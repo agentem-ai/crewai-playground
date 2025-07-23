@@ -119,35 +119,35 @@ class EventListener:
 
         # Flow Events
         @crewai_event_bus.on(FlowStartedEvent)
-        def handle_flow_started(self, source, event):
+        def handle_flow_started(source, event):
             """Handle flow started event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
                 self._schedule(self._handle_flow_started(flow_id, event, source))
 
         @crewai_event_bus.on(FlowFinishedEvent)
-        def handle_flow_finished(self, source, event):
+        def handle_flow_finished(source, event):
             """Handle flow finished event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
                 self._schedule(self._handle_flow_finished(flow_id, event, source))
 
         @crewai_event_bus.on(MethodExecutionStartedEvent)
-        def handle_method_execution_started(self, source, event):
+        def handle_method_execution_started(source, event):
             """Handle method execution started event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
                 self._schedule(self._handle_method_started(flow_id, event))
 
         @crewai_event_bus.on(MethodExecutionFinishedEvent)
-        def handle_method_execution_finished(self, source, event):
+        def handle_method_execution_finished(source, event):
             """Handle method execution finished event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
                 self._schedule(self._handle_method_finished(flow_id, event))
 
         @crewai_event_bus.on(MethodExecutionFailedEvent)
-        def handle_method_execution_failed(self, source, event):
+        def handle_method_execution_failed(source, event):
             """Handle method execution failed event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
@@ -155,7 +155,7 @@ class EventListener:
 
         # Crew Events
         @crewai_event_bus.on(CrewKickoffStartedEvent)
-        def handle_crew_kickoff_started(self, source, event):
+        def handle_crew_kickoff_started(source, event):
             """Handle crew kickoff started event."""
             logger.info(f"🚀 CREW KICKOFF STARTED - Event received: {event}")
             logger.info(
@@ -203,7 +203,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(CrewKickoffCompletedEvent)
-        def handle_crew_kickoff_completed(self, source, event):
+        def handle_crew_kickoff_completed(source, event):
             """Handle crew kickoff completed event."""
             logger.info(f"🎉 CREW KICKOFF COMPLETED - Event received: {event}")
             logger.info(
@@ -235,7 +235,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(CrewKickoffFailedEvent)
-        def handle_crew_kickoff_failed(self, source, event):
+        def handle_crew_kickoff_failed(source, event):
             """Handle crew kickoff failed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -252,7 +252,7 @@ class EventListener:
                     )
 
         @crewai_event_bus.on(CrewTestFailedEvent)
-        def handle_crew_train_failed(self, source, event):
+        def handle_crew_train_failed(source, event):
             """Handle crew train failed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -260,7 +260,7 @@ class EventListener:
                 self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
 
         @crewai_event_bus.on(CrewTrainStartedEvent)
-        def handle_crew_train_started(self, source, event):
+        def handle_crew_train_started(source, event):
             """Handle crew train started event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -270,7 +270,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(CrewTrainCompletedEvent)
-        def handle_crew_train_completed(self, source, event):
+        def handle_crew_train_completed(source, event):
             """Handle crew train completed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -280,7 +280,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(CrewTrainFailedEvent)
-        def handle_crew_train_failed(self, source, event):
+        def handle_crew_train_failed(source, event):
             """Handle crew train failed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -289,7 +289,7 @@ class EventListener:
 
         # Agent Events
         @crewai_event_bus.on(CrewTestStartedEvent)
-        def handle_agent_execution_started(self, source, event):
+        def handle_agent_execution_started(source, event):
             """Handle agent execution started event."""
             logger.info(f"Agent execution started event received: {event}")
             execution_id = self._extract_execution_id(source, event)
@@ -335,7 +335,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(CrewTestCompletedEvent)
-        def handle_agent_execution_completed(self, source, event):
+        def handle_agent_execution_completed(source, event):
             """Handle agent execution completed event."""
             logger.info(f"Agent execution completed event received: {event}")
             execution_id = self._extract_execution_id(source, event)
@@ -367,7 +367,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(AgentExecutionErrorEvent)
-        def handle_agent_execution_error(self, source, event):
+        def handle_agent_execution_error(source, event):
             """Handle agent execution error event."""
             logger.info(f"Agent execution error event received: {event}")
             execution_id = self._extract_execution_id(source, event)
@@ -389,7 +389,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(TaskStartedEvent)
-        def handle_task_started(self, source, event):
+        def handle_task_started(source, event):
             """Handle task started event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id and not self._is_flow_context(source, event):
@@ -425,7 +425,7 @@ class EventListener:
                 self._schedule(self._handle_task_started_crew(execution_id, event))
 
         @crewai_event_bus.on(TaskCompletedEvent)
-        def handle_task_completed(self, source, event):
+        def handle_task_completed(source, event):
             """Handle task completed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -433,7 +433,7 @@ class EventListener:
 
         # Tool Usage Events
         @crewai_event_bus.on(ToolUsageStartedEvent)
-        def handle_tool_usage_started(self, source, event):
+        def handle_tool_usage_started(source, event):
             """Handle tool usage started event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -441,21 +441,21 @@ class EventListener:
                 # Tool events are usually logged but don't need state updates
 
         @crewai_event_bus.on(ToolUsageFinishedEvent)
-        def handle_tool_usage_finished(self, source, event):
+        def handle_tool_usage_finished(source, event):
             """Handle tool usage finished event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.debug(f"Tool usage finished for execution: {execution_id}")
 
         @crewai_event_bus.on(ToolUsageErrorEvent)
-        def handle_tool_usage_error(self, source, event):
+        def handle_tool_usage_error(source, event):
             """Handle tool usage error event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.warning(f"Tool usage error for execution: {execution_id}")
 
         @crewai_event_bus.on(ToolValidateInputErrorEvent)
-        def handle_tool_validate_input_error(self, source, event):
+        def handle_tool_validate_input_error(source, event):
             """Handle tool validate input error event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -464,14 +464,14 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(ToolExecutionErrorEvent)
-        def handle_tool_execution_error(self, source, event):
+        def handle_tool_execution_error(source, event):
             """Handle tool execution error event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.warning(f"Tool execution error for execution: {execution_id}")
 
         @crewai_event_bus.on(ToolSelectionErrorEvent)
-        def handle_tool_selection_error(self, source, event):
+        def handle_tool_selection_error(source, event):
             """Handle tool selection error event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -479,7 +479,7 @@ class EventListener:
 
         # LLM Events
         @crewai_event_bus.on(LLMCallStartedEvent)
-        def handle_llm_call_started(self, source, event):
+        def handle_llm_call_started(source, event):
             """Handle LLM call started event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -507,7 +507,7 @@ class EventListener:
                     logger.error(f"Error adding LLM started telemetry event: {e}")
 
         @crewai_event_bus.on(LLMCallCompletedEvent)
-        def handle_llm_call_completed(self, source, event):
+        def handle_llm_call_completed(source, event):
             """Handle LLM call completed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -537,21 +537,21 @@ class EventListener:
                     logger.error(f"Error adding LLM completed telemetry event: {e}")
 
         @crewai_event_bus.on(LLMCallFailedEvent)
-        def handle_llm_call_failed(self, source, event):
+        def handle_llm_call_failed(source, event):
             """Handle LLM call failed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.warning(f"LLM call failed for execution: {execution_id}")
 
         @crewai_event_bus.on(LLMStreamChunkEvent)
-        def handle_llm_stream_chunk(self, source, event):
+        def handle_llm_stream_chunk(source, event):
             """Handle LLM stream chunk event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
                 logger.debug(f"LLM stream chunk for execution: {execution_id}")
 
         @crewai_event_bus.on(CrewInitializationRequestedEvent)
-        def handle_crew_initialization_requested(self, source, event):
+        def handle_crew_initialization_requested(source, event):
             """Handle crew initialization requested event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -563,7 +563,7 @@ class EventListener:
                 )
 
         @crewai_event_bus.on(CrewInitializationCompletedEvent)
-        def handle_crew_initialization_completed(self, source, event):
+        def handle_crew_initialization_completed(source, event):
             """Handle crew initialization completed event."""
             execution_id = self._extract_execution_id(source, event)
             if execution_id:
@@ -833,7 +833,7 @@ class EventListener:
             except Exception as e:
                 logger.error(f"Error scheduling coroutine: {e}")
 
-    def _extract_execution_id(self, source, event):
+    def _extract_execution_id(source, event):
         """Extract execution ID from source or event."""
         # Try to get from event first (more reliable for crew events)
         if hasattr(event, "execution_id"):
@@ -872,7 +872,7 @@ class EventListener:
         )
         return execution_id
 
-    def _is_flow_context(self, source, event) -> bool:
+    def _is_flow_context(source, event) -> bool:
         """Determine if this event is in a flow context."""
         # Check if source is a Flow object
         if hasattr(source, "__class__") and "Flow" in source.__class__.__name__:
