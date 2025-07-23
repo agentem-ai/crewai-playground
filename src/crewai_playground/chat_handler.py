@@ -39,6 +39,7 @@ from crewai.cli.crew_chat import (
     build_system_message,
     run_crew_tool,
 )
+from .entities import entity_service
 
 
 class ChatHandler:
@@ -289,7 +290,9 @@ class ChatHandler:
 
         return run_crew_tool_with_messages
 
-    def run_crew(self, inputs: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    def run_crew(
+        self, inputs: Optional[Dict[str, str]] = None, crew_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Run the crew directly with the provided inputs.
 
         This method runs the crew using direct kickoff() to ensure proper event emission
@@ -301,14 +304,18 @@ class ChatHandler:
         Returns:
             Dictionary containing the crew execution results
         """
-        # Ensure crew has a valid ID for telemetry tracking
-        if not hasattr(self.crew, "id") or not self.crew.id:
-            import uuid
+        print("Running crew with inputs:", inputs)
+        print("Crew ID:", self.crew.id)
+        print("self.crew:", self.crew)
+        print("crew_id:", crew_id)
 
-            self.crew.id = str(uuid.uuid4())
-            logging.info(f"Set crew ID to {self.crew.id} in run_crew method")
-        else:
-            logging.info(f"Using existing crew ID: {self.crew.id} in run_crew method")
+        # add a mapping from crew_id to crew using the entities service
+        entity_service.register_entity(
+            primary_id=crew_id,
+            internal_id=self.crew.id,
+            entity_type="crew",
+            name=self.crew_name,
+        )
 
         # Start loading indicator in a separate thread
         loading_complete = threading.Event()
@@ -321,26 +328,32 @@ class ChatHandler:
         try:
             # Ensure the event listener is properly set up for this crew's event bus
             from .event_listener import event_listener
-            
+
             # Set up event listeners on the crew's event bus (or global if not available)
             if hasattr(self.crew, "get_event_bus"):
                 crew_event_bus = self.crew.get_event_bus()
                 event_listener.setup_listeners(crew_event_bus)
-                logging.info(f"Event listener set up on crew's event bus for crew {self.crew.id}")
+                logging.info(
+                    f"Event listener set up on crew's event bus for crew {self.crew.id}"
+                )
             else:
                 event_listener.setup_listeners(crewai_event_bus)
-                logging.info(f"Event listener set up on global event bus for crew {self.crew.id}")
+                logging.info(
+                    f"Event listener set up on global event bus for crew {self.crew.id}"
+                )
 
             # Run the crew directly using kickoff() to ensure proper event emission
             input_dict = {} if inputs is None else inputs
-            logging.info(f"Starting crew kickoff with inputs: {list(input_dict.keys()) if input_dict else 'None'}")
-            
+            logging.info(
+                f"Starting crew kickoff with inputs: {list(input_dict.keys()) if input_dict else 'None'}"
+            )
+
             # Use direct crew kickoff for proper event emission
             result = self.crew.kickoff(inputs=input_dict)
-            
+
             logging.info(f"Crew kickoff completed successfully for crew {self.crew.id}")
             return {"status": "success", "result": result}
-            
+
         except Exception as e:
             error_message = f"Error running crew: {str(e)}"
             logging.error(error_message, exc_info=True)
