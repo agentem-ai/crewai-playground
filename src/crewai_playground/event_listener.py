@@ -1088,6 +1088,137 @@ class EventListener:
         )
         return execution_id
 
+    def _extract_agent_id(self, event, source=None):
+        """Extract consistent agent ID from event or source."""
+        # Try event first
+        if hasattr(event, "agent_id") and event.agent_id:
+            return str(event.agent_id)
+        elif hasattr(event, "agent") and hasattr(event.agent, "id") and event.agent.id:
+            return str(event.agent.id)
+        elif hasattr(event, "agent") and hasattr(event.agent, "_id") and event.agent._id:
+            return str(event.agent._id)
+        
+        # Try source if provided
+        if source:
+            if hasattr(source, "id") and source.id:
+                return str(source.id)
+            elif hasattr(source, "_id") and source._id:
+                return str(source._id)
+        
+        # Try to create consistent ID from agent name/role
+        if hasattr(event, "agent") and hasattr(event.agent, "role") and event.agent.role:
+            # Create hash-based ID for consistency
+            role_hash = abs(hash(event.agent.role)) % 100000
+            return f"agent_{role_hash}"
+        elif hasattr(event, "agent_role") and event.agent_role:
+            role_hash = abs(hash(event.agent_role)) % 100000
+            return f"agent_{role_hash}"
+        
+        # Fallback to event-based ID
+        return f"agent_{abs(id(event)) % 100000}"
+
+    def _extract_task_id(self, event, source=None):
+        """Extract consistent task ID from event or source."""
+        # Try event first
+        if hasattr(event, "task_id") and event.task_id:
+            return str(event.task_id)
+        elif hasattr(event, "task") and hasattr(event.task, "id") and event.task.id:
+            return str(event.task.id)
+        elif hasattr(event, "task") and hasattr(event.task, "_id") and event.task._id:
+            return str(event.task._id)
+        
+        # Try source if provided
+        if source:
+            if hasattr(source, "id") and source.id:
+                return str(source.id)
+            elif hasattr(source, "_id") and source._id:
+                return str(source._id)
+        
+        # Try to create consistent ID from task description
+        if hasattr(event, "task") and hasattr(event.task, "description") and event.task.description:
+            desc_hash = abs(hash(event.task.description[:50])) % 100000  # Use first 50 chars
+            return f"task_{desc_hash}"
+        elif hasattr(event, "task_description") and event.task_description:
+            desc_hash = abs(hash(event.task_description[:50])) % 100000
+            return f"task_{desc_hash}"
+        
+        # Fallback to event-based ID
+        return f"task_{abs(id(event)) % 100000}"
+
+    def _extract_agent_data(self, event, source=None):
+        """Extract comprehensive agent data from event or source."""
+        agent_data = {}
+        
+        # Try to get data from event.agent object first
+        if hasattr(event, "agent") and event.agent:
+            agent_obj = event.agent
+            agent_data.update({
+                "name": getattr(agent_obj, "name", None),
+                "role": getattr(agent_obj, "role", None),
+                "description": getattr(agent_obj, "description", None),
+                "backstory": getattr(agent_obj, "backstory", None),
+                "goal": getattr(agent_obj, "goal", None),
+            })
+        
+        # Try to get data from event attributes
+        if hasattr(event, "agent_name") and event.agent_name:
+            agent_data["name"] = event.agent_name
+        if hasattr(event, "agent_role") and event.agent_role:
+            agent_data["role"] = event.agent_role
+        if hasattr(event, "agent_description") and event.agent_description:
+            agent_data["description"] = event.agent_description
+        
+        # Try source if provided
+        if source and not agent_data.get("name"):
+            if hasattr(source, "name"):
+                agent_data["name"] = source.name
+            if hasattr(source, "role"):
+                agent_data["role"] = source.role
+            if hasattr(source, "description"):
+                agent_data["description"] = source.description
+        
+        return agent_data
+
+    def _extract_task_data(self, event, source=None):
+        """Extract comprehensive task data from event or source."""
+        task_data = {}
+        
+        # Try to get data from event.task object first
+        if hasattr(event, "task") and event.task:
+            task_obj = event.task
+            task_data.update({
+                "name": getattr(task_obj, "name", None),
+                "description": getattr(task_obj, "description", None),
+                "expected_output": getattr(task_obj, "expected_output", None),
+                "agent_id": getattr(task_obj, "agent_id", None),
+            })
+            
+            # Try to get agent ID from task.agent if available
+            if hasattr(task_obj, "agent") and task_obj.agent:
+                if hasattr(task_obj.agent, "id"):
+                    task_data["agent_id"] = str(task_obj.agent.id)
+                elif hasattr(task_obj.agent, "role"):
+                    # Create consistent agent ID from role
+                    role_hash = abs(hash(task_obj.agent.role)) % 100000
+                    task_data["agent_id"] = f"agent_{role_hash}"
+        
+        # Try to get data from event attributes
+        if hasattr(event, "task_name") and event.task_name:
+            task_data["name"] = event.task_name
+        if hasattr(event, "task_description") and event.task_description:
+            task_data["description"] = event.task_description
+        if hasattr(event, "agent_id") and event.agent_id:
+            task_data["agent_id"] = str(event.agent_id)
+        
+        # Try source if provided
+        if source and not task_data.get("description"):
+            if hasattr(source, "description"):
+                task_data["description"] = source.description
+            if hasattr(source, "name"):
+                task_data["name"] = source.name
+        
+        return task_data
+
     def _is_flow_context(self, source, event) -> bool:
         """Determine if this event is in a flow context."""
         # Check if source is a Flow object
@@ -1362,10 +1493,20 @@ class EventListener:
         if hasattr(event, "crew") and event.crew:
             crew = event.crew
 
-            # Extract agents
+            # Extract agents with improved ID consistency
             if hasattr(crew, "agents") and crew.agents:
                 for i, agent in enumerate(crew.agents):
-                    agent_id = getattr(agent, "id", f"agent_{i}")
+                    # Use consistent ID extraction
+                    agent_id = getattr(agent, "id", None)
+                    if not agent_id and hasattr(agent, "role"):
+                        # Create hash-based ID from role for consistency
+                        role_hash = abs(hash(agent.role)) % 100000
+                        agent_id = f"agent_{role_hash}"
+                    elif not agent_id:
+                        agent_id = f"agent_{i}"
+                    else:
+                        agent_id = str(agent_id)
+                    
                     self.agent_states[agent_id] = {
                         "id": agent_id,
                         "name": getattr(agent, "name", f"Agent {i+1}"),
@@ -1373,18 +1514,56 @@ class EventListener:
                         "status": "initializing",
                         "timestamp": datetime.utcnow().isoformat(),
                     }
+                    
+                    # Add optional rich data if available
+                    if hasattr(agent, "description") and agent.description:
+                        self.agent_states[agent_id]["description"] = agent.description
+                    if hasattr(agent, "backstory") and agent.backstory:
+                        self.agent_states[agent_id]["backstory"] = agent.backstory
+                    if hasattr(agent, "goal") and agent.goal:
+                        self.agent_states[agent_id]["goal"] = agent.goal
 
-            # Extract tasks
+            # Extract tasks with improved ID consistency and agent association
             if hasattr(crew, "tasks") and crew.tasks:
                 for i, task in enumerate(crew.tasks):
-                    task_id = getattr(task, "id", f"task_{i}")
+                    # Use consistent ID extraction
+                    task_id = getattr(task, "id", None)
+                    if not task_id and hasattr(task, "description"):
+                        # Create hash-based ID from description for consistency
+                        desc_hash = abs(hash(task.description[:50])) % 100000
+                        task_id = f"task_{desc_hash}"
+                    elif not task_id:
+                        task_id = f"task_{i}"
+                    else:
+                        task_id = str(task_id)
+                    
+                    # Extract agent ID with consistent mapping
+                    agent_id = None
+                    if hasattr(task, "agent_id") and task.agent_id:
+                        agent_id = str(task.agent_id)
+                    elif hasattr(task, "agent") and task.agent:
+                        if hasattr(task.agent, "id"):
+                            agent_id = str(task.agent.id)
+                        elif hasattr(task.agent, "role"):
+                            # Use same hash-based ID as agents
+                            role_hash = abs(hash(task.agent.role)) % 100000
+                            agent_id = f"agent_{role_hash}"
+                    
                     self.task_states[task_id] = {
                         "id": task_id,
+                        "name": getattr(task, "name", f"Task {i+1}"),
                         "description": getattr(task, "description", f"Task {i+1}"),
                         "status": "pending",
-                        "agent_id": getattr(task, "agent_id", None),
                         "timestamp": datetime.utcnow().isoformat(),
                     }
+                    
+                    # Add agent association if found
+                    if agent_id:
+                        self.task_states[task_id]["agent_id"] = agent_id
+                    
+                    # Add optional rich data if available
+                    if hasattr(task, "expected_output") and task.expected_output:
+                        self.task_states[task_id]["expected_output"] = task.expected_output
 
         logger.info(
             f"Initialized crew state: {len(self.agent_states)} agents, "
@@ -1440,16 +1619,49 @@ class EventListener:
             f"Agent execution started (crew context) for execution: {execution_id}"
         )
 
-        agent_id = getattr(event, "agent_id", f"agent_{id(event)}")
-        agent_name = getattr(event, "agent_name", f"Agent {agent_id}")
-
-        self.agent_states[agent_id] = {
-            "id": agent_id,
-            "name": agent_name,
-            "role": getattr(event, "agent_role", "Unknown"),
-            "status": "running",
-            "timestamp": datetime.utcnow().isoformat(),
-        }
+        # Extract consistent agent ID
+        agent_id = self._extract_agent_id(event)
+        
+        # Extract comprehensive agent data
+        agent_data = self._extract_agent_data(event)
+        
+        # Preserve existing agent data if available, otherwise create new
+        if agent_id in self.agent_states:
+            # Update existing agent state while preserving rich data
+            existing_agent = self.agent_states[agent_id]
+            self.agent_states[agent_id].update({
+                "status": "running",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            
+            # Only update fields if we have better data from the event
+            if agent_data.get("name") and agent_data["name"] != existing_agent.get("name"):
+                self.agent_states[agent_id]["name"] = agent_data["name"]
+            if agent_data.get("role") and agent_data["role"] != existing_agent.get("role"):
+                self.agent_states[agent_id]["role"] = agent_data["role"]
+            if agent_data.get("description") and not existing_agent.get("description"):
+                self.agent_states[agent_id]["description"] = agent_data["description"]
+                
+            logger.info(f"Updated existing agent {agent_id}: {self.agent_states[agent_id].get('name', 'Unknown')}")
+        else:
+            # Create new agent state with extracted data
+            self.agent_states[agent_id] = {
+                "id": agent_id,
+                "name": agent_data.get("name") or f"Agent {agent_id}",
+                "role": agent_data.get("role") or "Unknown",
+                "status": "running",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+            # Add optional fields if available
+            if agent_data.get("description"):
+                self.agent_states[agent_id]["description"] = agent_data["description"]
+            if agent_data.get("backstory"):
+                self.agent_states[agent_id]["backstory"] = agent_data["backstory"]
+            if agent_data.get("goal"):
+                self.agent_states[agent_id]["goal"] = agent_data["goal"]
+                
+            logger.info(f"Created new agent {agent_id}: {self.agent_states[agent_id]['name']}")
 
         await self.broadcast_update()
 
@@ -1459,9 +1671,14 @@ class EventListener:
             f"Agent execution completed (crew context) for execution: {execution_id}"
         )
 
-        agent_id = getattr(event, "agent_id", f"agent_{id(event)}")
+        # Extract consistent agent ID
+        agent_id = self._extract_agent_id(event)
+        
+        # Extract any additional agent data from the completion event
+        agent_data = self._extract_agent_data(event)
 
         if agent_id in self.agent_states:
+            # Update existing agent state
             self.agent_states[agent_id].update(
                 {
                     "status": "completed",
@@ -1469,10 +1686,41 @@ class EventListener:
                 }
             )
 
+            # Add result if available
             if hasattr(event, "result") and event.result is not None:
                 self.agent_states[agent_id]["result"] = str(event.result)
+            elif hasattr(event, "output") and event.output is not None:
+                self.agent_states[agent_id]["result"] = str(event.output)
+                
+            # Update any missing data from the completion event
+            if agent_data.get("name") and not self.agent_states[agent_id].get("name", "").startswith("Agent "):
+                self.agent_states[agent_id]["name"] = agent_data["name"]
+            if agent_data.get("role") and self.agent_states[agent_id].get("role") == "Unknown":
+                self.agent_states[agent_id]["role"] = agent_data["role"]
+            if agent_data.get("description") and not self.agent_states[agent_id].get("description"):
+                self.agent_states[agent_id]["description"] = agent_data["description"]
+                
+            logger.info(f"Agent {agent_id} completed: {self.agent_states[agent_id].get('name', 'Unknown')}")
+        else:
+            # Create agent state if it doesn't exist (edge case)
+            logger.warning(f"Agent {agent_id} completed but no initial state found, creating new state")
+            self.agent_states[agent_id] = {
+                "id": agent_id,
+                "name": agent_data.get("name") or f"Agent {agent_id}",
+                "role": agent_data.get("role") or "Unknown",
+                "status": "completed",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+            # Add optional fields if available
+            if agent_data.get("description"):
+                self.agent_states[agent_id]["description"] = agent_data["description"]
+            if hasattr(event, "result") and event.result is not None:
+                self.agent_states[agent_id]["result"] = str(event.result)
+            elif hasattr(event, "output") and event.output is not None:
+                self.agent_states[agent_id]["result"] = str(event.output)
 
-            await self.broadcast_update()
+        await self.broadcast_update()
 
     async def _handle_agent_execution_error_crew(self, execution_id: str, event):
         """Handle agent execution error event in crew context."""
@@ -1480,9 +1728,14 @@ class EventListener:
             f"Agent execution error (crew context) for execution: {execution_id}"
         )
 
-        agent_id = getattr(event, "agent_id", f"agent_{id(event)}")
+        # Extract consistent agent ID
+        agent_id = self._extract_agent_id(event)
+        
+        # Extract any additional agent data from the error event
+        agent_data = self._extract_agent_data(event)
 
         if agent_id in self.agent_states:
+            # Update existing agent state
             self.agent_states[agent_id].update(
                 {
                     "status": "failed",
@@ -1490,10 +1743,41 @@ class EventListener:
                 }
             )
 
+            # Add error information if available
             if hasattr(event, "error") and event.error is not None:
                 self.agent_states[agent_id]["error"] = str(event.error)
+            elif hasattr(event, "exception") and event.exception is not None:
+                self.agent_states[agent_id]["error"] = str(event.exception)
+                
+            # Update any missing data from the error event
+            if agent_data.get("name") and not self.agent_states[agent_id].get("name", "").startswith("Agent "):
+                self.agent_states[agent_id]["name"] = agent_data["name"]
+            if agent_data.get("role") and self.agent_states[agent_id].get("role") == "Unknown":
+                self.agent_states[agent_id]["role"] = agent_data["role"]
+            if agent_data.get("description") and not self.agent_states[agent_id].get("description"):
+                self.agent_states[agent_id]["description"] = agent_data["description"]
+                
+            logger.error(f"Agent {agent_id} failed: {self.agent_states[agent_id].get('name', 'Unknown')}")
+        else:
+            # Create agent state if it doesn't exist (edge case)
+            logger.warning(f"Agent {agent_id} failed but no initial state found, creating new state")
+            self.agent_states[agent_id] = {
+                "id": agent_id,
+                "name": agent_data.get("name") or f"Agent {agent_id}",
+                "role": agent_data.get("role") or "Unknown",
+                "status": "failed",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+            # Add optional fields if available
+            if agent_data.get("description"):
+                self.agent_states[agent_id]["description"] = agent_data["description"]
+            if hasattr(event, "error") and event.error is not None:
+                self.agent_states[agent_id]["error"] = str(event.error)
+            elif hasattr(event, "exception") and event.exception is not None:
+                self.agent_states[agent_id]["error"] = str(event.exception)
 
-            await self.broadcast_update()
+        await self.broadcast_update()
 
     # Additional async implementation methods for new event handlers
     async def _handle_crew_test_started_crew(self, execution_id: str, event):
@@ -1596,16 +1880,47 @@ class EventListener:
         """Handle task started event in crew context."""
         logger.info(f"Task started (crew context) for execution: {execution_id}")
 
-        task_id = getattr(event, "task_id", f"task_{id(event)}")
-        task_name = getattr(event, "task_name", f"Task {task_id}")
+        # Extract consistent task ID
+        task_id = self._extract_task_id(event)
+        
+        # Extract comprehensive task data
+        task_data = self._extract_task_data(event)
 
-        self.task_states[task_id] = {
-            "id": task_id,
-            "name": task_name,
-            "description": getattr(event, "task_description", ""),
-            "status": "running",
-            "timestamp": datetime.utcnow().isoformat(),
-        }
+        # Preserve existing task data if available, otherwise create new
+        if task_id in self.task_states:
+            # Update existing task state while preserving rich data
+            existing_task = self.task_states[task_id]
+            self.task_states[task_id].update({
+                "status": "running",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            
+            # Only update fields if we have better data from the event
+            if task_data.get("name") and task_data["name"] != existing_task.get("name"):
+                self.task_states[task_id]["name"] = task_data["name"]
+            if task_data.get("description") and not existing_task.get("description"):
+                self.task_states[task_id]["description"] = task_data["description"]
+            if task_data.get("agent_id") and not existing_task.get("agent_id"):
+                self.task_states[task_id]["agent_id"] = task_data["agent_id"]
+                
+            logger.info(f"Updated existing task {task_id}: {self.task_states[task_id].get('name', 'Unknown')}")
+        else:
+            # Create new task state with extracted data
+            self.task_states[task_id] = {
+                "id": task_id,
+                "name": task_data.get("name") or f"Task {task_id}",
+                "description": task_data.get("description") or "",
+                "status": "running",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+            # Add optional fields if available
+            if task_data.get("agent_id"):
+                self.task_states[task_id]["agent_id"] = task_data["agent_id"]
+            if task_data.get("expected_output"):
+                self.task_states[task_id]["expected_output"] = task_data["expected_output"]
+                
+            logger.info(f"Created new task {task_id}: {self.task_states[task_id]['name']}")
 
         await self.broadcast_update()
 
@@ -1613,9 +1928,14 @@ class EventListener:
         """Handle task completed event in crew context."""
         logger.info(f"Task completed (crew context) for execution: {execution_id}")
 
-        task_id = getattr(event, "task_id", f"task_{id(event)}")
+        # Extract consistent task ID
+        task_id = self._extract_task_id(event)
+        
+        # Extract any additional task data from the completion event
+        task_data = self._extract_task_data(event)
 
         if task_id in self.task_states:
+            # Update existing task state
             self.task_states[task_id].update(
                 {
                     "status": "completed",
@@ -1623,31 +1943,43 @@ class EventListener:
                 }
             )
 
+            # Add result if available
             if hasattr(event, "result") and event.result is not None:
                 self.task_states[task_id]["result"] = str(event.result)
-
-            await self.broadcast_update()
-
-    async def _handle_task_completed_crew(self, execution_id: str, event):
-        """Handle task completed event in crew context."""
-        logger.info(f"Task completed (crew context) for execution: {execution_id}")
-
-        task_id = getattr(event, "task_id", f"task_{id(event)}")
-
-        if task_id in self.task_states:
-            self.task_states[task_id].update(
-                {
-                    "status": "completed",
-                    "timestamp": datetime.utcnow().isoformat(),
-                }
-            )
-
+            elif hasattr(event, "output") and event.output is not None:
+                self.task_states[task_id]["result"] = str(event.output)
+                
+            # Update any missing data from the completion event
+            if task_data.get("name") and not self.task_states[task_id].get("name", "").startswith("Task "):
+                self.task_states[task_id]["name"] = task_data["name"]
+            if task_data.get("description") and not self.task_states[task_id].get("description"):
+                self.task_states[task_id]["description"] = task_data["description"]
+            if task_data.get("agent_id") and not self.task_states[task_id].get("agent_id"):
+                self.task_states[task_id]["agent_id"] = task_data["agent_id"]
+                
+            logger.info(f"Task {task_id} completed: {self.task_states[task_id].get('name', 'Unknown')}")
+        else:
+            # Create task state if it doesn't exist (edge case)
+            logger.warning(f"Task {task_id} completed but no initial state found, creating new state")
+            self.task_states[task_id] = {
+                "id": task_id,
+                "name": task_data.get("name") or f"Task {task_id}",
+                "description": task_data.get("description") or "",
+                "status": "completed",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+            # Add optional fields if available
+            if task_data.get("agent_id"):
+                self.task_states[task_id]["agent_id"] = task_data["agent_id"]
             if hasattr(event, "result") and event.result is not None:
                 self.task_states[task_id]["result"] = str(event.result)
             elif hasattr(event, "output") and event.output is not None:
                 self.task_states[task_id]["result"] = str(event.output)
 
-            await self.broadcast_update()
+        await self.broadcast_update()
+
+
 
     async def _handle_crew_initialization_requested_crew(
         self, execution_id: str, event
