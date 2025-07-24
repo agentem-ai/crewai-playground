@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from crewai_playground.crew_loader import (
+from crewai_playground.loaders.crew_loader import (
     load_crew,
     load_crew_from_module,
     discover_available_crews,

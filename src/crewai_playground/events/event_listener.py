@@ -50,7 +50,7 @@ from crewai.utilities.events import (
 )
 
 try:
-    from crewai_playground.events import (
+    from crewai_playground.events.events import (
         CrewInitializationRequestedEvent,
         CrewInitializationCompletedEvent,
     )
@@ -60,7 +60,7 @@ except ImportError:
     CrewInitializationCompletedEvent = None
 
 # broadcast_flow_update functionality is now integrated into broadcast_update method
-from .telemetry import telemetry_service
+from crewai_playground.services.telemetry import telemetry_service
 
 logger = logging.getLogger(__name__)
 
@@ -1067,7 +1067,7 @@ class EventListener:
             flow_state: Optional flow state data for flow updates
             update_type: Type of update - "crew_state" or "flow_state"
         """
-        from .entities import entity_service
+        from crewai_playground.services.entities import entity_service
 
         # Handle flow updates
         if update_type == "flow_state" and flow_id and flow_state:
@@ -1165,13 +1165,13 @@ class EventListener:
 
     async def _broadcast_flow_update(self, flow_id: str, flow_state: dict):
         """Handle flow-specific broadcasting logic."""
-        from .websocket_utils import flow_websocket_queues
+        from crewai_playground.events.websocket_utils import flow_websocket_queues
 
         # Debug: Check if flow_id is actually an object ID instead of the API flow ID
         if isinstance(flow_id, int) or (isinstance(flow_id, str) and flow_id.isdigit()):
             # Try to find the correct API flow ID from the entity service
             try:
-                from .entities import entity_service
+                from crewai_playground.services.entities import entity_service
 
                 api_flow_id = entity_service.get_primary_id(str(flow_id))
                 if api_flow_id:
@@ -1405,15 +1405,19 @@ class EventListener:
                 return crew_id
 
         # Seventh priority: Check current crew state for active crew ID
-        if hasattr(self, 'crew_state') and self.crew_state and 'id' in self.crew_state:
-            crew_id = str(self.crew_state['id'])
+        if hasattr(self, "crew_state") and self.crew_state and "id" in self.crew_state:
+            crew_id = str(self.crew_state["id"])
             logger.debug(f"Using current crew_state.id for telemetry: {crew_id}")
             return crew_id
 
         # Last resort: Fall back to execution_id (but warn about it)
         execution_id = self._extract_execution_id(source, event)
-        logger.warning(f"⚠️  Could not find crew ID for telemetry, falling back to execution_id: {execution_id}")
-        logger.warning(f"⚠️  This may cause 'No trace found' warnings. Event type: {type(event).__name__}")
+        logger.warning(
+            f"⚠️  Could not find crew ID for telemetry, falling back to execution_id: {execution_id}"
+        )
+        logger.warning(
+            f"⚠️  This may cause 'No trace found' warnings. Event type: {type(event).__name__}"
+        )
         return execution_id
 
     def _extract_agent_id(self, event, source=None):
@@ -1588,7 +1592,7 @@ class EventListener:
         flow_id_str = str(flow_id)
 
         try:
-            from .entities import entity_service
+            from crewai_playground.services.entities import entity_service
 
             api_flow_id = entity_service.get_primary_id(flow_id_str)
             if not api_flow_id:
@@ -1810,7 +1814,7 @@ class EventListener:
 
     async def _handle_crew_kickoff_started_crew(self, execution_id: str, event):
         """Handle crew kickoff started event for crew context."""
-        from .entities import entity_service
+        from crewai_playground.services.entities import entity_service
 
         logger.info(f"🚀 Crew kickoff started - execution_id: {execution_id}")
 

@@ -19,7 +19,7 @@ import socket
 import asyncio
 import importlib
 import inspect
-from crewai_playground.tool_loader import discover_available_tools
+from crewai_playground.loaders.tool_loader import discover_available_tools
 
 # Configure logging
 logging.basicConfig(
@@ -51,18 +51,20 @@ except ImportError:
     # python-dotenv not installed; proceed without loading
     pass
 
-from crewai_playground.crew_loader import (
+from crewai_playground.loaders.crew_loader import (
     load_crew,
     load_crew_from_module,
     discover_available_crews,
 )
-from crewai_playground.chat_handler import ChatHandler
-from crewai_playground.event_listener import (
+from crewai_playground.handlers.chat_handler import ChatHandler
+from crewai_playground.events.event_listener import (
     event_listener as crew_visualization_listener,
 )
-from crewai_playground.tool_loader import discover_available_tools as discover_tools
-from crewai_playground.telemetry import telemetry_service
-from crewai_playground.flow_api import (
+from crewai_playground.loaders.tool_loader import (
+    discover_available_tools as discover_tools,
+)
+from crewai_playground.services.telemetry import telemetry_service
+from crewai_playground.routers.flow_api import (
     router as flow_router,
     get_active_execution,
     FlowInfo,
@@ -70,15 +72,15 @@ from crewai_playground.flow_api import (
     active_flows,
     is_execution_active,
 )
-from crewai_playground.websocket_utils import (
+from crewai_playground.events.websocket_utils import (
     register_websocket_queue,
     unregister_websocket_queue,
 )
-from crewai_playground.event_listener import (
+from crewai_playground.events.event_listener import (
     event_listener as flow_websocket_listener,
 )
 from crewai.utilities.events import crewai_event_bus
-from crewai_playground.evaluation_api import (
+from crewai_playground.routers.evaluation_api import (
     router as evaluation_router,
     EVALUATION_AVAILABLE,
 )
@@ -768,7 +770,7 @@ async def initialize_crew(crew_id: str) -> JSONResponse:
             )
 
         # Emit initialization events
-        from crewai_playground.events import (
+        from crewai_playground.events.events import (
             CrewInitializationRequestedEvent,
             CrewInitializationCompletedEvent,
         )
@@ -877,7 +879,7 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
             """Run crew in async context to maintain event bus registration."""
             try:
                 # Ensure event listener is set up in the main thread context
-                from crewai_playground.event_listener import event_listener
+                from crewai_playground.events.event_listener import event_listener
                 from crewai.utilities.events.crewai_event_bus import crewai_event_bus
 
                 event_listener.setup_listeners(crewai_event_bus)
@@ -997,7 +999,7 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
 
     try:
         # Check if this is an API flow ID that needs to be mapped to internal flow ID
-        from .entities import entity_service
+        from crewai_playground.services.entities import entity_service
 
         internal_flow_id = entity_service.get_internal_id(flow_id) or flow_id
 
