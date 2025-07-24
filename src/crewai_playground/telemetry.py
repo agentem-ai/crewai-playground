@@ -633,19 +633,19 @@ class CrewAITelemetry:
         Returns:
             A list of traces for the crew
         """
-        print(f"Looking for traces with crew_id: {crew_id}")
-        print(f"Current traces in storage: {len(traces_storage)}")
+        logger.info(f"Looking for traces with crew_id: {crew_id}")
+        logger.info(f"Current traces in storage: {len(traces_storage)}")
 
         # Normalize the crew ID for comparison
         normalized_crew_id = str(crew_id).strip().lower()
 
         # Debug: Log all crew IDs in storage
         all_crew_ids = set(trace.get("crew_id") for trace in traces_storage.values())
-        print(f"Available crew IDs in storage: {all_crew_ids}")
+        logger.info(f"Available crew IDs in storage: {all_crew_ids}")
 
         # Use entity service to resolve all possible crew IDs
         possible_crew_ids = entity_service.resolve_broadcast_ids(crew_id)
-        print(f"Looking for traces with possible crew IDs: {possible_crew_ids}")
+        logger.info(f"Looking for traces with possible crew IDs: {possible_crew_ids}")
 
         # Find traces that match any of the possible crew IDs
         traces = []
@@ -653,11 +653,11 @@ class CrewAITelemetry:
             stored_crew_id = str(trace.get("crew_id", ""))
             if stored_crew_id in possible_crew_ids:
                 traces.append(trace)
-                print(f"Found matching trace with crew_id {stored_crew_id}")
+                logger.info(f"Found matching trace with crew_id {stored_crew_id}")
 
         # If no matches found with entity service, fall back to original methods
         if not traces:
-            print(
+            logger.info(
                 f"No matches found with entity service, falling back to direct comparison"
             )
 
@@ -670,7 +670,7 @@ class CrewAITelemetry:
 
             # If no exact matches, try case-insensitive comparison
             if not traces:
-                print(
+                logger.info(
                     f"No exact matches found, trying case-insensitive comparison for: {crew_id}"
                 )
                 traces = [
@@ -683,7 +683,7 @@ class CrewAITelemetry:
             # If still no matches and crew_id looks like a simple name (e.g., "crew_0"), try to find any trace
             # that might contain this as part of the crew name
             if not traces and ("_" in crew_id or crew_id.isalnum()):
-                print(
+                logger.info(
                     f"No matches found, trying to match by crew name pattern: {crew_id}"
                 )
                 traces = [
@@ -695,14 +695,14 @@ class CrewAITelemetry:
 
             # If we found traces by name pattern, log this information
             if traces:
-                print(
+                logger.info(
                     f"Found {len(traces)} traces by matching crew name pattern: {crew_id}"
                 )
                 # Log the actual crew IDs that were matched
                 matched_ids = set(trace.get("crew_id") for trace in traces)
-                print(f"Matched crew IDs: {matched_ids}")
+                logger.info(f"Matched crew IDs: {matched_ids}")
 
-        print(f"Found {len(traces)} traces for crew_id: {crew_id}")
+        logger.info(f"Found {len(traces)} traces for crew_id: {crew_id}")
         return traces
 
 
