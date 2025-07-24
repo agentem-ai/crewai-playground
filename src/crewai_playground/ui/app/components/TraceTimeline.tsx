@@ -240,7 +240,7 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({
 
   return (
     <div className="w-full overflow-x-auto bg-white rounded-lg p-4">
-      <svg ref={svgRef} className="w-full" style={{ minWidth: "800px" }} />
+      <svg ref={svgRef} className="w-full" />
     </div>
   );
 };
