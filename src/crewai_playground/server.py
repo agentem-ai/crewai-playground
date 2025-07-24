@@ -869,9 +869,26 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
         # Run the crew directly
         inputs = request.inputs or {}
 
-        # Run the crew kickoff in a separate thread to not block the API
-        thread = threading.Thread(target=handler.run_crew, args=(inputs, crew_id))
-        thread.start()
+        # Run the crew kickoff asynchronously to ensure proper event capture
+        # Using asyncio.create_task to run in background while maintaining event bus context
+        import asyncio
+
+        async def run_crew_async():
+            """Run crew in async context to maintain event bus registration."""
+            try:
+                # Ensure event listener is set up in the main thread context
+                from crewai_playground.event_listener import event_listener
+                from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+
+                event_listener.setup_listeners(crewai_event_bus)
+
+                handler.run_crew(inputs, crew_id)
+
+            except Exception as e:
+                logging.error(f"❌ Error in async crew execution: {e}", exc_info=True)
+
+        # Start the async crew execution as a background task
+        asyncio.create_task(run_crew_async())
 
         return JSONResponse(
             content={

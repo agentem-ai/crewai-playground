@@ -1339,8 +1339,9 @@ class EventListener:
         in order of reliability:
         1. Direct crew_id from event
         2. Direct crew_id from source
-        3. Crew object's ID if available
-        4. Execution ID as last resort
+        3. Crew object's ID if available (from event or source)
+        4. Agent/Task parent crew context
+        5. Current crew state as last resort
 
         Args:
             source: The source object (usually a crew or agent)
@@ -1350,34 +1351,69 @@ class EventListener:
             str: A consistent crew ID for telemetry operations
         """
         # First priority: Check for explicit crew_id in event
-        if hasattr(event, "crew_id"):
+        if hasattr(event, "crew_id") and event.crew_id:
             crew_id = str(event.crew_id)
             logger.debug(f"Using event.crew_id for telemetry: {crew_id}")
             return crew_id
 
         # Second priority: Check for crew_id in source
-        if hasattr(source, "crew_id"):
+        if hasattr(source, "crew_id") and source.crew_id:
             crew_id = str(source.crew_id)
             logger.debug(f"Using source.crew_id for telemetry: {crew_id}")
             return crew_id
 
         # Third priority: Check if source is a crew with an ID
         if hasattr(source, "__class__") and "crew" in source.__class__.__name__.lower():
-            if hasattr(source, "id"):
+            if hasattr(source, "id") and source.id:
                 crew_id = str(source.id)
                 logger.debug(f"Using crew source.id for telemetry: {crew_id}")
                 return crew_id
 
         # Fourth priority: Check if event has a crew attribute with ID
-        if hasattr(event, "crew"):
-            if hasattr(event.crew, "id"):
+        if hasattr(event, "crew") and event.crew:
+            if hasattr(event.crew, "id") and event.crew.id:
                 crew_id = str(event.crew.id)
                 logger.debug(f"Using event.crew.id for telemetry: {crew_id}")
                 return crew_id
 
-        # Last resort: Fall back to execution_id
+        # Fifth priority: For agent events, check if agent has crew context
+        if hasattr(event, "agent") and event.agent:
+            # Check if agent has crew reference
+            if hasattr(event.agent, "crew") and event.agent.crew:
+                if hasattr(event.agent.crew, "id") and event.agent.crew.id:
+                    crew_id = str(event.agent.crew.id)
+                    logger.debug(f"Using agent.crew.id for telemetry: {crew_id}")
+                    return crew_id
+            # Check if agent has crew_id attribute
+            if hasattr(event.agent, "crew_id") and event.agent.crew_id:
+                crew_id = str(event.agent.crew_id)
+                logger.debug(f"Using agent.crew_id for telemetry: {crew_id}")
+                return crew_id
+
+        # Sixth priority: For task events, check if task has crew context
+        if hasattr(event, "task") and event.task:
+            # Check if task has crew reference
+            if hasattr(event.task, "crew") and event.task.crew:
+                if hasattr(event.task.crew, "id") and event.task.crew.id:
+                    crew_id = str(event.task.crew.id)
+                    logger.debug(f"Using task.crew.id for telemetry: {crew_id}")
+                    return crew_id
+            # Check if task has crew_id attribute
+            if hasattr(event.task, "crew_id") and event.task.crew_id:
+                crew_id = str(event.task.crew_id)
+                logger.debug(f"Using task.crew_id for telemetry: {crew_id}")
+                return crew_id
+
+        # Seventh priority: Check current crew state for active crew ID
+        if hasattr(self, 'crew_state') and self.crew_state and 'id' in self.crew_state:
+            crew_id = str(self.crew_state['id'])
+            logger.debug(f"Using current crew_state.id for telemetry: {crew_id}")
+            return crew_id
+
+        # Last resort: Fall back to execution_id (but warn about it)
         execution_id = self._extract_execution_id(source, event)
-        logger.debug(f"Falling back to execution_id for telemetry: {execution_id}")
+        logger.warning(f"⚠️  Could not find crew ID for telemetry, falling back to execution_id: {execution_id}")
+        logger.warning(f"⚠️  This may cause 'No trace found' warnings. Event type: {type(event).__name__}")
         return execution_id
 
     def _extract_agent_id(self, event, source=None):
