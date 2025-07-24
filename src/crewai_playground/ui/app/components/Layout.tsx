@@ -20,9 +20,9 @@ function Sidebar() {
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/" },
     { icon: BotMessageSquare, label: "Chat", path: "/chat" },
-    { icon: Zap, label: "Crews", path: "/kickoff" },
+    { icon: Zap, label: "Crews", path: "/crews" },
     { icon: Wrench, label: "Tools", path: "/tools" },
-    { icon: Network, label: "Flows", path: "/flow" },
+    { icon: Network, label: "Flows", path: "/flows" },
   ];
 
   return (

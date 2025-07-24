@@ -12,21 +12,21 @@ export function FlowNavigation({ flowId }: FlowNavigationProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const path = location.pathname;
-  
+
   // Navigation items for the flow section
   const navigationItems = [
     {
       name: "Execution",
-      path: flowId ? `/flow?flowId=${flowId}` : "/flow",
+      path: flowId ? `/flows?flowId=${flowId}` : "/flows",
       icon: <Play className="h-4 w-4" />,
-      isActive: path === "/flow"
+      isActive: path === "/flows",
     },
     {
       name: "Traces",
-      path: flowId ? `/flow/traces?flowId=${flowId}` : "/flow/traces",
+      path: flowId ? `/flows/traces?flowId=${flowId}` : "/flows/traces",
       icon: <Activity className="h-4 w-4" />,
-      isActive: path.includes("/flow/traces")
-    }
+      isActive: path.includes("/flows/traces"),
+    },
   ];
 
   return (
