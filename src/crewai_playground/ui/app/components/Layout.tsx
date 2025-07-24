@@ -26,7 +26,7 @@ function Sidebar() {
   ];
 
   return (
-    <aside className="md:w-48 lg:w-64 flex-shrink-0 border-r bg-background p-4 flex flex-col">
+    <aside className="sm:w-48 md:w-48 lg:w-64 flex-shrink-0 border-r bg-background p-4 flex flex-col">
       <div className="flex items-center mb-8">
         <h2 className="text-2xl font-bold">CrewAI Playground</h2>
       </div>
