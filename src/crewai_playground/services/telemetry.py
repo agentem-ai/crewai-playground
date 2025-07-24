@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
 import uuid
 
-from crewai_playground.entities import entity_service
+from crewai_playground.services.entities import entity_service
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider

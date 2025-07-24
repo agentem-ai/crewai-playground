@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
-from .flow_loader import (
+from crewai_playground.loaders.flow_loader import (
     FlowInput,
     FlowInfo,
     load_flow,
@@ -38,36 +38,41 @@ active_flows: Dict[str, Dict[str, Any]] = {}
 flow_traces: Dict[str, List[Dict[str, Any]]] = {}
 flow_states: Dict[str, Dict[str, Any]] = {}
 # Entity service for ID management (replaces local mappings)
-from .entities import entity_service
+from crewai_playground.services.entities import entity_service
 
 
 def register_flow_entity(flow, flow_id: str):
     """Register a flow entity with the entity service."""
     internal_flow_id = getattr(flow, "id", None)
     python_object_id = str(id(flow))
-    flow_name = getattr(flow, "name", getattr(flow.__class__, "__name__", "Unknown Flow"))
-    
+    flow_name = getattr(
+        flow, "name", getattr(flow.__class__, "__name__", "Unknown Flow")
+    )
+
     # Register with entity service
     entity_service.register_entity(
         primary_id=flow_id,
         internal_id=internal_flow_id if internal_flow_id != flow_id else None,
         entity_type="flow",
         name=flow_name,
-        aliases=[python_object_id] if python_object_id != flow_id else None
+        aliases=[python_object_id] if python_object_id != flow_id else None,
     )
-    
+
     logger.info(
         f"Registered flow entity: API {flow_id} -> Internal {internal_flow_id}, Object ID {python_object_id}"
     )
 
+
 # Import after defining the above to avoid circular imports
-from .websocket_utils import (
+from crewai_playground.events.websocket_utils import (
     broadcast_flow_update,
     register_websocket_queue,
     unregister_websocket_queue,
     flow_websocket_queues,
 )
-from .event_listener import event_listener as flow_websocket_listener
+from crewai_playground.events.event_listener import (
+    event_listener as flow_websocket_listener,
+)
 
 
 class FlowExecuteRequest(BaseModel):
@@ -917,6 +922,8 @@ def get_flow_state(flow_id: str) -> Optional[Dict[str, Any]]:
         Current state of the flow execution or None if not found
     """
     # Use the event_listener's flow state cache
-    from .event_listener import event_listener as flow_websocket_listener
+    from crewai_playground.events.event_listener import (
+        event_listener as flow_websocket_listener,
+    )
 
     return flow_websocket_listener.get_flow_state(flow_id)

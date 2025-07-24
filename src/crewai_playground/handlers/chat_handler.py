@@ -39,7 +39,7 @@ from crewai.cli.crew_chat import (
     build_system_message,
     run_crew_tool,
 )
-from .entities import entity_service
+from crewai_playground.services.entities import entity_service
 
 
 class ChatHandler:
@@ -61,7 +61,7 @@ class ChatHandler:
         self.is_initialized = False
 
         # Register event listeners using the existing event listener
-        from .event_listener import event_listener
+        from crewai_playground.events.event_listener import event_listener
 
         event_listener.setup_listeners(crewai_event_bus)
 
@@ -73,7 +73,7 @@ class ChatHandler:
         This allows the visualization to display agents before the crew starts running.
         """
         try:
-            from .event_listener import (
+            from crewai_playground.events.event_listener import (
                 event_listener as crew_visualization_listener,
             )
             import uuid
