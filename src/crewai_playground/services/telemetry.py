@@ -297,11 +297,11 @@ class CrewAITelemetry:
             with self.tracer.start_as_current_span(
                 name=f"agent.execute.{agent_role}",
                 attributes={
-                    "llm.user.role": agent_role,
-                    "llm.user.id": agent_id,
-                    "agent.id": agent_id,
-                    "agent.name": agent_name,
-                    "agent.role": agent_role,
+                    "llm.user.role": agent_role or "unknown",
+                    "llm.user.id": agent_id or "unknown",
+                    "agent.id": agent_id or "unknown",
+                    "agent.name": agent_name or "unknown",
+                    "agent.role": agent_role or "unknown",
                 },
             ) as span:
                 # Store the active span
@@ -422,9 +422,9 @@ class CrewAITelemetry:
             with self.tracer.start_as_current_span(
                 name=f"task.execute",
                 attributes={
-                    "task.id": task_id,
-                    "task.description": task_description,
-                    "agent.id": agent_id if agent_id else "unknown",
+                    "task.id": task_id or "unknown",
+                    "task.description": task_description or "unknown",
+                    "agent.id": agent_id or "unknown",
                 },
             ) as span:
                 # Store the active span
