@@ -322,32 +322,9 @@ class ChatHandler:
         loading_thread.start()
 
         try:
-            # Ensure the event listener is properly set up for this crew's event bus
-            from .event_listener import event_listener
-
-            # Set up event listeners on the crew's event bus (or global if not available)
-            if hasattr(self.crew, "get_event_bus"):
-                crew_event_bus = self.crew.get_event_bus()
-                event_listener.setup_listeners(crew_event_bus)
-                logging.info(
-                    f"Event listener set up on crew's event bus for crew {self.crew.id}"
-                )
-            else:
-                event_listener.setup_listeners(crewai_event_bus)
-                logging.info(
-                    f"Event listener set up on global event bus for crew {self.crew.id}"
-                )
-
             # Run the crew directly using kickoff() to ensure proper event emission
             input_dict = {} if inputs is None else inputs
-            logging.info(
-                f"Starting crew kickoff with inputs: {list(input_dict.keys()) if input_dict else 'None'}"
-            )
-
-            # Use direct crew kickoff for proper event emission
             result = self.crew.kickoff(inputs=input_dict)
-
-            logging.info(f"Crew kickoff completed successfully for crew {self.crew.id}")
             return {"status": "success", "result": result}
 
         except Exception as e:
