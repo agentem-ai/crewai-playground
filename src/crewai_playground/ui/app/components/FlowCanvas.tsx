@@ -1168,13 +1168,6 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
     <Card className="p-6 mb-6 overflow-hidden">
       <div className="p-4 flex justify-between items-center flex-shrink-0">
         <h3 className="font-semibold text-lg">Flow Visualization</h3>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigate("/flow/traces")}
-        >
-          View Traces
-        </Button>
       </div>
       {(loading || loadingStructure) && (
         <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/80">
