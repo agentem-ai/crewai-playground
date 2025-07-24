@@ -14,6 +14,7 @@ import {
 import { useChatStore } from "~/lib/store";
 import { Loader2 } from "lucide-react";
 import { Layout } from "../components/Layout";
+import { FlowNavigation } from "../components/FlowNavigation";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import ReactMarkdown from "react-markdown";
@@ -319,6 +320,9 @@ export default function Flow() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      {/* Navigation Menu */}
+      {selectedFlowId && <FlowNavigation flowId={selectedFlowId} />}
 
       {/* Flow Visualization Canvas */}
       {selectedFlowId && (

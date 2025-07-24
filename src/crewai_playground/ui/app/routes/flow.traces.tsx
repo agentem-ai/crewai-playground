@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router";
+import { Layout } from "../components/Layout";
+import { FlowNavigation } from "../components/FlowNavigation";
 import {
   Card,
   CardContent,
@@ -18,9 +20,6 @@ import {
   Loader2,
   ChevronRight,
   ChevronDown,
-  ArrowLeft,
-  Moon,
-  Sun,
   Clock,
   List,
   BarChart2,
@@ -335,7 +334,7 @@ const convertToSpanData = (span: TraceSpan) => {
 export default function FlowTraces() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { flows, setFlows, isDarkMode, toggleDarkMode } = useChatStore();
+  const { flows, setFlows, isDarkMode } = useChatStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedFlowId, setSelectedFlowId] = useState<string>("");
@@ -541,10 +540,7 @@ export default function FlowTraces() {
     return convertToTimelineSpans(rootSpans);
   }, [selectedTrace]);
 
-  // Handle back button click
-  const handleBack = () => {
-    navigate("/flow");
-  };
+
 
   // Render the list of traces
   const renderTraceList = () => {
@@ -613,64 +609,44 @@ export default function FlowTraces() {
     );
   };
 
-  return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="py-4 px-6 border-b bg-background">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBack}
-              className="mr-4"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <h1 className="text-2xl font-bold">Flow Traces</h1>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleDarkMode}
-            className="h-8 w-8"
-          >
-            {isDarkMode ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-      </header>
+  // Create right sidebar with flow selection and trace list
+  const rightSidebar = (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold">Flows & Traces</h3>
+        <p className="text-sm text-muted-foreground">Select a flow and trace to view details</p>
+      </div>
       
-      {/* Main Layout with Sidebar and Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-80 border-r flex-shrink-0 overflow-y-auto p-4 bg-background">
+      {/* Flow selection */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Flow</label>
+        <Select onValueChange={setSelectedFlowId} value={selectedFlowId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select a flow" />
+          </SelectTrigger>
+          <SelectContent>
+            {flows.map((flow) => (
+              <SelectItem key={flow.id} value={flow.id}>
+                {flow.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      
+      {/* Trace list */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Traces</label>
+        <ScrollArea className="h-[500px] border rounded-md">
+          <div className="p-4">{renderTraceList()}</div>
+        </ScrollArea>
+      </div>
+    </div>
+  );
 
-        {/* Flow selection */}
-        <div className="p-4 border-b">
-          <Select onValueChange={setSelectedFlowId} value={selectedFlowId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a flow" />
-            </SelectTrigger>
-            <SelectContent>
-              {flows.map((flow) => (
-                <SelectItem key={flow.id} value={flow.id}>
-                  {flow.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Trace list */}
-        <div className="flex-1 overflow-y-auto p-4">{renderTraceList()}</div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-6 bg-background">
+  return (
+    <Layout rightSidebar={rightSidebar}>
+      <div className="w-full">
         {error && (
           <Alert variant="destructive" className="mb-6">
             <AlertTitle>Error</AlertTitle>
@@ -678,43 +654,32 @@ export default function FlowTraces() {
           </Alert>
         )}
 
-        {loading && (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        )}
+        {/* Navigation Menu */}
+        {selectedFlowId && <FlowNavigation flowId={selectedFlowId} />}
 
-        {!loading && !error && !selectedTrace && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center max-w-md">
-              <h2 className="text-2xl font-bold mb-2">Flow Traces</h2>
-              <p className="text-muted-foreground mb-4">
-                Select a flow and a trace from the sidebar to view execution
-                details.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {selectedTrace && (
-          <div className="space-y-4">
-            <Tabs
-              defaultValue="overview"
-              value={activeTab}
-              onValueChange={setActiveTab}
-              className="w-full"
-            >
-              <TabsList className="grid grid-cols-3 mb-4">
-                <TabsTrigger
-                  value="overview"
-                  className="flex items-center gap-1"
-                >
-                  <Info className="h-4 w-4" />
-                  <span>Overview</span>
-                </TabsTrigger>
-                <TabsTrigger value="methods">Methods</TabsTrigger>
-                <TabsTrigger value="events">Events</TabsTrigger>
-              </TabsList>
+        {selectedTrace ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>{selectedTrace.flow_name}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Tabs
+                defaultValue="overview"
+                value={activeTab}
+                onValueChange={setActiveTab}
+                className="w-full"
+              >
+                <TabsList className="grid grid-cols-3 mb-4">
+                  <TabsTrigger
+                    value="overview"
+                    className="flex items-center gap-1"
+                  >
+                    <Info className="h-4 w-4" />
+                    <span>Overview</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="methods">Methods</TabsTrigger>
+                  <TabsTrigger value="events">Events</TabsTrigger>
+                </TabsList>
               <TabsContent value="overview">
                 <div className="space-y-6">
                   <Card>
@@ -911,10 +876,18 @@ export default function FlowTraces() {
                 </Card>
               </TabsContent>
             </Tabs>
+            </CardContent>
+          </Card>
+        ) : loading ? (
+          <div className="flex justify-center items-center p-8">
+            <Loader2 className="h-8 w-8 animate-spin" />
+          </div>
+        ) : (
+          <div className="text-center p-8 text-gray-500">
+            Select a flow and trace to view details
           </div>
         )}
-      </main>
       </div>
-    </div>
+    </Layout>
   );
 }
