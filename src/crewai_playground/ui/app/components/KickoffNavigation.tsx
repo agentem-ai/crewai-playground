@@ -12,27 +12,27 @@ export function KickoffNavigation({ crewId }: KickoffNavigationProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const path = location.pathname;
-  
+
   // Navigation items for the kickoff section
   const navigationItems = [
     {
       name: "Execution",
-      path: crewId ? `/kickoff?crewId=${crewId}` : "/kickoff",
+      path: crewId ? `/crews?crewId=${crewId}` : "/crews",
       icon: <Play className="h-4 w-4" />,
-      isActive: path === "/kickoff"
+      isActive: path === "/crews",
     },
     {
       name: "Traces",
-      path: `/kickoff/traces?crewId=${crewId}`,
+      path: `/crews/traces?crewId=${crewId}`,
       icon: <Activity className="h-4 w-4" />,
-      isActive: path.includes("/kickoff/traces")
+      isActive: path.includes("/crews/traces"),
     },
     {
       name: "Evaluations",
-      path: `/kickoff/evals?crewId=${crewId}`,
+      path: `/crews/evals?crewId=${crewId}`,
       icon: <BarChart3 className="h-4 w-4" />,
-      isActive: path.includes("/kickoff/evals")
-    }
+      isActive: path.includes("/crews/evals"),
+    },
   ];
 
   return (
