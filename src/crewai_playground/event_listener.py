@@ -179,7 +179,7 @@ class EventListener:
                 )
                 # Add telemetry for crew kickoff started
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     crew_name = getattr(event, "crew_name", None)
 
                     # If crew_name is not in event, try to get it from event.crew
@@ -222,7 +222,7 @@ class EventListener:
                 )
                 # Add telemetry for crew kickoff completed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     output = getattr(event, "output", None)
                     logger.info(f"📊 Ending telemetry trace for crew: {crew_id}")
                     telemetry_service.end_crew_trace(crew_id, output)
@@ -259,7 +259,7 @@ class EventListener:
                 logger.info(f"Crew test started for execution: {execution_id}")
                 # Add telemetry for crew test started
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     crew_name = getattr(event, "crew_name", f"Crew {crew_id}")
                     logger.info(f"📊 Starting telemetry trace for crew test: {crew_id}")
                     telemetry_service.start_crew_trace(crew_id, crew_name)
@@ -275,7 +275,7 @@ class EventListener:
                     )
                 except Exception as e:
                     logger.error(f"Error starting telemetry trace for crew test: {e}")
-                
+
                 self._schedule(self._handle_crew_test_started_crew(execution_id, event))
 
         @crewai_event_bus.on(CrewTestCompletedEvent)
@@ -286,7 +286,7 @@ class EventListener:
                 logger.info(f"Crew test completed for execution: {execution_id}")
                 # Add telemetry for crew test completed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     output = getattr(event, "output", None)
                     results = getattr(event, "results", None)
                     logger.info(f"📊 Ending telemetry trace for crew test: {crew_id}")
@@ -303,7 +303,7 @@ class EventListener:
                     telemetry_service.end_crew_trace(crew_id, output)
                 except Exception as e:
                     logger.error(f"Error ending telemetry trace for crew test: {e}")
-                
+
                 self._schedule(
                     self._handle_crew_test_completed_crew(execution_id, event)
                 )
@@ -316,10 +316,12 @@ class EventListener:
                 logger.info(f"Crew test failed for execution: {execution_id}")
                 # Add telemetry for crew test failed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     error = getattr(event, "error", "Unknown error")
                     error_str = str(error) if error else "Unknown error"
-                    logger.info(f"📊 Adding error event and ending telemetry trace for crew test: {crew_id}")
+                    logger.info(
+                        f"📊 Adding error event and ending telemetry trace for crew test: {crew_id}"
+                    )
                     # Add specific event for test failed
                     telemetry_service.add_event(
                         crew_id,
@@ -333,7 +335,7 @@ class EventListener:
                     telemetry_service.end_crew_trace(crew_id, {"error": error_str})
                 except Exception as e:
                     logger.error(f"Error ending telemetry trace for crew test: {e}")
-                
+
                 self._schedule(self._handle_crew_test_failed_crew(execution_id, event))
 
         @crewai_event_bus.on(CrewTrainStartedEvent)
@@ -344,9 +346,11 @@ class EventListener:
                 logger.info(f"Crew train started for execution: {execution_id}")
                 # Add telemetry for crew train started
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     crew_name = getattr(event, "crew_name", f"Crew {crew_id}")
-                    logger.info(f"📊 Starting telemetry trace for crew train: {crew_id}")
+                    logger.info(
+                        f"📊 Starting telemetry trace for crew train: {crew_id}"
+                    )
                     telemetry_service.start_crew_trace(crew_id, crew_name)
                     # Add specific event for train started
                     telemetry_service.add_event(
@@ -360,7 +364,7 @@ class EventListener:
                     )
                 except Exception as e:
                     logger.error(f"Error starting telemetry trace for crew train: {e}")
-                
+
                 self._schedule(
                     self._handle_crew_train_started_crew(execution_id, event)
                 )
@@ -373,7 +377,7 @@ class EventListener:
                 logger.info(f"Crew train completed for execution: {execution_id}")
                 # Add telemetry for crew train completed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     output = getattr(event, "output", None)
                     results = getattr(event, "results", None)
                     logger.info(f"📊 Ending telemetry trace for crew train: {crew_id}")
@@ -390,7 +394,7 @@ class EventListener:
                     telemetry_service.end_crew_trace(crew_id, output)
                 except Exception as e:
                     logger.error(f"Error ending telemetry trace for crew train: {e}")
-                
+
                 self._schedule(
                     self._handle_crew_train_completed_crew(execution_id, event)
                 )
@@ -403,10 +407,12 @@ class EventListener:
                 logger.info(f"Crew train failed for execution: {execution_id}")
                 # Add telemetry for crew train failed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     error = getattr(event, "error", "Unknown error")
                     error_str = str(error) if error else "Unknown error"
-                    logger.info(f"📊 Adding error event and ending telemetry trace for crew train: {crew_id}")
+                    logger.info(
+                        f"📊 Adding error event and ending telemetry trace for crew train: {crew_id}"
+                    )
                     # Add specific event for train failed
                     telemetry_service.add_event(
                         crew_id,
@@ -420,7 +426,7 @@ class EventListener:
                     telemetry_service.end_crew_trace(crew_id, {"error": error_str})
                 except Exception as e:
                     logger.error(f"Error ending telemetry trace for crew train: {e}")
-                
+
                 self._schedule(self._handle_crew_train_failed_crew(execution_id, event))
 
         # Agent Events
@@ -444,7 +450,7 @@ class EventListener:
                 )
                 # Add telemetry for agent execution started
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     agent_id = getattr(event, "agent_id", None)
                     agent_name = getattr(event, "agent_name", None)
                     agent_role = getattr(event, "agent_role", None)
@@ -490,7 +496,7 @@ class EventListener:
                 )
                 # Add telemetry for agent execution completed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     agent_id = getattr(event, "agent_id", None)
                     output = getattr(event, "output", None)
                     logger.info(f"📊 Ending telemetry for agent execution: {agent_id}")
@@ -534,7 +540,7 @@ class EventListener:
                 )
                 # Add telemetry for task started
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     task_id = getattr(event, "task_id", None)
                     agent_id = getattr(event, "agent_id", None)
 
@@ -570,7 +576,7 @@ class EventListener:
                 )
                 # Add telemetry for task completed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     task_id = getattr(event, "task_id", None)
                     output = getattr(event, "output", None)
                     logger.info(f"📊 Ending telemetry for task execution: {task_id}")
@@ -592,16 +598,16 @@ class EventListener:
                 # Extract tool information
                 tool_name = getattr(event, "tool_name", "unknown_tool")
                 inputs = getattr(event, "inputs", {})
-                
+
                 # Add telemetry for tool usage started
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     # We don't have output yet, so pass None
                     telemetry_service.trace_tool_execution(
                         crew_id=crew_id,
                         agent_id=agent_id,
                         tool_name=tool_name,
-                        inputs=inputs
+                        inputs=inputs,
                     )
                 except Exception as e:
                     logger.error(f"Error adding tool usage started telemetry: {e}")
@@ -618,16 +624,16 @@ class EventListener:
                 tool_name = getattr(event, "tool_name", "unknown_tool")
                 inputs = getattr(event, "inputs", {})
                 output = getattr(event, "output", None)
-                
+
                 # Add telemetry for tool usage finished
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     telemetry_service.trace_tool_execution(
                         crew_id=crew_id,
                         agent_id=agent_id,
                         tool_name=tool_name,
                         inputs=inputs,
-                        output=output
+                        output=output,
                     )
                 except Exception as e:
                     logger.error(f"Error adding tool usage finished telemetry: {e}")
@@ -644,16 +650,16 @@ class EventListener:
                 tool_name = getattr(event, "tool_name", "unknown_tool")
                 inputs = getattr(event, "inputs", {})
                 error = getattr(event, "error", "Unknown error")
-                
+
                 # Add telemetry for tool usage error
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     telemetry_service.trace_tool_execution(
                         crew_id=crew_id,
                         agent_id=agent_id,
                         tool_name=f"{tool_name}:error",
                         inputs=inputs,
-                        output=str(error)
+                        output=str(error),
                     )
                     # Also add as an event
                     telemetry_service.add_event(
@@ -664,7 +670,7 @@ class EventListener:
                             "agent_id": agent_id,
                             "error": str(error),
                             "timestamp": datetime.utcnow().isoformat(),
-                        }
+                        },
                     )
                 except Exception as e:
                     logger.error(f"Error adding tool usage error telemetry: {e}")
@@ -683,16 +689,16 @@ class EventListener:
                 tool_name = getattr(event, "tool_name", "unknown_tool")
                 inputs = getattr(event, "inputs", {})
                 error = getattr(event, "error", "Input validation error")
-                
+
                 # Add telemetry for tool validation error
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     telemetry_service.trace_tool_execution(
                         crew_id=crew_id,
                         agent_id=agent_id,
                         tool_name=f"{tool_name}:validate_error",
                         inputs=inputs,
-                        output=str(error)
+                        output=str(error),
                     )
                     # Also add as an event
                     telemetry_service.add_event(
@@ -703,7 +709,7 @@ class EventListener:
                             "agent_id": agent_id,
                             "error": str(error),
                             "timestamp": datetime.utcnow().isoformat(),
-                        }
+                        },
                     )
                 except Exception as e:
                     logger.error(f"Error adding tool validation error telemetry: {e}")
@@ -720,16 +726,16 @@ class EventListener:
                 tool_name = getattr(event, "tool_name", "unknown_tool")
                 inputs = getattr(event, "inputs", {})
                 error = getattr(event, "error", "Execution error")
-                
+
                 # Add telemetry for tool execution error
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     telemetry_service.trace_tool_execution(
                         crew_id=crew_id,
                         agent_id=agent_id,
                         tool_name=f"{tool_name}:execution_error",
                         inputs=inputs,
-                        output=str(error)
+                        output=str(error),
                     )
                     # Also add as an event
                     telemetry_service.add_event(
@@ -740,7 +746,7 @@ class EventListener:
                             "agent_id": agent_id,
                             "error": str(error),
                             "timestamp": datetime.utcnow().isoformat(),
-                        }
+                        },
                     )
                 except Exception as e:
                     logger.error(f"Error adding tool execution error telemetry: {e}")
@@ -755,16 +761,16 @@ class EventListener:
                 agent_id = self._extract_agent_id(event, source)
                 # Extract tool information
                 error = getattr(event, "error", "Tool selection error")
-                
+
                 # Add telemetry for tool selection error
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     telemetry_service.trace_tool_execution(
                         crew_id=crew_id,
                         agent_id=agent_id,
                         tool_name="tool_selection:error",
                         inputs={"error_message": str(error)},
-                        output=str(error)
+                        output=str(error),
                     )
                     # Also add as an event
                     telemetry_service.add_event(
@@ -774,7 +780,7 @@ class EventListener:
                             "agent_id": agent_id,
                             "error": str(error),
                             "timestamp": datetime.utcnow().isoformat(),
-                        }
+                        },
                     )
                 except Exception as e:
                     logger.error(f"Error adding tool selection error telemetry: {e}")
@@ -788,7 +794,7 @@ class EventListener:
                 logger.debug(f"LLM call started for execution: {execution_id}")
                 # Add telemetry for LLM call started
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     # Extract additional data if available
                     model = getattr(event, "model", None)
                     prompt = getattr(event, "prompt", None)
@@ -816,7 +822,7 @@ class EventListener:
                 logger.debug(f"LLM call completed for execution: {execution_id}")
                 # Add telemetry for LLM call completed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     # Extract additional data if available
                     model = getattr(event, "model", None)
                     completion = getattr(event, "completion", None)
@@ -846,7 +852,7 @@ class EventListener:
                 logger.warning(f"LLM call failed for execution: {execution_id}")
                 # Add telemetry for LLM call failed
                 try:
-                    crew_id = getattr(event, "crew_id", execution_id)
+                    crew_id = self._extract_crew_id_for_telemetry(source, event)
                     # Extract additional data if available
                     model = getattr(event, "model", None)
                     error = getattr(event, "error", "LLM call failed")
@@ -984,6 +990,7 @@ class EventListener:
         websocket = client["websocket"]
         client_crew_id = client.get("crew_id")
         current_crew_id = self.crew_state.get("id") if self.crew_state else None
+        current_crew_name = self.crew_state.get("name") if self.crew_state else None
 
         logger.debug(
             f"Sending state to client {client_id}, client_crew_id: {client_crew_id}, current_crew_id: {current_crew_id}"
@@ -1061,7 +1068,7 @@ class EventListener:
             update_type: Type of update - "crew_state" or "flow_state"
         """
         from .entities import entity_service
-        
+
         # Handle flow updates
         if update_type == "flow_state" and flow_id and flow_state:
             await self._broadcast_flow_update(flow_id, flow_state)
@@ -1078,7 +1085,9 @@ class EventListener:
         # Use entity service to get all broadcast IDs
         if current_crew_id:
             mapped_ids = entity_service.resolve_broadcast_ids(current_crew_id)
-            broadcast_crew_id = entity_service.get_primary_id(current_crew_id) or current_crew_id
+            broadcast_crew_id = (
+                entity_service.get_primary_id(current_crew_id) or current_crew_id
+            )
         else:
             mapped_ids = []
             broadcast_crew_id = None
@@ -1123,8 +1132,10 @@ class EventListener:
             logger.debug(f"Checking client {client_id} with crew_id: {client_crew_id}")
 
             # Use entity service for broadcast decision
-            should_send = entity_service.should_broadcast_to_client(current_crew_id, client_crew_id)
-            
+            should_send = entity_service.should_broadcast_to_client(
+                current_crew_id, client_crew_id
+            )
+
             if should_send:
                 matching_clients += 1
                 try:
@@ -1319,6 +1330,56 @@ class EventListener:
         )
         return execution_id
 
+    def _extract_crew_id_for_telemetry(self, source, event):
+        """
+        Extract crew ID specifically for telemetry operations.
+
+        This method prioritizes finding a consistent crew ID for telemetry
+        operations to ensure proper trace lookups. It tries multiple sources
+        in order of reliability:
+        1. Direct crew_id from event
+        2. Direct crew_id from source
+        3. Crew object's ID if available
+        4. Execution ID as last resort
+
+        Args:
+            source: The source object (usually a crew or agent)
+            event: The event object containing metadata
+
+        Returns:
+            str: A consistent crew ID for telemetry operations
+        """
+        # First priority: Check for explicit crew_id in event
+        if hasattr(event, "crew_id"):
+            crew_id = str(event.crew_id)
+            logger.debug(f"Using event.crew_id for telemetry: {crew_id}")
+            return crew_id
+
+        # Second priority: Check for crew_id in source
+        if hasattr(source, "crew_id"):
+            crew_id = str(source.crew_id)
+            logger.debug(f"Using source.crew_id for telemetry: {crew_id}")
+            return crew_id
+
+        # Third priority: Check if source is a crew with an ID
+        if hasattr(source, "__class__") and "crew" in source.__class__.__name__.lower():
+            if hasattr(source, "id"):
+                crew_id = str(source.id)
+                logger.debug(f"Using crew source.id for telemetry: {crew_id}")
+                return crew_id
+
+        # Fourth priority: Check if event has a crew attribute with ID
+        if hasattr(event, "crew"):
+            if hasattr(event.crew, "id"):
+                crew_id = str(event.crew.id)
+                logger.debug(f"Using event.crew.id for telemetry: {crew_id}")
+                return crew_id
+
+        # Last resort: Fall back to execution_id
+        execution_id = self._extract_execution_id(source, event)
+        logger.debug(f"Falling back to execution_id for telemetry: {execution_id}")
+        return execution_id
+
     def _extract_agent_id(self, event, source=None):
         """Extract consistent agent ID from event or source."""
         # Try event first
@@ -1326,25 +1387,31 @@ class EventListener:
             return str(event.agent_id)
         elif hasattr(event, "agent") and hasattr(event.agent, "id") and event.agent.id:
             return str(event.agent.id)
-        elif hasattr(event, "agent") and hasattr(event.agent, "_id") and event.agent._id:
+        elif (
+            hasattr(event, "agent") and hasattr(event.agent, "_id") and event.agent._id
+        ):
             return str(event.agent._id)
-        
+
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
                 return str(source.id)
             elif hasattr(source, "_id") and source._id:
                 return str(source._id)
-        
+
         # Try to create consistent ID from agent name/role
-        if hasattr(event, "agent") and hasattr(event.agent, "role") and event.agent.role:
+        if (
+            hasattr(event, "agent")
+            and hasattr(event.agent, "role")
+            and event.agent.role
+        ):
             # Create hash-based ID for consistency
             role_hash = abs(hash(event.agent.role)) % 100000
             return f"agent_{role_hash}"
         elif hasattr(event, "agent_role") and event.agent_role:
             role_hash = abs(hash(event.agent_role)) % 100000
             return f"agent_{role_hash}"
-        
+
         # Fallback to event-based ID
         return f"agent_{abs(id(event)) % 100000}"
 
@@ -1357,40 +1424,48 @@ class EventListener:
             return str(event.task.id)
         elif hasattr(event, "task") and hasattr(event.task, "_id") and event.task._id:
             return str(event.task._id)
-        
+
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
                 return str(source.id)
             elif hasattr(source, "_id") and source._id:
                 return str(source._id)
-        
+
         # Try to create consistent ID from task description
-        if hasattr(event, "task") and hasattr(event.task, "description") and event.task.description:
-            desc_hash = abs(hash(event.task.description[:50])) % 100000  # Use first 50 chars
+        if (
+            hasattr(event, "task")
+            and hasattr(event.task, "description")
+            and event.task.description
+        ):
+            desc_hash = (
+                abs(hash(event.task.description[:50])) % 100000
+            )  # Use first 50 chars
             return f"task_{desc_hash}"
         elif hasattr(event, "task_description") and event.task_description:
             desc_hash = abs(hash(event.task_description[:50])) % 100000
             return f"task_{desc_hash}"
-        
+
         # Fallback to event-based ID
         return f"task_{abs(id(event)) % 100000}"
 
     def _extract_agent_data(self, event, source=None):
         """Extract comprehensive agent data from event or source."""
         agent_data = {}
-        
+
         # Try to get data from event.agent object first
         if hasattr(event, "agent") and event.agent:
             agent_obj = event.agent
-            agent_data.update({
-                "name": getattr(agent_obj, "name", None),
-                "role": getattr(agent_obj, "role", None),
-                "description": getattr(agent_obj, "description", None),
-                "backstory": getattr(agent_obj, "backstory", None),
-                "goal": getattr(agent_obj, "goal", None),
-            })
-        
+            agent_data.update(
+                {
+                    "name": getattr(agent_obj, "name", None),
+                    "role": getattr(agent_obj, "role", None),
+                    "description": getattr(agent_obj, "description", None),
+                    "backstory": getattr(agent_obj, "backstory", None),
+                    "goal": getattr(agent_obj, "goal", None),
+                }
+            )
+
         # Try to get data from event attributes
         if hasattr(event, "agent_name") and event.agent_name:
             agent_data["name"] = event.agent_name
@@ -1398,7 +1473,7 @@ class EventListener:
             agent_data["role"] = event.agent_role
         if hasattr(event, "agent_description") and event.agent_description:
             agent_data["description"] = event.agent_description
-        
+
         # Try source if provided
         if source and not agent_data.get("name"):
             if hasattr(source, "name"):
@@ -1407,23 +1482,25 @@ class EventListener:
                 agent_data["role"] = source.role
             if hasattr(source, "description"):
                 agent_data["description"] = source.description
-        
+
         return agent_data
 
     def _extract_task_data(self, event, source=None):
         """Extract comprehensive task data from event or source."""
         task_data = {}
-        
+
         # Try to get data from event.task object first
         if hasattr(event, "task") and event.task:
             task_obj = event.task
-            task_data.update({
-                "name": getattr(task_obj, "name", None),
-                "description": getattr(task_obj, "description", None),
-                "expected_output": getattr(task_obj, "expected_output", None),
-                "agent_id": getattr(task_obj, "agent_id", None),
-            })
-            
+            task_data.update(
+                {
+                    "name": getattr(task_obj, "name", None),
+                    "description": getattr(task_obj, "description", None),
+                    "expected_output": getattr(task_obj, "expected_output", None),
+                    "agent_id": getattr(task_obj, "agent_id", None),
+                }
+            )
+
             # Try to get agent ID from task.agent if available
             if hasattr(task_obj, "agent") and task_obj.agent:
                 if hasattr(task_obj.agent, "id"):
@@ -1432,7 +1509,7 @@ class EventListener:
                     # Create consistent agent ID from role
                     role_hash = abs(hash(task_obj.agent.role)) % 100000
                     task_data["agent_id"] = f"agent_{role_hash}"
-        
+
         # Try to get data from event attributes
         if hasattr(event, "task_name") and event.task_name:
             task_data["name"] = event.task_name
@@ -1440,14 +1517,14 @@ class EventListener:
             task_data["description"] = event.task_description
         if hasattr(event, "agent_id") and event.agent_id:
             task_data["agent_id"] = str(event.agent_id)
-        
+
         # Try source if provided
         if source and not task_data.get("description"):
             if hasattr(source, "description"):
                 task_data["description"] = source.description
             if hasattr(source, "name"):
                 task_data["name"] = source.name
-        
+
         return task_data
 
     def _is_flow_context(self, source, event) -> bool:
@@ -1698,21 +1775,23 @@ class EventListener:
     async def _handle_crew_kickoff_started_crew(self, execution_id: str, event):
         """Handle crew kickoff started event for crew context."""
         from .entities import entity_service
-        
+
         logger.info(f"🚀 Crew kickoff started - execution_id: {execution_id}")
 
         # Extract crew information from the event
         crew_id = getattr(event, "crew_id", execution_id)
         crew_name = getattr(event, "crew_name", "Unknown Crew")
-        
+
         # Register the crew entity with the entity service
         entity_service.register_entity(
             primary_id=execution_id,  # Use execution_id as primary
             internal_id=crew_id if crew_id != execution_id else None,
             entity_type="crew",
-            name=crew_name
+            name=crew_name,
         )
-        logger.debug(f"Registered crew entity: primary_id={execution_id}, internal_id={crew_id}, name={crew_name}")
+        logger.debug(
+            f"Registered crew entity: primary_id={execution_id}, internal_id={crew_id}, name={crew_name}"
+        )
 
         # Initialize crew state
         self.crew_state = {
@@ -1744,7 +1823,7 @@ class EventListener:
                         agent_id = f"agent_{i}"
                     else:
                         agent_id = str(agent_id)
-                    
+
                     self.agent_states[agent_id] = {
                         "id": agent_id,
                         "name": getattr(agent, "name", f"Agent {i+1}"),
@@ -1752,7 +1831,7 @@ class EventListener:
                         "status": "initializing",
                         "timestamp": datetime.utcnow().isoformat(),
                     }
-                    
+
                     # Add optional rich data if available
                     if hasattr(agent, "description") and agent.description:
                         self.agent_states[agent_id]["description"] = agent.description
@@ -1774,7 +1853,7 @@ class EventListener:
                         task_id = f"task_{i}"
                     else:
                         task_id = str(task_id)
-                    
+
                     # Extract agent ID with consistent mapping
                     agent_id = None
                     if hasattr(task, "agent_id") and task.agent_id:
@@ -1786,7 +1865,7 @@ class EventListener:
                             # Use same hash-based ID as agents
                             role_hash = abs(hash(task.agent.role)) % 100000
                             agent_id = f"agent_{role_hash}"
-                    
+
                     self.task_states[task_id] = {
                         "id": task_id,
                         "name": getattr(task, "name", f"Task {i+1}"),
@@ -1794,14 +1873,16 @@ class EventListener:
                         "status": "pending",
                         "timestamp": datetime.utcnow().isoformat(),
                     }
-                    
+
                     # Add agent association if found
                     if agent_id:
                         self.task_states[task_id]["agent_id"] = agent_id
-                    
+
                     # Add optional rich data if available
                     if hasattr(task, "expected_output") and task.expected_output:
-                        self.task_states[task_id]["expected_output"] = task.expected_output
+                        self.task_states[task_id][
+                            "expected_output"
+                        ] = task.expected_output
 
         logger.info(
             f"Initialized crew state: {len(self.agent_states)} agents, "
@@ -1859,28 +1940,36 @@ class EventListener:
 
         # Extract consistent agent ID
         agent_id = self._extract_agent_id(event)
-        
+
         # Extract comprehensive agent data
         agent_data = self._extract_agent_data(event)
-        
+
         # Preserve existing agent data if available, otherwise create new
         if agent_id in self.agent_states:
             # Update existing agent state while preserving rich data
             existing_agent = self.agent_states[agent_id]
-            self.agent_states[agent_id].update({
-                "status": "running",
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-            
+            self.agent_states[agent_id].update(
+                {
+                    "status": "running",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
             # Only update fields if we have better data from the event
-            if agent_data.get("name") and agent_data["name"] != existing_agent.get("name"):
+            if agent_data.get("name") and agent_data["name"] != existing_agent.get(
+                "name"
+            ):
                 self.agent_states[agent_id]["name"] = agent_data["name"]
-            if agent_data.get("role") and agent_data["role"] != existing_agent.get("role"):
+            if agent_data.get("role") and agent_data["role"] != existing_agent.get(
+                "role"
+            ):
                 self.agent_states[agent_id]["role"] = agent_data["role"]
             if agent_data.get("description") and not existing_agent.get("description"):
                 self.agent_states[agent_id]["description"] = agent_data["description"]
-                
-            logger.info(f"Updated existing agent {agent_id}: {self.agent_states[agent_id].get('name', 'Unknown')}")
+
+            logger.info(
+                f"Updated existing agent {agent_id}: {self.agent_states[agent_id].get('name', 'Unknown')}"
+            )
         else:
             # Create new agent state with extracted data
             self.agent_states[agent_id] = {
@@ -1890,7 +1979,7 @@ class EventListener:
                 "status": "running",
                 "timestamp": datetime.utcnow().isoformat(),
             }
-            
+
             # Add optional fields if available
             if agent_data.get("description"):
                 self.agent_states[agent_id]["description"] = agent_data["description"]
@@ -1898,8 +1987,10 @@ class EventListener:
                 self.agent_states[agent_id]["backstory"] = agent_data["backstory"]
             if agent_data.get("goal"):
                 self.agent_states[agent_id]["goal"] = agent_data["goal"]
-                
-            logger.info(f"Created new agent {agent_id}: {self.agent_states[agent_id]['name']}")
+
+            logger.info(
+                f"Created new agent {agent_id}: {self.agent_states[agent_id]['name']}"
+            )
 
         await self.broadcast_update()
 
@@ -1911,7 +2002,7 @@ class EventListener:
 
         # Extract consistent agent ID
         agent_id = self._extract_agent_id(event)
-        
+
         # Extract any additional agent data from the completion event
         agent_data = self._extract_agent_data(event)
 
@@ -1929,19 +2020,30 @@ class EventListener:
                 self.agent_states[agent_id]["result"] = str(event.result)
             elif hasattr(event, "output") and event.output is not None:
                 self.agent_states[agent_id]["result"] = str(event.output)
-                
+
             # Update any missing data from the completion event
-            if agent_data.get("name") and not self.agent_states[agent_id].get("name", "").startswith("Agent "):
+            if agent_data.get("name") and not self.agent_states[agent_id].get(
+                "name", ""
+            ).startswith("Agent "):
                 self.agent_states[agent_id]["name"] = agent_data["name"]
-            if agent_data.get("role") and self.agent_states[agent_id].get("role") == "Unknown":
+            if (
+                agent_data.get("role")
+                and self.agent_states[agent_id].get("role") == "Unknown"
+            ):
                 self.agent_states[agent_id]["role"] = agent_data["role"]
-            if agent_data.get("description") and not self.agent_states[agent_id].get("description"):
+            if agent_data.get("description") and not self.agent_states[agent_id].get(
+                "description"
+            ):
                 self.agent_states[agent_id]["description"] = agent_data["description"]
-                
-            logger.info(f"Agent {agent_id} completed: {self.agent_states[agent_id].get('name', 'Unknown')}")
+
+            logger.info(
+                f"Agent {agent_id} completed: {self.agent_states[agent_id].get('name', 'Unknown')}"
+            )
         else:
             # Create agent state if it doesn't exist (edge case)
-            logger.warning(f"Agent {agent_id} completed but no initial state found, creating new state")
+            logger.warning(
+                f"Agent {agent_id} completed but no initial state found, creating new state"
+            )
             self.agent_states[agent_id] = {
                 "id": agent_id,
                 "name": agent_data.get("name") or f"Agent {agent_id}",
@@ -1949,7 +2051,7 @@ class EventListener:
                 "status": "completed",
                 "timestamp": datetime.utcnow().isoformat(),
             }
-            
+
             # Add optional fields if available
             if agent_data.get("description"):
                 self.agent_states[agent_id]["description"] = agent_data["description"]
@@ -1968,7 +2070,7 @@ class EventListener:
 
         # Extract consistent agent ID
         agent_id = self._extract_agent_id(event)
-        
+
         # Extract any additional agent data from the error event
         agent_data = self._extract_agent_data(event)
 
@@ -1986,19 +2088,30 @@ class EventListener:
                 self.agent_states[agent_id]["error"] = str(event.error)
             elif hasattr(event, "exception") and event.exception is not None:
                 self.agent_states[agent_id]["error"] = str(event.exception)
-                
+
             # Update any missing data from the error event
-            if agent_data.get("name") and not self.agent_states[agent_id].get("name", "").startswith("Agent "):
+            if agent_data.get("name") and not self.agent_states[agent_id].get(
+                "name", ""
+            ).startswith("Agent "):
                 self.agent_states[agent_id]["name"] = agent_data["name"]
-            if agent_data.get("role") and self.agent_states[agent_id].get("role") == "Unknown":
+            if (
+                agent_data.get("role")
+                and self.agent_states[agent_id].get("role") == "Unknown"
+            ):
                 self.agent_states[agent_id]["role"] = agent_data["role"]
-            if agent_data.get("description") and not self.agent_states[agent_id].get("description"):
+            if agent_data.get("description") and not self.agent_states[agent_id].get(
+                "description"
+            ):
                 self.agent_states[agent_id]["description"] = agent_data["description"]
-                
-            logger.error(f"Agent {agent_id} failed: {self.agent_states[agent_id].get('name', 'Unknown')}")
+
+            logger.error(
+                f"Agent {agent_id} failed: {self.agent_states[agent_id].get('name', 'Unknown')}"
+            )
         else:
             # Create agent state if it doesn't exist (edge case)
-            logger.warning(f"Agent {agent_id} failed but no initial state found, creating new state")
+            logger.warning(
+                f"Agent {agent_id} failed but no initial state found, creating new state"
+            )
             self.agent_states[agent_id] = {
                 "id": agent_id,
                 "name": agent_data.get("name") or f"Agent {agent_id}",
@@ -2006,7 +2119,7 @@ class EventListener:
                 "status": "failed",
                 "timestamp": datetime.utcnow().isoformat(),
             }
-            
+
             # Add optional fields if available
             if agent_data.get("description"):
                 self.agent_states[agent_id]["description"] = agent_data["description"]
@@ -2120,7 +2233,7 @@ class EventListener:
 
         # Extract consistent task ID
         task_id = self._extract_task_id(event)
-        
+
         # Extract comprehensive task data
         task_data = self._extract_task_data(event)
 
@@ -2128,11 +2241,13 @@ class EventListener:
         if task_id in self.task_states:
             # Update existing task state while preserving rich data
             existing_task = self.task_states[task_id]
-            self.task_states[task_id].update({
-                "status": "running",
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-            
+            self.task_states[task_id].update(
+                {
+                    "status": "running",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+
             # Only update fields if we have better data from the event
             if task_data.get("name") and task_data["name"] != existing_task.get("name"):
                 self.task_states[task_id]["name"] = task_data["name"]
@@ -2140,8 +2255,10 @@ class EventListener:
                 self.task_states[task_id]["description"] = task_data["description"]
             if task_data.get("agent_id") and not existing_task.get("agent_id"):
                 self.task_states[task_id]["agent_id"] = task_data["agent_id"]
-                
-            logger.info(f"Updated existing task {task_id}: {self.task_states[task_id].get('name', 'Unknown')}")
+
+            logger.info(
+                f"Updated existing task {task_id}: {self.task_states[task_id].get('name', 'Unknown')}"
+            )
         else:
             # Create new task state with extracted data
             self.task_states[task_id] = {
@@ -2151,14 +2268,18 @@ class EventListener:
                 "status": "running",
                 "timestamp": datetime.utcnow().isoformat(),
             }
-            
+
             # Add optional fields if available
             if task_data.get("agent_id"):
                 self.task_states[task_id]["agent_id"] = task_data["agent_id"]
             if task_data.get("expected_output"):
-                self.task_states[task_id]["expected_output"] = task_data["expected_output"]
-                
-            logger.info(f"Created new task {task_id}: {self.task_states[task_id]['name']}")
+                self.task_states[task_id]["expected_output"] = task_data[
+                    "expected_output"
+                ]
+
+            logger.info(
+                f"Created new task {task_id}: {self.task_states[task_id]['name']}"
+            )
 
         await self.broadcast_update()
 
@@ -2168,7 +2289,7 @@ class EventListener:
 
         # Extract consistent task ID
         task_id = self._extract_task_id(event)
-        
+
         # Extract any additional task data from the completion event
         task_data = self._extract_task_data(event)
 
@@ -2186,19 +2307,29 @@ class EventListener:
                 self.task_states[task_id]["result"] = str(event.result)
             elif hasattr(event, "output") and event.output is not None:
                 self.task_states[task_id]["result"] = str(event.output)
-                
+
             # Update any missing data from the completion event
-            if task_data.get("name") and not self.task_states[task_id].get("name", "").startswith("Task "):
+            if task_data.get("name") and not self.task_states[task_id].get(
+                "name", ""
+            ).startswith("Task "):
                 self.task_states[task_id]["name"] = task_data["name"]
-            if task_data.get("description") and not self.task_states[task_id].get("description"):
+            if task_data.get("description") and not self.task_states[task_id].get(
+                "description"
+            ):
                 self.task_states[task_id]["description"] = task_data["description"]
-            if task_data.get("agent_id") and not self.task_states[task_id].get("agent_id"):
+            if task_data.get("agent_id") and not self.task_states[task_id].get(
+                "agent_id"
+            ):
                 self.task_states[task_id]["agent_id"] = task_data["agent_id"]
-                
-            logger.info(f"Task {task_id} completed: {self.task_states[task_id].get('name', 'Unknown')}")
+
+            logger.info(
+                f"Task {task_id} completed: {self.task_states[task_id].get('name', 'Unknown')}"
+            )
         else:
             # Create task state if it doesn't exist (edge case)
-            logger.warning(f"Task {task_id} completed but no initial state found, creating new state")
+            logger.warning(
+                f"Task {task_id} completed but no initial state found, creating new state"
+            )
             self.task_states[task_id] = {
                 "id": task_id,
                 "name": task_data.get("name") or f"Task {task_id}",
@@ -2206,7 +2337,7 @@ class EventListener:
                 "status": "completed",
                 "timestamp": datetime.utcnow().isoformat(),
             }
-            
+
             # Add optional fields if available
             if task_data.get("agent_id"):
                 self.task_states[task_id]["agent_id"] = task_data["agent_id"]
@@ -2216,8 +2347,6 @@ class EventListener:
                 self.task_states[task_id]["result"] = str(event.output)
 
         await self.broadcast_update()
-
-
 
     async def _handle_crew_initialization_requested_crew(
         self, execution_id: str, event
