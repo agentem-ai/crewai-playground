@@ -180,6 +180,16 @@ export default function TracesPage() {
   const timelineSpans = useMemo(() => {
     if (!selectedTrace) return [];
 
+    console.log('Creating timeline spans for trace:', {
+      traceId: selectedTrace.id,
+      hasLLMCalls: !!selectedTrace.llmCalls,
+      llmCallsCount: selectedTrace.llmCalls?.length || 0,
+      hasToolExecutions: !!selectedTrace.toolExecutions,
+      toolExecutionsCount: selectedTrace.toolExecutions?.length || 0,
+      agentsCount: Object.keys(selectedTrace.agents || {}).length,
+      tasksCount: Object.keys(selectedTrace.tasks || {}).length
+    });
+
     const spans: TimelineSpan[] = [];
 
     // Add crew span as root
@@ -208,26 +218,82 @@ export default function TracesPage() {
     // Add agent spans - ensure agents is an object before iterating
     if (selectedTrace.agents && typeof selectedTrace.agents === 'object') {
       Object.values(selectedTrace.agents).forEach((agent) => {
-      const agentStartTime = new Date(agent.start_time);
-      const agentEndTime = agent.end_time ? new Date(agent.end_time) : null;
-      const agentDuration = agentEndTime
-        ? agentEndTime.getTime() - agentStartTime.getTime()
-        : 0;
+        const agentStartTime = new Date(agent.start_time);
+        const agentEndTime = agent.end_time ? new Date(agent.end_time) : null;
+        const agentDuration = agentEndTime
+          ? agentEndTime.getTime() - agentStartTime.getTime()
+          : 0;
 
-      const agentSpan: TimelineSpan = {
-        id: agent.id,
-        name: `Agent: ${agent.name}`,
-        startTime: agentStartTime,
-        endTime: agentEndTime,
-        status: agent.status,
-        parentId: selectedTrace.id,
-        depth: 1,
-        duration: agentDuration,
-        serviceName: "agent",
-        operation: agent.role,
-        children: [],
-      };
-      spans.push(agentSpan);
+        const agentSpan: TimelineSpan = {
+          id: agent.id,
+          name: `Agent: ${agent.name}`,
+          startTime: agentStartTime,
+          endTime: agentEndTime,
+          status: agent.status,
+          parentId: selectedTrace.id,
+          depth: 1,
+          duration: agentDuration,
+          serviceName: "agent",
+          operation: agent.role,
+          children: [],
+        };
+        spans.push(agentSpan);
+
+        // Add LLM calls as child spans of the agent
+        if (agent.llmCalls && agent.llmCalls.length > 0) {
+          agent.llmCalls.forEach((llmCall, index) => {
+            const llmStartTime = new Date(llmCall.timestamp);
+            // Estimate end time based on status and duration (if available) or use a small offset
+            const llmEndTime = llmCall.duration 
+              ? new Date(llmStartTime.getTime() + llmCall.duration)
+              : llmCall.status === 'completed' 
+                ? new Date(llmStartTime.getTime() + 2000) // 2 second default
+                : null;
+            
+            const llmSpan: TimelineSpan = {
+              id: `${agent.id}-llm-${index}`,
+              name: `LLM Call: ${llmCall.model || 'Unknown Model'}`,
+              startTime: llmStartTime,
+              endTime: llmEndTime,
+              status: llmCall.status,
+              parentId: agent.id,
+              depth: 2,
+              duration: llmCall.duration || (llmEndTime ? llmEndTime.getTime() - llmStartTime.getTime() : 0),
+              serviceName: "llm",
+              operation: llmCall.type,
+              children: [],
+            };
+            spans.push(llmSpan);
+          });
+        }
+
+        // Add tool executions as child spans of the agent
+        if (agent.toolExecutions && agent.toolExecutions.length > 0) {
+          agent.toolExecutions.forEach((toolExec, index) => {
+            const toolStartTime = new Date(toolExec.timestamp);
+            // Estimate end time based on status and duration (if available) or use a small offset
+            const toolEndTime = toolExec.duration 
+              ? new Date(toolStartTime.getTime() + toolExec.duration)
+              : toolExec.status === 'completed' 
+                ? new Date(toolStartTime.getTime() + 1000) // 1 second default
+                : null;
+            
+            const toolSpan: TimelineSpan = {
+              id: `${agent.id}-tool-${index}`,
+              name: `Tool: ${toolExec.tool_name || 'Unknown Tool'}`,
+              startTime: toolStartTime,
+              endTime: toolEndTime,
+              status: toolExec.status,
+              parentId: agent.id,
+              depth: 2,
+              duration: toolExec.duration || (toolEndTime ? toolEndTime.getTime() - toolStartTime.getTime() : 0),
+              serviceName: "tool",
+              operation: toolExec.type,
+              children: [],
+            };
+            spans.push(toolSpan);
+          });
+        }
       });
     }
 
@@ -257,6 +323,65 @@ export default function TracesPage() {
         children: [],
       };
       spans.push(taskSpan);
+      });
+    }
+
+    // Add trace-level LLM calls and tool executions (not associated with specific agents)
+    if (selectedTrace.llmCalls && selectedTrace.llmCalls.length > 0) {
+      selectedTrace.llmCalls.forEach((llmCall, index) => {
+        // Only add if not already associated with an agent
+        if (!llmCall.agent_id) {
+          const llmStartTime = new Date(llmCall.timestamp);
+          const llmEndTime = llmCall.duration 
+            ? new Date(llmStartTime.getTime() + llmCall.duration)
+            : llmCall.status === 'completed' 
+              ? new Date(llmStartTime.getTime() + 2000) // 2 second default
+              : null;
+          
+          const llmSpan: TimelineSpan = {
+            id: `crew-llm-${index}`,
+            name: `LLM Call: ${llmCall.model || 'Unknown Model'}`,
+            startTime: llmStartTime,
+            endTime: llmEndTime,
+            status: llmCall.status,
+            parentId: selectedTrace.id,
+            depth: 1,
+            duration: llmCall.duration || (llmEndTime ? llmEndTime.getTime() - llmStartTime.getTime() : 0),
+            serviceName: "llm",
+            operation: llmCall.type,
+            children: [],
+          };
+          spans.push(llmSpan);
+        }
+      });
+    }
+
+    if (selectedTrace.toolExecutions && selectedTrace.toolExecutions.length > 0) {
+      selectedTrace.toolExecutions.forEach((toolExec, index) => {
+        // Only add if not already associated with an agent
+        if (!toolExec.agent_id) {
+          const toolStartTime = new Date(toolExec.timestamp);
+          const toolEndTime = toolExec.duration 
+            ? new Date(toolStartTime.getTime() + toolExec.duration)
+            : toolExec.status === 'completed' 
+              ? new Date(toolStartTime.getTime() + 1000) // 1 second default
+              : null;
+          
+          const toolSpan: TimelineSpan = {
+            id: `crew-tool-${index}`,
+            name: `Tool: ${toolExec.tool_name || 'Unknown Tool'}`,
+            startTime: toolStartTime,
+            endTime: toolEndTime,
+            status: toolExec.status,
+            parentId: selectedTrace.id,
+            depth: 1,
+            duration: toolExec.duration || (toolEndTime ? toolEndTime.getTime() - toolStartTime.getTime() : 0),
+            serviceName: "tool",
+            operation: toolExec.type,
+            children: [],
+          };
+          spans.push(toolSpan);
+        }
       });
     }
 
@@ -428,38 +553,94 @@ export default function TracesPage() {
     const toolExecutions: ToolExecution[] = [];
     const events = trace.events || [];
 
-    // Process events to extract LLM calls and tool executions
+    // Group events by agent_id and task_id to pair started/completed events
+    const llmEventGroups = new Map<string, { started?: any, completed?: any, failed?: any }>();
+    const toolEventGroups = new Map<string, { started?: any, completed?: any, failed?: any }>();
+
+    // First pass: group events by agent_id + task_id
     events.forEach((event: TraceEvent) => {
       if (event.type.startsWith('llm.')) {
+        const key = `${event.data.agent_id || 'unknown'}-${event.data.task_id || 'unknown'}`;
+        if (!llmEventGroups.has(key)) {
+          llmEventGroups.set(key, {});
+        }
+        const group = llmEventGroups.get(key)!;
+        if (event.type === 'llm.started') {
+          group.started = event;
+        } else if (event.type === 'llm.completed') {
+          group.completed = event;
+        } else if (event.type === 'llm.failed') {
+          group.failed = event;
+        }
+      } else if (event.type.startsWith('tool.')) {
+        const key = `${event.data.agent_id || 'unknown'}-${event.data.tool_name || 'unknown'}`;
+        if (!toolEventGroups.has(key)) {
+          toolEventGroups.set(key, {});
+        }
+        const group = toolEventGroups.get(key)!;
+        if (event.type === 'tool.started') {
+          group.started = event;
+        } else if (event.type === 'tool.completed') {
+          group.completed = event;
+        } else if (event.type === 'tool.failed') {
+          group.failed = event;
+        }
+      }
+    });
+
+    // Second pass: create LLM calls with proper duration calculation
+    llmEventGroups.forEach((group, key) => {
+      const startEvent = group.started;
+      const endEvent = group.completed || group.failed;
+      
+      if (startEvent || endEvent) {
+        const event = endEvent || startEvent;
+        const startTime = startEvent ? new Date(startEvent.timestamp).getTime() : new Date(event.timestamp).getTime();
+        const endTime = endEvent ? new Date(endEvent.timestamp).getTime() : null;
+        const duration = endTime ? endTime - startTime : undefined;
+        
         const llmCall: LLMCall = {
-          id: event.data.id || `${event.type}-${event.timestamp}`,
-          type: event.type as LLMCall['type'],
-          timestamp: event.timestamp,
-          model: event.data.model,
+          id: event.data.id || `llm-${key}-${event.timestamp}`,
+          type: endEvent ? endEvent.type as LLMCall['type'] : startEvent.type as LLMCall['type'],
+          timestamp: startEvent ? startEvent.timestamp : event.timestamp,
+          model: event.data.model || 'Unknown Model',
           prompt: event.data.prompt,
-          completion: event.data.completion,
-          tokens: event.data.tokens,
-          status: event.type === 'llm.completed' ? 'completed' : 
-                  event.type === 'llm.failed' ? 'failed' : 'started',
+          completion: endEvent?.data.completion,
+          tokens: endEvent?.data.tokens,
+          status: group.completed ? 'completed' : group.failed ? 'failed' : 'started',
           agent_id: event.data.agent_id,
           agent_name: event.data.agent_name,
           task_id: event.data.task_id,
-          error: event.data.error
+          error: group.failed?.data.error,
+          duration
         };
         llmCalls.push(llmCall);
-      } else if (event.type.startsWith('tool.')) {
+      }
+    });
+
+    // Second pass: create tool executions with proper duration calculation
+    toolEventGroups.forEach((group, key) => {
+      const startEvent = group.started;
+      const endEvent = group.completed || group.failed;
+      
+      if (startEvent || endEvent) {
+        const event = endEvent || startEvent;
+        const startTime = startEvent ? new Date(startEvent.timestamp).getTime() : new Date(event.timestamp).getTime();
+        const endTime = endEvent ? new Date(endEvent.timestamp).getTime() : null;
+        const duration = endTime ? endTime - startTime : undefined;
+        
         const toolExecution: ToolExecution = {
-          id: event.data.id || `${event.type}-${event.timestamp}`,
-          type: event.type as ToolExecution['type'],
-          timestamp: event.timestamp,
-          tool_name: event.data.tool_name,
+          id: event.data.id || `tool-${key}-${event.timestamp}`,
+          type: endEvent ? endEvent.type as ToolExecution['type'] : startEvent.type as ToolExecution['type'],
+          timestamp: startEvent ? startEvent.timestamp : event.timestamp,
+          tool_name: event.data.tool_name || 'Unknown Tool',
           inputs: event.data.inputs,
-          outputs: event.data.outputs,
-          status: event.type === 'tool.completed' ? 'completed' : 
-                  event.type === 'tool.failed' ? 'failed' : 'started',
+          outputs: endEvent?.data.outputs,
+          status: group.completed ? 'completed' : group.failed ? 'failed' : 'started',
           agent_id: event.data.agent_id,
           agent_name: event.data.agent_name,
-          error: event.data.error
+          error: group.failed?.data.error,
+          duration
         };
         toolExecutions.push(toolExecution);
       }
@@ -493,6 +674,13 @@ export default function TracesPage() {
     Object.values(trace.agents || {}).forEach((agent: any) => {
       agent.llmCalls = llmCalls.filter(call => call.agent_id === agent.id);
       agent.toolExecutions = toolExecutions.filter(exec => exec.agent_id === agent.id);
+    });
+
+    console.log('Extracted telemetry data:', {
+      llmCallsCount: llmCalls.length,
+      toolExecutionsCount: toolExecutions.length,
+      llmCalls: llmCalls.map(call => ({ id: call.id, model: call.model, agent_id: call.agent_id, duration: call.duration })),
+      toolExecutions: toolExecutions.map(exec => ({ id: exec.id, tool_name: exec.tool_name, agent_id: exec.agent_id, duration: exec.duration }))
     });
 
     return { llmCalls, toolExecutions, metrics };
