@@ -1275,19 +1275,36 @@ class EventListener:
             # Try to get the current running loop
             loop = asyncio.get_running_loop()
             # Create task on the running loop
-            loop.create_task(coro)
+            task = loop.create_task(coro)
+            logger.debug(f"✅ Scheduled coroutine on current event loop: {task}")
         except RuntimeError:
-            # No running loop, try to create a new one or use thread pool
+            # No running loop, try to use the stored loop
             try:
-                # Try to use the stored loop if available
                 if self.loop and not self.loop.is_closed():
                     # Schedule on the stored loop using call_soon_threadsafe
                     future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+                    logger.debug(f"✅ Scheduled coroutine on stored event loop: {future}")
                     # Don't wait for the result to avoid blocking
                 else:
                     logger.warning(
-                        "No running event loop found and no stored loop available"
+                        "No running event loop found and no stored loop available - trying to create new loop"
                     )
+                    # Last resort: try to run in a new event loop (not recommended but better than nothing)
+                    try:
+                        import threading
+                        def run_in_thread():
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            try:
+                                new_loop.run_until_complete(coro)
+                            finally:
+                                new_loop.close()
+                        
+                        thread = threading.Thread(target=run_in_thread, daemon=True)
+                        thread.start()
+                        logger.debug("✅ Scheduled coroutine in new thread with new event loop")
+                    except Exception as thread_e:
+                        logger.error(f"Failed to create new thread for coroutine: {thread_e}")
             except Exception as e:
                 logger.error(f"Error scheduling coroutine: {e}")
 

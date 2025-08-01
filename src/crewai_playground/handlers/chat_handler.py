@@ -337,6 +337,58 @@ class ChatHandler:
             if loading_thread.is_alive():
                 loading_thread.join(timeout=1.0)
 
+    async def run_crew_async(
+        self, inputs: Optional[Dict[str, str]] = None, crew_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Run the crew asynchronously with the provided inputs.
+
+        This method runs the crew using async kickoff_async() to enable real-time
+        WebSocket updates during execution.
+
+        Args:
+            inputs: Dictionary of input values for the crew
+            crew_id: Optional crew ID for tracking
+
+        Returns:
+            Dictionary containing the crew execution results
+        """
+        # Register entity mapping for crew tracking
+        entity_service.register_entity(
+            primary_id=crew_id,
+            internal_id=self.crew.id,
+            entity_type="crew",
+            name=self.crew_name,
+        )
+
+        try:
+            # Run the crew asynchronously using kickoff_async() for real-time updates
+            input_dict = {} if inputs is None else inputs
+            
+            logging.info(f"🚀 ChatHandler: Starting crew execution with inputs: {input_dict}")
+            
+            # Check if crew has async kickoff method
+            if hasattr(self.crew, 'kickoff_async'):
+                logging.info(f"✅ Using crew.kickoff_async() for real-time execution")
+                result = await self.crew.kickoff_async(inputs=input_dict)
+                logging.info(f"✅ crew.kickoff_async() completed successfully")
+            else:
+                # Fallback to sync method in thread pool to avoid blocking
+                logging.info(f"⚠️ Fallback to crew.kickoff() in thread pool")
+                import asyncio
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None, lambda: self.crew.kickoff(inputs=input_dict)
+                )
+                logging.info(f"✅ crew.kickoff() in thread pool completed successfully")
+            
+            logging.info(f"🎉 Crew execution result type: {type(result)}, status: success")
+            return {"status": "success", "result": result}
+
+        except Exception as e:
+            error_message = f"Error running crew asynchronously: {str(e)}"
+            logging.error(error_message, exc_info=True)
+            return {"status": "error", "error": error_message}
+
     def process_message(self, user_message: str) -> Dict[str, Any]:
         """
         Process a user message and return a response.
