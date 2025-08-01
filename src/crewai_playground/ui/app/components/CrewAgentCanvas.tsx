@@ -95,7 +95,7 @@ interface VisualizationState {
   crew: Crew | null;
   agents: Agent[];
   tasks: Task[];
-  timestamp?: string;
+  timestamp?: string | null;
 }
 
 interface CrewAgentCanvasProps {
@@ -150,14 +150,15 @@ const getLayoutedElements = (
   const nodeWidth = Math.max(maxWidth, 320); // Increased minimum width for task details
   const nodeHeight = Math.max(maxHeight, 200); // Increased minimum height for task details
 
-  // Create a new directed graph with optimized spacing for vertical layout
+  // Create a new directed graph with optimized spacing for stable vertical layout
   dagreGraph.setGraph({
     rankdir: direction,
-    nodesep: 50, // Horizontal spacing between nodes (reduced for center alignment)
-    ranksep: 120, // Vertical spacing between ranks
+    nodesep: 80, // Horizontal spacing between nodes (increased for stability)
+    ranksep: 150, // Vertical spacing between ranks (increased for stability)
     align: "UL", // Align nodes to upper-left for consistent positioning
-    marginx: 20,
-    marginy: 20,
+    marginx: 50,
+    marginy: 50,
+    edgesep: 20 // Edge separation for cleaner layout
   });
 
   // Add nodes to the graph with uniform dimensions
@@ -208,6 +209,32 @@ const getLayoutedElements = (
     };
   });
 
+  // Post-process to ensure crew node is positioned at the top center
+  const crewNodeIndex = layoutedNodes.findIndex(node => node.type === 'crew');
+  if (crewNodeIndex !== -1) {
+    const agentNodes = layoutedNodes.filter(node => node.type === 'agent');
+    if (agentNodes.length > 0) {
+      // Calculate the center X position based on agent nodes
+      const agentXPositions = agentNodes.map(node => node.position.x);
+      const minX = Math.min(...agentXPositions);
+      const maxX = Math.max(...agentXPositions);
+      const centerX = (minX + maxX) / 2;
+      
+      // Find the topmost agent Y position
+      const agentYPositions = agentNodes.map(node => node.position.y);
+      const topAgentY = Math.min(...agentYPositions);
+      
+      // Position crew node above the agents, centered
+      layoutedNodes[crewNodeIndex] = {
+        ...layoutedNodes[crewNodeIndex],
+        position: {
+          x: centerX,
+          y: topAgentY - nodeHeight - 50 // 50px gap above agents
+        }
+      };
+    }
+  }
+
   return { nodes: layoutedNodes, edges, fullWidth, fullHeight };
 };
 
@@ -226,9 +253,10 @@ const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
       style={{
         borderColor: statusColor,
         width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : "320px",
-        minHeight: typedData.uniformHeight
+        height: typedData.uniformHeight
           ? `${typedData.uniformHeight}px`
           : "180px",
+        overflow: "hidden", // Prevent content from expanding the node
       }}
     >
       <div className="flex justify-between items-center">
@@ -387,9 +415,10 @@ const CrewNode: React.FC<NodeProps> = ({ data }) => {
       style={{
         borderColor: statusColor,
         width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : "320px",
-        minHeight: typedData.uniformHeight
+        height: typedData.uniformHeight
           ? `${typedData.uniformHeight}px`
           : "200px",
+        overflow: "hidden", // Prevent content from expanding the node
       }}
     >
       <div className="flex justify-between items-center mb-2">
@@ -811,15 +840,15 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
         heartbeatIntervalRef.current = null;
       }
     };
-  }, [crewId, connectWebSocket, initializeCrew]); // Removed resetKey from dependencies
+  }, [crewId, connectWebSocket, initializeCrew]);
 
   // Reset state when resetKey changes (without WebSocket reconnection)
   useEffect(() => {
-    // Only reset state, don't reconnect WebSocket
     setState({
       crew: null,
       agents: [],
       tasks: [],
+      timestamp: null,
     });
     setHasReceivedData(false);
     setError(null);
@@ -954,25 +983,8 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
       newEdges.push(agentEdge);
     }
 
-    // 4. Connect crew node to first agent for perfect vertical layout
-    if (state.crew && orderedAgents.length > 0) {
-      const firstAgent = orderedAgents[0];
-      const crewToFirstAgentEdge: Edge = {
-        id: `crew-${state.crew.id}-to-agent-${firstAgent.id}`,
-        source: `crew-${state.crew.id}`,
-        target: `agent-${firstAgent.id}`,
-        type: "default",
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: "#64748b",
-        },
-        style: {
-          strokeWidth: 2,
-          stroke: "#64748b",
-        },
-      };
-      newEdges.push(crewToFirstAgentEdge);
-    }
+    // 4. No edge between crew and first agent since crew has no handles and first agent has no input handle
+    // The crew node remains standalone as required
 
     // Apply dagre layout to position nodes automatically
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
