@@ -846,12 +846,6 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
         # Load the crew
         crew_instance, crew_name = load_crew_from_module(Path(crew_path))
 
-        # Event listener setup is now handled in ChatHandler.run_crew() to ensure
-        # it's set up on the correct event bus during actual crew execution
-        logging.info(
-            f"Event listener setup will be handled during crew execution for crew: {crew_id}"
-        )
-
         # Set the crew ID explicitly to ensure consistent tracking
         if hasattr(crew_instance, "id"):
             logging.info(f"Crew ID from instance: {crew_instance.id}")
@@ -871,25 +865,36 @@ async def kickoff_crew(crew_id: str, request: KickoffRequest) -> JSONResponse:
         # Run the crew directly
         inputs = request.inputs or {}
 
-        # Run the crew kickoff asynchronously to ensure proper event capture
-        # Using asyncio.create_task to run in background while maintaining event bus context
-        import asyncio
+        # Set up event listener in the main async context
+        from crewai_playground.events.event_listener import event_listener
+        from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+        
+        # Ensure event listener has the current event loop
+        event_listener.ensure_event_loop()
+        event_listener.setup_listeners(crewai_event_bus)
+        
+        logging.info(f"Event listener setup completed. Event loop: {event_listener.loop}")
+        logging.info(f"Connected WebSocket clients: {len(event_listener.clients)}")
 
+        # Run crew execution asynchronously to enable real-time streaming
         async def run_crew_async():
-            """Run crew in async context to maintain event bus registration."""
+            """Run crew asynchronously to enable real-time WebSocket updates."""
             try:
-                # Ensure event listener is set up in the main thread context
-                from crewai_playground.events.event_listener import event_listener
-                from crewai.utilities.events.crewai_event_bus import crewai_event_bus
-
-                event_listener.setup_listeners(crewai_event_bus)
-
-                handler.run_crew(inputs, crew_id)
-
+                logging.info(f"🚀 Starting async crew execution for crew_id: {crew_id}")
+                logging.info(f"Event listener clients before execution: {len(event_listener.clients)}")
+                
+                # Run the crew using async method to maintain event loop context
+                result = await handler.run_crew_async(inputs, crew_id)
+                
+                logging.info(f"✅ Crew execution completed: {result.get('status')}")
+                logging.info(f"Event listener clients after execution: {len(event_listener.clients)}")
+                return result
             except Exception as e:
                 logging.error(f"❌ Error in async crew execution: {e}", exc_info=True)
+                return {"status": "error", "error": str(e)}
 
         # Start the async crew execution as a background task
+        # This allows the endpoint to return immediately while crew runs in background
         asyncio.create_task(run_crew_async())
 
         return JSONResponse(
