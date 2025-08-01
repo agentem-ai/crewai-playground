@@ -147,8 +147,15 @@ const getLayoutedElements = (
   const nodeWidth = Math.max(maxWidth, 320); // Increased minimum width for task details
   const nodeHeight = Math.max(maxHeight, 200); // Increased minimum height for task details
 
-  // Create a new directed graph
-  dagreGraph.setGraph({ rankdir: direction, nodesep: 100, ranksep: 150 }); // Increased spacing
+  // Create a new directed graph with optimized spacing for vertical layout
+  dagreGraph.setGraph({ 
+    rankdir: direction, 
+    nodesep: 50, // Horizontal spacing between nodes (reduced for center alignment)
+    ranksep: 120, // Vertical spacing between ranks
+    align: 'UL', // Align nodes to upper-left for consistent positioning
+    marginx: 20,
+    marginy: 20
+  });
 
   // Add nodes to the graph with uniform dimensions
   nodes.forEach((node) => {
@@ -363,18 +370,32 @@ const CrewNode: React.FC<NodeProps> = ({ data }) => {
 
   return (
     <div
-      className="px-4 py-2 shadow-md rounded-md bg-white border-2 w-[280px]"
-      style={{ borderColor: statusColor }}
+      className="px-4 py-3 shadow-md rounded-md bg-white border-2 flex flex-col justify-center"
+      style={{ 
+        borderColor: statusColor,
+        width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : '320px',
+        minHeight: typedData.uniformHeight ? `${typedData.uniformHeight}px` : '200px'
+      }}
     >
-      <div className="flex justify-between items-center">
-        <div className="font-bold text-sm">Crew</div>
+      <div className="flex justify-between items-center mb-2">
+        <div className="font-bold text-lg">🚀 Crew</div>
         <div
-          className="rounded-full w-3 h-3"
+          className="rounded-full w-4 h-4"
           style={{ backgroundColor: statusColor }}
         ></div>
       </div>
-      <div className="text-xs text-gray-500 mt-1">{typedData.name}</div>
-      <div className="mt-2 text-xs">Status: {typedData.status}</div>
+      <div className="text-sm font-medium text-gray-700 mb-1">{typedData.name}</div>
+      <div className="text-xs text-gray-500 mb-2">Status: {typedData.status}</div>
+      
+      {/* Crew Details */}
+      <div className="mt-auto pt-2 border-t border-gray-100">
+        <div className="text-xs text-gray-600">
+          <div>Type: {typedData.type || 'Sequential'}</div>
+          {typedData.started_at && (
+            <div className="mt-1">Started: {new Date(typedData.started_at).toLocaleTimeString()}</div>
+          )}
+        </div>
+      </div>
       
       {/* Crew node has no handles as per requirements */}
     </div>
@@ -823,8 +844,8 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
       const isFirstAgent = index === 0;
       const isLastAgent = index === orderedAgents.length - 1;
       
-      // First agent has no input handle, last agent has no output handle
-      const hasIncomingEdge = !isFirstAgent;
+      // First agent has input handle from crew, last agent has no output handle
+      const hasIncomingEdge = true; // All agents have incoming edges (first from crew, others from previous agent)
       const hasOutgoingEdge = !isLastAgent;
       
       const agentNode = {
@@ -883,6 +904,26 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
       };
 
       newEdges.push(agentEdge);
+    }
+
+    // 4. Connect crew node to first agent for perfect vertical layout
+    if (state.crew && orderedAgents.length > 0) {
+      const firstAgent = orderedAgents[0];
+      const crewToFirstAgentEdge: Edge = {
+        id: `crew-${state.crew.id}-to-agent-${firstAgent.id}`,
+        source: `crew-${state.crew.id}`,
+        target: `agent-${firstAgent.id}`,
+        type: "default",
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: "#64748b",
+        },
+        style: {
+          strokeWidth: 2,
+          stroke: "#64748b",
+        },
+      };
+      newEdges.push(crewToFirstAgentEdge);
     }
     
     // Apply dagre layout to position nodes automatically
