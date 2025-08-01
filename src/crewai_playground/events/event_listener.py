@@ -1283,7 +1283,9 @@ class EventListener:
                 if self.loop and not self.loop.is_closed():
                     # Schedule on the stored loop using call_soon_threadsafe
                     future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-                    logger.debug(f"✅ Scheduled coroutine on stored event loop: {future}")
+                    logger.debug(
+                        f"✅ Scheduled coroutine on stored event loop: {future}"
+                    )
                     # Don't wait for the result to avoid blocking
                 else:
                     logger.warning(
@@ -1292,6 +1294,7 @@ class EventListener:
                     # Last resort: try to run in a new event loop (not recommended but better than nothing)
                     try:
                         import threading
+
                         def run_in_thread():
                             new_loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(new_loop)
@@ -1299,12 +1302,16 @@ class EventListener:
                                 new_loop.run_until_complete(coro)
                             finally:
                                 new_loop.close()
-                        
+
                         thread = threading.Thread(target=run_in_thread, daemon=True)
                         thread.start()
-                        logger.debug("✅ Scheduled coroutine in new thread with new event loop")
+                        logger.debug(
+                            "✅ Scheduled coroutine in new thread with new event loop"
+                        )
                     except Exception as thread_e:
-                        logger.error(f"Failed to create new thread for coroutine: {thread_e}")
+                        logger.error(
+                            f"Failed to create new thread for coroutine: {thread_e}"
+                        )
             except Exception as e:
                 logger.error(f"Error scheduling coroutine: {e}")
 
@@ -1853,11 +1860,13 @@ class EventListener:
         # Update crew state (preserve existing state if available)
         if self.crew_state:
             # Update existing crew state
-            self.crew_state.update({
-                "status": "running",
-                "started_at": datetime.utcnow().isoformat(),
-                "type": getattr(event, "process", "sequential"),
-            })
+            self.crew_state.update(
+                {
+                    "status": "running",
+                    "started_at": datetime.utcnow().isoformat(),
+                    "type": getattr(event, "process", "sequential"),
+                }
+            )
             logger.info(f"Updated existing crew state to 'running' status")
         else:
             # Initialize new crew state
@@ -1872,7 +1881,9 @@ class EventListener:
 
         # Update existing agent and task states instead of clearing them
         # This preserves the visualization structure and only updates statuses
-        logger.info(f"Preserving existing states: {len(self.agent_states)} agents, {len(self.task_states)} tasks")
+        logger.info(
+            f"Preserving existing states: {len(self.agent_states)} agents, {len(self.task_states)} tasks"
+        )
 
         # Try to extract initial agent and task information if available
         if hasattr(event, "crew") and event.crew:
@@ -1895,11 +1906,15 @@ class EventListener:
                     # Update existing agent state or create new one
                     if agent_id in self.agent_states:
                         # Update existing agent state - preserve structure, update status
-                        self.agent_states[agent_id].update({
-                            "status": "ready",  # Update status to ready when crew starts
-                            "timestamp": datetime.utcnow().isoformat(),
-                        })
-                        logger.debug(f"Updated existing agent {agent_id} status to 'ready'")
+                        self.agent_states[agent_id].update(
+                            {
+                                "status": "ready",  # Update status to ready when crew starts
+                                "timestamp": datetime.utcnow().isoformat(),
+                            }
+                        )
+                        logger.debug(
+                            f"Updated existing agent {agent_id} status to 'ready'"
+                        )
                     else:
                         # Create new agent state (shouldn't happen often if ChatHandler registered them)
                         self.agent_states[agent_id] = {
@@ -1909,15 +1924,17 @@ class EventListener:
                             "status": "ready",
                             "timestamp": datetime.utcnow().isoformat(),
                         }
-                        
+
                         # Add optional rich data if available
                         if hasattr(agent, "description") and agent.description:
-                            self.agent_states[agent_id]["description"] = agent.description
+                            self.agent_states[agent_id][
+                                "description"
+                            ] = agent.description
                         if hasattr(agent, "backstory") and agent.backstory:
                             self.agent_states[agent_id]["backstory"] = agent.backstory
                         if hasattr(agent, "goal") and agent.goal:
                             self.agent_states[agent_id]["goal"] = agent.goal
-                        
+
                         logger.debug(f"Created new agent state for {agent_id}")
 
             # Extract tasks with improved ID consistency and agent association
@@ -1949,14 +1966,18 @@ class EventListener:
                     # Update existing task state or create new one
                     if task_id in self.task_states:
                         # Update existing task state - preserve structure, update status
-                        self.task_states[task_id].update({
-                            "status": "pending",  # Reset to pending when crew starts
-                            "timestamp": datetime.utcnow().isoformat(),
-                        })
+                        self.task_states[task_id].update(
+                            {
+                                "status": "pending",  # Reset to pending when crew starts
+                                "timestamp": datetime.utcnow().isoformat(),
+                            }
+                        )
                         # Update agent association if found
                         if agent_id:
                             self.task_states[task_id]["agent_id"] = agent_id
-                        logger.debug(f"Updated existing task {task_id} status to 'pending'")
+                        logger.debug(
+                            f"Updated existing task {task_id} status to 'pending'"
+                        )
                     else:
                         # Create new task state (shouldn't happen often if ChatHandler registered them)
                         self.task_states[task_id] = {
@@ -1976,7 +1997,7 @@ class EventListener:
                             self.task_states[task_id][
                                 "expected_output"
                             ] = task.expected_output
-                        
+
                         logger.debug(f"Created new task state for {task_id}")
 
         logger.info(
@@ -1988,10 +2009,21 @@ class EventListener:
     async def _handle_crew_kickoff_completed_crew(self, execution_id: str, event):
         """Handle crew kickoff completed event in crew context."""
         logger.info(
-            f"Crew kickoff completed (crew context) for execution: {execution_id}"
+            f"🎉 Crew kickoff completed (crew context) for execution: {execution_id}"
         )
 
-        if self.crew_state.get("id") == execution_id:
+        # Debug logging to understand ID matching
+        current_crew_id = self.crew_state.get("id") if self.crew_state else None
+
+        # Try to use entity service to resolve IDs
+        from crewai_playground.services.entities import entity_service
+
+        possible_ids = entity_service.resolve_broadcast_ids(execution_id)
+
+        # Check if any of the possible IDs match the current crew state
+        id_match = current_crew_id in possible_ids if current_crew_id else False
+
+        if current_crew_id and (current_crew_id == execution_id or id_match):
             self.crew_state.update(
                 {
                     "status": "completed",
@@ -2008,7 +2040,37 @@ class EventListener:
                     f"Crew result stored as output: {self.crew_state.get('output', 'No output')[:100]}..."
                 )
 
+            logger.info(f"✅ Successfully updated crew state to 'completed'")
             await self.broadcast_update()
+        else:
+            # Fallback: If IDs don't match but we have a crew state, still mark as completed
+            # This handles cases where ID mapping might be inconsistent
+            if self.crew_state:
+
+                self.crew_state.update(
+                    {
+                        "status": "completed",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
+
+                if hasattr(event, "result") and event.result is not None:
+                    if hasattr(event.result, "raw"):
+                        self.crew_state["output"] = event.result.raw
+                    else:
+                        self.crew_state["output"] = str(event.result)
+                    logger.info(
+                        f"Crew result stored as output: {self.crew_state.get('output', 'No output')[:100]}..."
+                    )
+
+                logger.info(
+                    f"✅ Fallback: Successfully updated crew state to 'completed'"
+                )
+                await self.broadcast_update()
+            else:
+                logger.error(
+                    f"❌ No crew state found to update for execution: {execution_id}"
+                )
 
     async def _handle_crew_kickoff_failed_crew(self, execution_id: str, event):
         """Handle crew kickoff failed event in crew context."""
