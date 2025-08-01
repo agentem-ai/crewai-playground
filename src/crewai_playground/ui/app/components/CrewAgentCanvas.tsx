@@ -360,9 +360,6 @@ const TaskNode: React.FC<NodeProps> = ({ data }) => {
 const CrewNode: React.FC<NodeProps> = ({ data }) => {
   const typedData = data as unknown as CrewNodeData;
   const statusColor = getStatusColor(typedData.status);
-  
-  // Check if this node has outgoing connections
-  const hasOutgoingEdge = typedData.hasOutgoingEdge ?? false;
 
   return (
     <div
@@ -379,15 +376,7 @@ const CrewNode: React.FC<NodeProps> = ({ data }) => {
       <div className="text-xs text-gray-500 mt-1">{typedData.name}</div>
       <div className="mt-2 text-xs">Status: {typedData.status}</div>
       
-      {/* Only render source handle if this node has outgoing connections */}
-      {hasOutgoingEdge && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          className="w-2 h-2 bg-blue-500"
-          isConnectable={false}
-        />
-      )}
+      {/* Crew node has no handles as per requirements */}
     </div>
   );
 };
@@ -788,7 +777,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
     const newNodes: Node[] = [];
     const newEdges: Edge[] = [];
 
-    // 1. Create crew node if available
+    // 1. Create crew node if available (crew node has no handles)
     if (state.crew) {
       const crewNode = {
         id: `crew-${state.crew.id}`,
@@ -796,40 +785,47 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
         position: { x: 0, y: 0 }, // Position will be set by dagre layout
         data: {
           ...state.crew,
-          // Crew node has outgoing edges if there are agents
-          hasOutgoingEdge: state.agents.length > 0,
-          hasIncomingEdge: false, // Crew node never has incoming edges
+          // Crew node never has handles
+          hasOutgoingEdge: false,
+          hasIncomingEdge: false,
         },
       } as Node;
 
       newNodes.push(crewNode);
     }
 
-    // 2. Create agent nodes
-    // Sort agents by status to show running first, then waiting, then completed
-    const sortedAgents = [...state.agents].sort((a, b) => {
-      const statusOrder: Record<string, number> = {
-        running: 0,
-        waiting: 1,
-        initializing: 2,
-        completed: 3,
-      };
+    // 2. Create agent nodes in execution order
+    let orderedAgents: Agent[] = [];
+    
+    // Use execution order if available, otherwise use agent array order
+    if (state.crew?.execution_order && state.crew.execution_order.length > 0) {
+      // Order agents based on execution_order
+      orderedAgents = state.crew.execution_order
+        .map(agentId => state.agents.find(a => a.id === agentId))
+        .filter(agent => agent !== undefined) as Agent[];
+      
+      // Add any agents not in execution_order at the end
+      const agentsInOrder = new Set(orderedAgents.map(a => a.id));
+      const remainingAgents = state.agents.filter(a => !agentsInOrder.has(a.id));
+      orderedAgents = [...orderedAgents, ...remainingAgents];
+    } else {
+      // Fallback to original agent order
+      orderedAgents = [...state.agents];
+    }
 
-      return (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
-    });
-
-    sortedAgents.forEach((agent, index) => {
+    orderedAgents.forEach((agent: Agent, index: number) => {
       // Find tasks assigned to this agent
       const agentTasks = state.tasks.filter(
         (task) => task.agent_id === agent.id
       );
 
-      // Determine if this agent has incoming or outgoing edges
+      // Determine handle visibility based on execution position
       const isFirstAgent = index === 0;
-      const isLastAgent = index === sortedAgents.length - 1;
-      const hasIncomingEdge = isFirstAgent || 
-        (state.crew?.type === "sequential" && index > 0);
-      const hasOutgoingEdge = state.crew?.type === "sequential" && !isLastAgent;
+      const isLastAgent = index === orderedAgents.length - 1;
+      
+      // First agent has no input handle, last agent has no output handle
+      const hasIncomingEdge = !isFirstAgent;
+      const hasOutgoingEdge = !isLastAgent;
       
       const agentNode = {
         id: `agent-${agent.id}`,
@@ -842,75 +838,51 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
           isLast: isLastAgent,
           hasIncomingEdge: hasIncomingEdge,
           hasOutgoingEdge: hasOutgoingEdge,
+          executionOrder: index, // Add execution order for debugging
         },
       } as Node;
 
       newNodes.push(agentNode);
-
-      // Connect crew to first agent
-      if (state.crew && index === 0) {
-        const crewToAgentEdge: Edge = {
-          id: `crew-${state.crew.id}-to-agent-${agent.id}`,
-          source: `crew-${state.crew.id}`,
-          target: `agent-${agent.id}`,
-          type: "default",
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: "#64748b",
-          },
-          style: {
-            strokeWidth: 2,
-            stroke: "#64748b",
-          },
-        };
-
-        newEdges.push(crewToAgentEdge);
-      }
     });
 
-    // 3. Create edges between agents in sequence if crew type is sequential
-    if (state.crew?.type === "sequential" && state.crew.execution_order) {
-      for (let i = 0; i < state.crew.execution_order.length - 1; i++) {
-        const currentAgentId = state.crew.execution_order[i];
-        const nextAgentId = state.crew.execution_order[i + 1];
-        
-        const currentAgent = sortedAgents.find(a => a.id === currentAgentId);
-        const nextAgent = sortedAgents.find(a => a.id === nextAgentId);
-        
-        if (currentAgent && nextAgent) {
-          const sourceId = `agent-${currentAgent.id}`;
-          const targetId = `agent-${nextAgent.id}`;
+    // 3. Create edges between consecutive agents in execution order
+    for (let i = 0; i < orderedAgents.length - 1; i++) {
+      const currentAgent = orderedAgents[i];
+      const nextAgent = orderedAgents[i + 1];
+      
+      const sourceId = `agent-${currentAgent.id}`;
+      const targetId = `agent-${nextAgent.id}`;
 
-          // Determine edge color based on current agent status
-          let edgeColor = "#64748b"; // default slate-500
-          let animated = false;
+      // Determine edge color based on current agent status
+      let edgeColor = "#64748b"; // default slate-500
+      let animated = false;
 
-          if (currentAgent.status === "completed") {
-            edgeColor = "#6366f1"; // indigo-500 for completed
-          } else if (currentAgent.status === "running") {
-            edgeColor = "#10b981"; // emerald-500 for running
-            animated = true;
-          }
-
-          const agentEdge: Edge = {
-            id: `agent-${currentAgent.id}-to-${nextAgent.id}`,
-            source: sourceId,
-            target: targetId,
-            type: "default",
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: edgeColor,
-            },
-            style: {
-              strokeWidth: 2,
-              stroke: edgeColor,
-            },
-            animated: animated,
-          };
-
-          newEdges.push(agentEdge);
-        }
+      if (currentAgent.status === "completed") {
+        edgeColor = "#6366f1"; // indigo-500 for completed
+      } else if (currentAgent.status === "running") {
+        edgeColor = "#10b981"; // emerald-500 for running
+        animated = true;
+      } else if (currentAgent.status === "waiting") {
+        edgeColor = "#f59e0b"; // amber-500 for waiting
       }
+
+      const agentEdge: Edge = {
+        id: `agent-${currentAgent.id}-to-${nextAgent.id}`,
+        source: sourceId,
+        target: targetId,
+        type: "default",
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: edgeColor,
+        },
+        style: {
+          strokeWidth: 2,
+          stroke: edgeColor,
+        },
+        animated: animated,
+      };
+
+      newEdges.push(agentEdge);
     }
     
     // Apply dagre layout to position nodes automatically
