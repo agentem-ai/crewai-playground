@@ -18,15 +18,17 @@ import {
 import { Badge } from "../components/ui/badge";
 import {
   Loader2,
-  ChevronRight,
-  ChevronDown,
-  ArrowLeft,
-  Moon,
-  Sun,
-  Clock,
-  List,
-  BarChart2,
   Info,
+  ArrowLeft,
+  Clock,
+  Users,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Brain,
+  Wrench,
+  Zap,
+  Timer,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import {
@@ -42,46 +44,88 @@ import { TraceSpanDetail } from "../components/TraceSpanDetail";
 import { Separator } from "../components/ui/separator";
 import { ScrollArea } from "../components/ui/scroll-area";
 
-// Define trace data types
+// Define trace data// Type definitions
 interface TraceEvent {
   type: string;
   timestamp: string;
   data: Record<string, any>;
 }
 
-interface TraceAgent {
+interface LLMCall {
+  id: string;
+  type: 'llm.started' | 'llm.completed' | 'llm.failed';
+  timestamp: string;
+  model?: string;
+  prompt?: string;
+  completion?: string;
+  tokens?: number;
+  status: 'started' | 'completed' | 'failed';
+  agent_id?: string;
+  agent_name?: string;
+  task_id?: string;
+  error?: string;
+  duration?: number;
+}
+
+interface ToolExecution {
+  id: string;
+  type: 'tool.started' | 'tool.completed' | 'tool.failed';
+  timestamp: string;
+  tool_name?: string;
+  inputs?: any;
+  outputs?: any;
+  status: 'started' | 'completed' | 'failed';
+  agent_id?: string;
+  agent_name?: string;
+  error?: string;
+  duration?: number;
+}
+
+interface TelemetryMetrics {
+  totalLLMCalls: number;
+  totalToolExecutions: number;
+  totalTokens: number;
+  executionTime: number;
+  completedLLMCalls: number;
+  failedLLMCalls: number;
+  completedToolExecutions: number;
+  failedToolExecutions: number;
+}
+
+interface Agent {
   id: string;
   name: string;
   role: string;
   status: string;
   start_time: string;
   end_time?: string;
-  output?: string;
-  events: TraceEvent[];
+  llmCalls?: LLMCall[];
+  toolExecutions?: ToolExecution[];
 }
 
-interface TraceTask {
+interface Task {
   id: string;
   description: string;
-  agent_id: string | null;
+  agent_id?: string;
   status: string;
   start_time: string;
   end_time?: string;
   output?: string;
-  events: TraceEvent[];
 }
 
 interface Trace {
   id: string;
   crew_id: string;
   crew_name: string;
+  status: string;
   start_time: string;
   end_time?: string;
-  status: string;
-  output?: string;
   events: TraceEvent[];
-  agents: Record<string, TraceAgent>;
-  tasks: Record<string, TraceTask>;
+  agents: Record<string, Agent>;
+  tasks: Record<string, Task>;
+  telemetryMetrics?: TelemetryMetrics;
+  llmCalls?: LLMCall[];
+  toolExecutions?: ToolExecution[];
 }
 
 // Visualization data types
@@ -122,6 +166,11 @@ export default function TracesPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedSpan, setSelectedSpan] = useState<TimelineSpan | null>(null);
+  const [telemetryData, setTelemetryData] = useState<{
+    llmCalls: LLMCall[];
+    toolExecutions: ToolExecution[];
+    metrics: TelemetryMetrics;
+  } | null>(null);
 
   const handleBack = () => {
     navigate(`/kickoff?crewId=${crewId}`);
@@ -328,17 +377,39 @@ export default function TracesPage() {
         }
         const data = await response.json();
         
-        // Ensure agents and tasks are objects if they're null or undefined
-        const processedData = data.map((trace: any) => ({
-          ...trace,
-          agents: trace.agents || {},
-          tasks: trace.tasks || {}
-        }));
+        // Process trace data and extract telemetry information
+        const processedData = data.map((trace: any) => {
+          const processedTrace = {
+            ...trace,
+            agents: trace.agents || {},
+            tasks: trace.tasks || {},
+            events: trace.events || []
+          };
+          
+          // Extract telemetry data from events
+          const telemetryData = extractTelemetryData(processedTrace);
+          
+          return {
+            ...processedTrace,
+            telemetryMetrics: telemetryData.metrics,
+            llmCalls: telemetryData.llmCalls,
+            toolExecutions: telemetryData.toolExecutions
+          };
+        });
         
         setTraces(processedData);
         // Select the first trace by default
         if (processedData.length > 0) {
-          setSelectedTrace(processedData[0]);
+          const firstTrace = processedData[0];
+          setSelectedTrace(firstTrace);
+          // Set telemetry data for the selected trace
+          if (firstTrace.llmCalls && firstTrace.toolExecutions && firstTrace.telemetryMetrics) {
+            setTelemetryData({
+              llmCalls: firstTrace.llmCalls,
+              toolExecutions: firstTrace.toolExecutions,
+              metrics: firstTrace.telemetryMetrics
+            });
+          }
         }
       } catch (err) {
         console.error('Error fetching traces:', err);
@@ -350,6 +421,95 @@ export default function TracesPage() {
 
     fetchTraces();
   }, [crewId]);
+
+  // Extract telemetry data from trace events
+  const extractTelemetryData = (trace: any) => {
+    const llmCalls: LLMCall[] = [];
+    const toolExecutions: ToolExecution[] = [];
+    const events = trace.events || [];
+
+    // Process events to extract LLM calls and tool executions
+    events.forEach((event: TraceEvent) => {
+      if (event.type.startsWith('llm.')) {
+        const llmCall: LLMCall = {
+          id: event.data.id || `${event.type}-${event.timestamp}`,
+          type: event.type as LLMCall['type'],
+          timestamp: event.timestamp,
+          model: event.data.model,
+          prompt: event.data.prompt,
+          completion: event.data.completion,
+          tokens: event.data.tokens,
+          status: event.type === 'llm.completed' ? 'completed' : 
+                  event.type === 'llm.failed' ? 'failed' : 'started',
+          agent_id: event.data.agent_id,
+          agent_name: event.data.agent_name,
+          task_id: event.data.task_id,
+          error: event.data.error
+        };
+        llmCalls.push(llmCall);
+      } else if (event.type.startsWith('tool.')) {
+        const toolExecution: ToolExecution = {
+          id: event.data.id || `${event.type}-${event.timestamp}`,
+          type: event.type as ToolExecution['type'],
+          timestamp: event.timestamp,
+          tool_name: event.data.tool_name,
+          inputs: event.data.inputs,
+          outputs: event.data.outputs,
+          status: event.type === 'tool.completed' ? 'completed' : 
+                  event.type === 'tool.failed' ? 'failed' : 'started',
+          agent_id: event.data.agent_id,
+          agent_name: event.data.agent_name,
+          error: event.data.error
+        };
+        toolExecutions.push(toolExecution);
+      }
+    });
+
+    // Calculate metrics
+    const totalLLMCalls = llmCalls.length;
+    const completedLLMCalls = llmCalls.filter(call => call.status === 'completed').length;
+    const failedLLMCalls = llmCalls.filter(call => call.status === 'failed').length;
+    const totalToolExecutions = toolExecutions.length;
+    const completedToolExecutions = toolExecutions.filter(exec => exec.status === 'completed').length;
+    const failedToolExecutions = toolExecutions.filter(exec => exec.status === 'failed').length;
+    const totalTokens = llmCalls.reduce((sum, call) => sum + (call.tokens || 0), 0);
+    
+    const startTime = trace.start_time ? new Date(trace.start_time).getTime() : 0;
+    const endTime = trace.end_time ? new Date(trace.end_time).getTime() : Date.now();
+    const executionTime = endTime - startTime;
+
+    const metrics: TelemetryMetrics = {
+      totalLLMCalls,
+      totalToolExecutions,
+      totalTokens,
+      executionTime,
+      completedLLMCalls,
+      failedLLMCalls,
+      completedToolExecutions,
+      failedToolExecutions
+    };
+
+    // Enhance agents with their LLM calls and tool executions
+    Object.values(trace.agents || {}).forEach((agent: any) => {
+      agent.llmCalls = llmCalls.filter(call => call.agent_id === agent.id);
+      agent.toolExecutions = toolExecutions.filter(exec => exec.agent_id === agent.id);
+    });
+
+    return { llmCalls, toolExecutions, metrics };
+  };
+
+  // Update telemetry data when selected trace changes
+  useEffect(() => {
+    if (selectedTrace && selectedTrace.llmCalls && selectedTrace.toolExecutions && selectedTrace.telemetryMetrics) {
+      setTelemetryData({
+        llmCalls: selectedTrace.llmCalls,
+        toolExecutions: selectedTrace.toolExecutions,
+        metrics: selectedTrace.telemetryMetrics
+      });
+    } else {
+      setTelemetryData(null);
+    }
+  }, [selectedTrace]);
 
   // Format timestamp to readable format
   const formatTime = (timestamp: string) => {
@@ -433,6 +593,16 @@ export default function TracesPage() {
             onClick={() => {
               setSelectedTrace(trace);
               setSelectedSpan(null); // Reset selected span when changing traces
+              // Update telemetry data for the selected trace
+              if (trace.llmCalls && trace.toolExecutions && trace.telemetryMetrics) {
+                setTelemetryData({
+                  llmCalls: trace.llmCalls,
+                  toolExecutions: trace.toolExecutions,
+                  metrics: trace.telemetryMetrics
+                });
+              } else {
+                setTelemetryData(null);
+              }
             }}
           >
             <div className="flex justify-between items-center">
@@ -482,6 +652,80 @@ export default function TracesPage() {
 
     return (
       <div className="space-y-6">
+        {/* Telemetry Metrics Overview */}
+        {selectedTrace.telemetryMetrics && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              Telemetry Metrics
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-bold text-blue-600">{selectedTrace.telemetryMetrics.totalLLMCalls}</div>
+                      <div className="text-sm text-gray-500">LLM Calls</div>
+                      <div className="text-xs text-gray-400">
+                        {selectedTrace.telemetryMetrics.completedLLMCalls} completed, {selectedTrace.telemetryMetrics.failedLLMCalls} failed
+                      </div>
+                    </div>
+                    <Brain className="h-8 w-8 text-blue-500" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-bold text-green-600">{selectedTrace.telemetryMetrics.totalToolExecutions}</div>
+                      <div className="text-sm text-gray-500">Tool Executions</div>
+                      <div className="text-xs text-gray-400">
+                        {selectedTrace.telemetryMetrics.completedToolExecutions} completed, {selectedTrace.telemetryMetrics.failedToolExecutions} failed
+                      </div>
+                    </div>
+                    <Wrench className="h-8 w-8 text-green-500" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-bold text-purple-600">{selectedTrace.telemetryMetrics.totalTokens.toLocaleString()}</div>
+                      <div className="text-sm text-gray-500">Total Tokens</div>
+                      <div className="text-xs text-gray-400">
+                        Across all LLM calls
+                      </div>
+                    </div>
+                    <Zap className="h-8 w-8 text-purple-500" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-bold text-orange-600">
+                        {selectedTrace.telemetryMetrics.executionTime < 60000 
+                          ? `${(selectedTrace.telemetryMetrics.executionTime / 1000).toFixed(1)}s`
+                          : `${(selectedTrace.telemetryMetrics.executionTime / 60000).toFixed(1)}m`
+                        }
+                      </div>
+                      <div className="text-sm text-gray-500">Execution Time</div>
+                      <div className="text-xs text-gray-400">
+                        Total duration
+                      </div>
+                    </div>
+                    <Timer className="h-8 w-8 text-orange-500" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* Basic Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-6">
@@ -642,37 +886,98 @@ export default function TracesPage() {
                     </div>
                   )}
 
-                  {agent.output && (
+                  {/* LLM Calls Section */}
+                  {agent.llmCalls && agent.llmCalls.length > 0 && (
                     <div className="col-span-2">
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                        Output
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-2">
+                        <Brain className="h-4 w-4" />
+                        LLM Calls ({agent.llmCalls.length})
                       </div>
-                      <div className="bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md text-sm whitespace-pre-wrap font-mono">
-                        {agent.output}
+                      <div className="space-y-2">
+                        {agent.llmCalls.map((call, idx) => (
+                          <div key={idx} className="border rounded-md p-3 bg-blue-50 dark:bg-blue-900/20">
+                            <div className="flex justify-between items-center mb-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant={call.status === 'completed' ? 'default' : call.status === 'failed' ? 'destructive' : 'secondary'}>
+                                  {call.status}
+                                </Badge>
+                                {call.model && <span className="text-sm font-mono">{call.model}</span>}
+                              </div>
+                              <span className="text-xs text-gray-500">{formatTime(call.timestamp)}</span>
+                            </div>
+                            {call.tokens && (
+                              <div className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                                <Zap className="h-3 w-3 inline mr-1" />
+                                {call.tokens} tokens
+                              </div>
+                            )}
+                            {call.prompt && (
+                              <details className="mb-2">
+                                <summary className="text-sm font-medium cursor-pointer hover:text-blue-600">View Prompt</summary>
+                                <div className="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono whitespace-pre-wrap">
+                                  {call.prompt.length > 500 ? `${call.prompt.substring(0, 500)}...` : call.prompt}
+                                </div>
+                              </details>
+                            )}
+                            {call.completion && (
+                              <details>
+                                <summary className="text-sm font-medium cursor-pointer hover:text-blue-600">View Response</summary>
+                                <div className="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono whitespace-pre-wrap">
+                                  {call.completion.length > 500 ? `${call.completion.substring(0, 500)}...` : call.completion}
+                                </div>
+                              </details>
+                            )}
+                            {call.error && (
+                              <div className="text-sm text-red-600 dark:text-red-400 mt-2">
+                                <AlertCircle className="h-3 w-3 inline mr-1" />
+                                {call.error}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
 
-                  {agent.events.length > 0 && (
-                    <div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                        Events
+                  {/* Tool Executions Section */}
+                  {agent.toolExecutions && agent.toolExecutions.length > 0 && (
+                    <div className="col-span-2">
+                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-2">
+                        <Wrench className="h-4 w-4" />
+                        Tool Executions ({agent.toolExecutions.length})
                       </div>
-                      <div className="border rounded-md divide-y dark:divide-gray-700 col-span-2">
-                        {agent.events.map((event, idx) => (
-                          <div
-                            key={idx}
-                            className="p-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                          >
-                            <div className="flex justify-between">
-                              <Badge variant="outline">{event.type}</Badge>
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
-                                {formatTime(event.timestamp)}
-                              </span>
+                      <div className="space-y-2">
+                        {agent.toolExecutions.map((execution, idx) => (
+                          <div key={idx} className="border rounded-md p-3 bg-green-50 dark:bg-green-900/20">
+                            <div className="flex justify-between items-center mb-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant={execution.status === 'completed' ? 'default' : execution.status === 'failed' ? 'destructive' : 'secondary'}>
+                                  {execution.status}
+                                </Badge>
+                                {execution.tool_name && <span className="text-sm font-mono">{execution.tool_name}</span>}
+                              </div>
+                              <span className="text-xs text-gray-500">{formatTime(execution.timestamp)}</span>
                             </div>
-                            {Object.keys(event.data).length > 0 && (
-                              <div className="mt-1 text-xs font-mono bg-gray-50 dark:bg-gray-800/50 p-1 rounded">
-                                {JSON.stringify(event.data, null, 2)}
+                            {execution.inputs && (
+                              <details className="mb-2">
+                                <summary className="text-sm font-medium cursor-pointer hover:text-green-600">View Inputs</summary>
+                                <div className="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
+                                  {JSON.stringify(execution.inputs, null, 2)}
+                                </div>
+                              </details>
+                            )}
+                            {execution.outputs && (
+                              <details>
+                                <summary className="text-sm font-medium cursor-pointer hover:text-green-600">View Outputs</summary>
+                                <div className="mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
+                                  {JSON.stringify(execution.outputs, null, 2)}
+                                </div>
+                              </details>
+                            )}
+                            {execution.error && (
+                              <div className="text-sm text-red-600 dark:text-red-400 mt-2">
+                                <AlertCircle className="h-3 w-3 inline mr-1" />
+                                {execution.error}
                               </div>
                             )}
                           </div>
@@ -770,33 +1075,7 @@ export default function TracesPage() {
                     </div>
                   )}
 
-                  {task.events.length > 0 && (
-                    <div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                        Events
-                      </div>
-                      <div className="border rounded-md divide-y dark:divide-gray-700 col-span-2">
-                        {task.events.map((event, idx) => (
-                          <div
-                            key={idx}
-                            className="p-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                          >
-                            <div className="flex justify-between">
-                              <Badge variant="outline">{event.type}</Badge>
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
-                                {formatTime(event.timestamp)}
-                              </span>
-                            </div>
-                            {Object.keys(event.data).length > 0 && (
-                              <div className="mt-1 text-xs font-mono bg-gray-50 dark:bg-gray-800/50 p-1 rounded">
-                                {JSON.stringify(event.data, null, 2)}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {/* Task-specific details can be added here if needed */}
                 </div>
               </AccordionContent>
             </AccordionItem>
@@ -804,6 +1083,23 @@ export default function TracesPage() {
         </Accordion>
       </div>
     );
+  };
+
+  // Get event type color and icon
+  const getEventTypeInfo = (eventType: string) => {
+    if (eventType.includes('completed')) {
+      return { color: 'text-green-600', bgColor: 'bg-green-100 dark:bg-green-900/30', icon: CheckCircle };
+    } else if (eventType.includes('failed') || eventType.includes('error')) {
+      return { color: 'text-red-600', bgColor: 'bg-red-100 dark:bg-red-900/30', icon: XCircle };
+    } else if (eventType.includes('started')) {
+      return { color: 'text-blue-600', bgColor: 'bg-blue-100 dark:bg-blue-900/30', icon: Clock };
+    } else if (eventType.includes('llm')) {
+      return { color: 'text-purple-600', bgColor: 'bg-purple-100 dark:bg-purple-900/30', icon: Brain };
+    } else if (eventType.includes('tool')) {
+      return { color: 'text-orange-600', bgColor: 'bg-orange-100 dark:bg-orange-900/30', icon: Wrench };
+    } else {
+      return { color: 'text-gray-600', bgColor: 'bg-gray-100 dark:bg-gray-900/30', icon: Info };
+    }
   };
 
   // Render events tab
@@ -821,28 +1117,98 @@ export default function TracesPage() {
       );
     }
 
+    // Sort events by timestamp
+    const sortedEvents = [...events].sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
     return (
       <div className="space-y-4">
-        <div className="border rounded-md divide-y dark:divide-gray-700">
-          {events.map((event, idx) => (
-            <div
-              key={idx}
-              className="p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50"
-            >
-              <div className="flex justify-between items-center">
-                <Badge variant="outline">{event.type}</Badge>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {formatTime(event.timestamp)}
-                </span>
-              </div>
-              {Object.keys(event.data).length > 0 && (
-                <div className="mt-2 text-xs font-mono bg-gray-50 dark:bg-gray-800/50 p-2 rounded">
-                  {JSON.stringify(event.data, null, 2)}
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Clock className="h-5 w-5" />
+            Events Timeline ({sortedEvents.length})
+          </h3>
         </div>
+        
+        <ScrollArea className="h-[600px]">
+          <div className="space-y-3">
+            {sortedEvents.map((event, idx) => {
+              const typeInfo = getEventTypeInfo(event.type);
+              const IconComponent = typeInfo.icon;
+              
+              return (
+                <div
+                  key={idx}
+                  className={`border rounded-lg p-4 ${typeInfo.bgColor} hover:shadow-md transition-shadow`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <IconComponent className={`h-5 w-5 ${typeInfo.color} flex-shrink-0`} />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Badge 
+                            variant="outline" 
+                            className={`${typeInfo.color} border-current`}
+                          >
+                            {event.type}
+                          </Badge>
+                          {event.data.agent_name && (
+                            <span className="text-sm text-gray-600 dark:text-gray-300">
+                              Agent: {event.data.agent_name}
+                            </span>
+                          )}
+                          {event.data.task_id && (
+                            <span className="text-sm text-gray-600 dark:text-gray-300">
+                              Task: {event.data.task_id}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {formatTime(event.timestamp)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Event-specific details */}
+                  {event.data.model && (
+                    <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">
+                      <strong>Model:</strong> {event.data.model}
+                    </div>
+                  )}
+                  {event.data.tokens && (
+                    <div className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                      <strong>Tokens:</strong> {event.data.tokens}
+                    </div>
+                  )}
+                  {event.data.tool_name && (
+                    <div className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                      <strong>Tool:</strong> {event.data.tool_name}
+                    </div>
+                  )}
+                  {event.data.error && (
+                    <div className="mt-2 text-sm text-red-600 dark:text-red-400">
+                      <strong>Error:</strong> {event.data.error}
+                    </div>
+                  )}
+                  
+                  {/* Expandable raw data */}
+                  {Object.keys(event.data).length > 0 && (
+                    <details className="mt-3">
+                      <summary className="text-sm font-medium cursor-pointer hover:text-blue-600 dark:hover:text-blue-400">
+                        View Raw Event Data
+                      </summary>
+                      <div className="mt-2 text-xs font-mono bg-gray-50 dark:bg-gray-800 p-3 rounded border overflow-x-auto">
+                        <pre>{JSON.stringify(event.data, null, 2)}</pre>
+                      </div>
+                    </details>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
       </div>
     );
   };
@@ -879,7 +1245,7 @@ export default function TracesPage() {
                   onValueChange={setActiveTab}
                   className="w-full"
                 >
-                  <TabsList className="grid grid-cols-3 mb-4">
+                  <TabsList className="grid grid-cols-4 mb-4">
                     <TabsTrigger
                       value="overview"
                       className="flex items-center gap-1"
@@ -887,8 +1253,15 @@ export default function TracesPage() {
                       <Info className="h-4 w-4" />
                       <span>Overview</span>
                     </TabsTrigger>
-                    <TabsTrigger value="agents">Agents</TabsTrigger>
+                    <TabsTrigger value="agents" className="flex items-center gap-1">
+                      <Users className="h-4 w-4" />
+                      <span>Agents</span>
+                    </TabsTrigger>
                     <TabsTrigger value="tasks">Tasks</TabsTrigger>
+                    <TabsTrigger value="events" className="flex items-center gap-1">
+                      <Clock className="h-4 w-4" />
+                      <span>Events</span>
+                    </TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="overview">
@@ -898,6 +1271,8 @@ export default function TracesPage() {
                   <TabsContent value="agents">{renderAgents()}</TabsContent>
 
                   <TabsContent value="tasks">{renderTasks()}</TabsContent>
+
+                  <TabsContent value="events">{renderEvents()}</TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
