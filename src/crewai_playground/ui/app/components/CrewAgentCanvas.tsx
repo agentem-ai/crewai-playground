@@ -20,14 +20,14 @@ import {
   applyEdgeChanges,
   useReactFlow,
 } from "@xyflow/react";
-import type { 
-  NodeTypes, 
-  Node, 
-  Edge, 
+import type {
+  NodeTypes,
+  Node,
+  Edge,
   NodeProps,
   NodeChange,
   EdgeChange,
-  ReactFlowInstance 
+  ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
@@ -120,41 +120,44 @@ const getStatusColor = (status: string): string => {
     default:
       return "#64748b"; // slate-500
   }
-}
+};
 
 // Initialize dagre graph
 const dagreGraph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
 
 // Calculate maximum dimensions for all nodes to ensure uniform sizing
-const calculateMaxNodeDimensions = (nodes: Node[]): { width: number; height: number } => {
+const calculateMaxNodeDimensions = (
+  nodes: Node[]
+): { width: number; height: number } => {
   // Default minimum dimensions
   const defaultWidth = 280;
   const defaultHeight = 150;
-  
+
   return { width: defaultWidth, height: defaultHeight };
-}
+};
 
 // Layout the nodes and edges using dagre
 const getLayoutedElements = (
   nodes: Node[],
   edges: Edge[],
-  direction: 'TB' | 'LR' = 'TB'
+  direction: "TB" | "LR" = "TB"
 ): { nodes: Node[]; edges: Edge[]; fullWidth: number; fullHeight: number } => {
   if (!nodes.length) return { nodes, edges, fullWidth: 0, fullHeight: 0 };
 
   // Get max dimensions to ensure uniform sizing
-  const { width: maxWidth, height: maxHeight } = calculateMaxNodeDimensions(nodes);
+  const { width: maxWidth, height: maxHeight } =
+    calculateMaxNodeDimensions(nodes);
   const nodeWidth = Math.max(maxWidth, 320); // Increased minimum width for task details
   const nodeHeight = Math.max(maxHeight, 200); // Increased minimum height for task details
 
   // Create a new directed graph with optimized spacing for vertical layout
-  dagreGraph.setGraph({ 
-    rankdir: direction, 
+  dagreGraph.setGraph({
+    rankdir: direction,
     nodesep: 50, // Horizontal spacing between nodes (reduced for center alignment)
     ranksep: 120, // Vertical spacing between ranks
-    align: 'UL', // Align nodes to upper-left for consistent positioning
+    align: "UL", // Align nodes to upper-left for consistent positioning
     marginx: 20,
-    marginy: 20
+    marginy: 20,
   });
 
   // Add nodes to the graph with uniform dimensions
@@ -212,7 +215,7 @@ const getLayoutedElements = (
 const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
   const typedData = data as unknown as AgentNodeData;
   const statusColor = getStatusColor(typedData.status);
-  
+
   // Check if this node has incoming or outgoing connections
   const hasIncomingEdge = typedData.hasIncomingEdge ?? false;
   const hasOutgoingEdge = typedData.hasOutgoingEdge ?? false;
@@ -220,10 +223,12 @@ const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
   return (
     <div
       className="px-4 py-3 shadow-md rounded-md bg-white border-2"
-      style={{ 
+      style={{
         borderColor: statusColor,
-        width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : '320px',
-        minHeight: typedData.uniformHeight ? `${typedData.uniformHeight}px` : '180px'
+        width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : "320px",
+        minHeight: typedData.uniformHeight
+          ? `${typedData.uniformHeight}px`
+          : "180px",
       }}
     >
       <div className="flex justify-between items-center">
@@ -239,18 +244,18 @@ const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
           ? `${typedData.description.substring(0, 80)}...`
           : typedData.description}
       </div>
-      
+
       {/* Tasks Section - Always Visible */}
       {typedData.associatedTasks && typedData.associatedTasks.length > 0 && (
         <div className="mt-3 border-t pt-2">
           <div className="text-xs font-semibold mb-1">Tasks:</div>
           <div className="space-y-2">
             {typedData.associatedTasks.map((task) => (
-              <div 
+              <div
                 key={task.id}
                 className="text-xs p-2 rounded bg-gray-50 border border-gray-100"
                 style={{
-                  borderLeft: `3px solid ${getStatusColor(task.status)}`
+                  borderLeft: `3px solid ${getStatusColor(task.status)}`,
                 }}
               >
                 {/* Task Header with Description and Status */}
@@ -260,24 +265,32 @@ const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
                       ? `${task.description.substring(0, 50)}...`
                       : task.description}
                   </div>
-                  <div className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium" 
-                    style={{ 
+                  <div
+                    className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                    style={{
                       backgroundColor: getStatusColor(task.status),
-                      color: 'white',
-                      opacity: 0.9
-                    }}>
+                      color: "white",
+                      opacity: 0.9,
+                    }}
+                  >
                     {task.status}
                   </div>
                 </div>
-                
+
                 {/* Task Output - Always Visible */}
                 {task.output && (
                   <div className="mt-1.5">
-                    <div className="text-[10px] text-gray-500 font-medium">Output:</div>
+                    <div className="text-[10px] text-gray-500 font-medium">
+                      Output:
+                    </div>
                     <div className="whitespace-pre-wrap overflow-hidden max-h-16 overflow-y-auto text-[10px] mt-0.5">
-                      {typeof task.output === 'string' 
-                        ? task.output.substring(0, 120) + (task.output.length > 120 ? '...' : '')
-                        : JSON.stringify(task.output, null, 2).substring(0, 120) + '...'}
+                      {typeof task.output === "string"
+                        ? task.output.substring(0, 120) +
+                          (task.output.length > 120 ? "..." : "")
+                        : JSON.stringify(task.output, null, 2).substring(
+                            0,
+                            120
+                          ) + "..."}
                     </div>
                   </div>
                 )}
@@ -286,7 +299,7 @@ const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
           </div>
         </div>
       )}
-      
+
       {/* Only render target handle if this node has incoming connections */}
       {hasIncomingEdge && (
         <Handle
@@ -296,7 +309,7 @@ const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
           isConnectable={false}
         />
       )}
-      
+
       {/* Only render source handle if this node has outgoing connections */}
       {hasOutgoingEdge && (
         <Handle
@@ -313,7 +326,7 @@ const AgentNode: React.FC<NodeProps> = ({ data, id }) => {
 const TaskNode: React.FC<NodeProps> = ({ data }) => {
   const typedData = data as unknown as TaskNodeData;
   const statusColor = getStatusColor(typedData.status);
-  
+
   // Check if this node has incoming or outgoing connections
   const hasIncomingEdge = typedData.hasIncomingEdge ?? false;
   const hasOutgoingEdge = typedData.hasOutgoingEdge ?? false;
@@ -340,7 +353,7 @@ const TaskNode: React.FC<NodeProps> = ({ data }) => {
           ? `${typedData.description.substring(0, 100)}...`
           : typedData.description}
       </div>
-      
+
       {/* Only render target handle if this node has incoming connections */}
       {hasIncomingEdge && (
         <Handle
@@ -350,7 +363,7 @@ const TaskNode: React.FC<NodeProps> = ({ data }) => {
           isConnectable={false}
         />
       )}
-      
+
       {/* Only render source handle if this node has outgoing connections */}
       {hasOutgoingEdge && (
         <Handle
@@ -371,10 +384,12 @@ const CrewNode: React.FC<NodeProps> = ({ data }) => {
   return (
     <div
       className="px-4 py-3 shadow-md rounded-md bg-white border-2 flex flex-col justify-center"
-      style={{ 
+      style={{
         borderColor: statusColor,
-        width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : '320px',
-        minHeight: typedData.uniformHeight ? `${typedData.uniformHeight}px` : '200px'
+        width: typedData.uniformWidth ? `${typedData.uniformWidth}px` : "320px",
+        minHeight: typedData.uniformHeight
+          ? `${typedData.uniformHeight}px`
+          : "200px",
       }}
     >
       <div className="flex justify-between items-center mb-2">
@@ -384,19 +399,25 @@ const CrewNode: React.FC<NodeProps> = ({ data }) => {
           style={{ backgroundColor: statusColor }}
         ></div>
       </div>
-      <div className="text-sm font-medium text-gray-700 mb-1">{typedData.name}</div>
-      <div className="text-xs text-gray-500 mb-2">Status: {typedData.status}</div>
-      
+      <div className="text-sm font-medium text-gray-700 mb-1">
+        {typedData.name}
+      </div>
+      <div className="text-xs text-gray-500 mb-2">
+        Status: {typedData.status}
+      </div>
+
       {/* Crew Details */}
       <div className="mt-auto pt-2 border-t border-gray-100">
         <div className="text-xs text-gray-600">
-          <div>Type: {typedData.type || 'Sequential'}</div>
+          <div>Type: {typedData.type || "Sequential"}</div>
           {typedData.started_at && (
-            <div className="mt-1">Started: {new Date(typedData.started_at).toLocaleTimeString()}</div>
+            <div className="mt-1">
+              Started: {new Date(typedData.started_at).toLocaleTimeString()}
+            </div>
           )}
         </div>
       </div>
-      
+
       {/* Crew node has no handles as per requirements */}
     </div>
   );
@@ -423,13 +444,16 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
   });
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [reactFlowInstance, setReactFlowInstance] =
+    useState<ReactFlowInstance | null>(null);
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    (changes: NodeChange[]) =>
+      setNodes((nds) => applyNodeChanges(changes, nds)),
     []
   );
   const onEdgesChange = useCallback(
-    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    (changes: EdgeChange[]) =>
+      setEdges((eds) => applyEdgeChanges(changes, eds)),
     []
   );
   const [connectionStatus, setConnectionStatus] = useState<
@@ -557,12 +581,22 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
             console.log("Heartbeat pong received");
           }
           // Handle state update - check for crew visualization data
-          else if (data.crew !== undefined || data.agents !== undefined || data.tasks !== undefined) {
+          else if (
+            data.crew !== undefined ||
+            data.agents !== undefined ||
+            data.tasks !== undefined
+          ) {
             console.log("🔄 Received crew visualization data:", {
-              crew: data.crew ? { id: data.crew.id, status: data.crew.status, hasOutput: !!data.crew.output } : null,
+              crew: data.crew
+                ? {
+                    id: data.crew.id,
+                    status: data.crew.status,
+                    hasOutput: !!data.crew.output,
+                  }
+                : null,
               agents: data.agents ? data.agents.length : 0,
               tasks: data.tasks ? data.tasks.length : 0,
-              timestamp: data.timestamp
+              timestamp: data.timestamp,
             });
 
             // Merge new state with existing state
@@ -575,12 +609,14 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
                   id: data.crew?.id,
                   status: data.crew?.status,
                   hasOutput: !!data.crew?.output,
-                  outputLength: data.crew?.output ? data.crew.output.length : 0
+                  outputLength: data.crew?.output ? data.crew.output.length : 0,
                 });
-                
+
                 // Log when crew completes with output
                 if (data.crew?.status === "completed" && data.crew?.output) {
-                  console.log("🎉 Crew completed with output! Result will be displayed.");
+                  console.log(
+                    "🎉 Crew completed with output! Result will be displayed."
+                  );
                 }
               }
 
@@ -596,7 +632,10 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
                 });
 
                 newState.agents = Array.from(agentMap.values());
-                console.log("👥 Updated agents:", newState.agents.map(a => ({ id: a.id, status: a.status })));
+                console.log(
+                  "👥 Updated agents:",
+                  newState.agents.map((a) => ({ id: a.id, status: a.status }))
+                );
               }
 
               if (data.tasks !== undefined) {
@@ -611,7 +650,10 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
                 });
 
                 newState.tasks = Array.from(taskMap.values());
-                console.log("📋 Updated tasks:", newState.tasks.map(t => ({ id: t.id, status: t.status })));
+                console.log(
+                  "📋 Updated tasks:",
+                  newState.tasks.map((t) => ({ id: t.id, status: t.status }))
+                );
               }
 
               if (data.timestamp) {
@@ -626,30 +668,36 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
             setHasReceivedData(true);
           }
           // Fallback: if data has any crew-related properties, treat as state update
-          else if (typeof data === 'object' && data !== null && 
-                   ('crew' in data || 'agents' in data || 'tasks' in data || 'timestamp' in data)) {
+          else if (
+            typeof data === "object" &&
+            data !== null &&
+            ("crew" in data ||
+              "agents" in data ||
+              "tasks" in data ||
+              "timestamp" in data)
+          ) {
             console.log("Fallback: Received potential crew data:", data);
-            
+
             // Set received data flag even for fallback case
             setHasReceivedData(true);
-            
+
             // Try to update state with available data
             setState((prevState) => {
               const newState = { ...prevState };
-              
-              if ('crew' in data && data.crew) {
+
+              if ("crew" in data && data.crew) {
                 newState.crew = data.crew as any;
               }
-              if ('agents' in data && data.agents) {
+              if ("agents" in data && data.agents) {
                 newState.agents = data.agents as any;
               }
-              if ('tasks' in data && data.tasks) {
+              if ("tasks" in data && data.tasks) {
                 newState.tasks = data.tasks as any;
               }
-              if ('timestamp' in data && data.timestamp) {
+              if ("timestamp" in data && data.timestamp) {
                 newState.timestamp = data.timestamp as any;
               }
-              
+
               return newState;
             });
           }
@@ -775,7 +823,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
     });
     setHasReceivedData(false);
     setError(null);
-    
+
     console.log(`State reset triggered by resetKey: ${resetKey}`);
   }, [resetKey]);
 
@@ -817,17 +865,19 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
 
     // 2. Create agent nodes in execution order
     let orderedAgents: Agent[] = [];
-    
+
     // Use execution order if available, otherwise use agent array order
     if (state.crew?.execution_order && state.crew.execution_order.length > 0) {
       // Order agents based on execution_order
       orderedAgents = state.crew.execution_order
-        .map(agentId => state.agents.find(a => a.id === agentId))
-        .filter(agent => agent !== undefined) as Agent[];
-      
+        .map((agentId) => state.agents.find((a) => a.id === agentId))
+        .filter((agent) => agent !== undefined) as Agent[];
+
       // Add any agents not in execution_order at the end
-      const agentsInOrder = new Set(orderedAgents.map(a => a.id));
-      const remainingAgents = state.agents.filter(a => !agentsInOrder.has(a.id));
+      const agentsInOrder = new Set(orderedAgents.map((a) => a.id));
+      const remainingAgents = state.agents.filter(
+        (a) => !agentsInOrder.has(a.id)
+      );
       orderedAgents = [...orderedAgents, ...remainingAgents];
     } else {
       // Fallback to original agent order
@@ -840,14 +890,12 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
         (task) => task.agent_id === agent.id
       );
 
-      // Determine handle visibility based on execution position
       const isFirstAgent = index === 0;
       const isLastAgent = index === orderedAgents.length - 1;
-      
-      // First agent has input handle from crew, last agent has no output handle
-      const hasIncomingEdge = true; // All agents have incoming edges (first from crew, others from previous agent)
+
+      const hasIncomingEdge = !isFirstAgent;
       const hasOutgoingEdge = !isLastAgent;
-      
+
       const agentNode = {
         id: `agent-${agent.id}`,
         type: "agent",
@@ -870,7 +918,7 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
     for (let i = 0; i < orderedAgents.length - 1; i++) {
       const currentAgent = orderedAgents[i];
       const nextAgent = orderedAgents[i + 1];
-      
+
       const sourceId = `agent-${currentAgent.id}`;
       const targetId = `agent-${nextAgent.id}`;
 
@@ -925,12 +973,12 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
       };
       newEdges.push(crewToFirstAgentEdge);
     }
-    
+
     // Apply dagre layout to position nodes automatically
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
       newNodes,
       newEdges,
-      'TB' // Top to bottom layout direction
+      "TB" // Top to bottom layout direction
     );
 
     // Update nodes and edges with the layouted positions
@@ -941,14 +989,14 @@ const CrewAgentCanvas: React.FC<CrewAgentCanvasProps> = ({
   // Get current location to determine active tab
   const location = useLocation();
   const path = location.pathname;
-  
+
   // Extract effective crew ID for navigation
   const effectiveCrewId = state.crew?.id || crewId;
 
   return (
     <Card className="p-6 mb-6 overflow-hidden relative">
       {/* Navigation menu moved to kickoff.tsx */}
-      
+
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Crew Execution Visualization</h3>
       </div>
