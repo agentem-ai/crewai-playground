@@ -255,6 +255,11 @@ class CrewAITelemetry:
             agent_name: The name of the agent
             agent_role: The role of the agent
         """
+        # Safety check: ensure agent_id is not None or empty
+        if not agent_id or agent_id == "None":
+            logger.warning(f"Invalid agent_id '{agent_id}' for crew {crew_id}, using fallback")
+            agent_id = f"agent_unknown_{abs(hash(agent_name or agent_role or 'unknown')) % 100000}"
+        
         # Locate active trace for this crew
         trace_id = self._get_trace_id_for_crew(crew_id)
 
@@ -315,6 +320,11 @@ class CrewAITelemetry:
             agent_id: The ID of the agent
             output: The output of the agent execution
         """
+        # Safety check: ensure agent_id is not None or empty
+        if not agent_id or agent_id == "None":
+            logger.warning(f"Invalid agent_id '{agent_id}' for crew {crew_id} in end_agent_execution")
+            return  # Can't end execution for unknown agent
+        
         # Locate active trace for this crew
         trace_id = self._get_trace_id_for_crew(crew_id)
 
@@ -372,6 +382,11 @@ class CrewAITelemetry:
             task_description: The description of the task
             agent_id: The ID of the agent executing the task
         """
+        # Safety check: ensure task_id is not None or empty
+        if not task_id or task_id == "None":
+            logger.warning(f"Invalid task_id '{task_id}' for crew {crew_id}, using fallback")
+            task_id = f"task_unknown_{abs(hash(task_description or 'unknown')) % 100000}"
+        
         # Locate active trace for this crew
         trace_id = self._get_trace_id_for_crew(crew_id)
 
@@ -438,6 +453,11 @@ class CrewAITelemetry:
             task_id: The ID of the task
             output: The output of the task execution
         """
+        # Safety check for task_id
+        if not task_id or task_id == "None":
+            task_id = f"task_unknown_{abs(hash(str(output) or 'unknown')) % 100000}"
+            logger.warning(f"Invalid task_id provided to end_task_execution, using fallback: {task_id}")
+        
         # Locate active trace for this crew
         trace_id = self._get_trace_id_for_crew(crew_id)
 

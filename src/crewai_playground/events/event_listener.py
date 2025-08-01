@@ -451,17 +451,12 @@ class EventListener:
                 # Add telemetry for agent execution started
                 try:
                     crew_id = self._extract_crew_id_for_telemetry(source, event)
-                    agent_id = getattr(event, "agent_id", None)
-                    agent_name = getattr(event, "agent_name", None)
-                    agent_role = getattr(event, "agent_role", None)
-
-                    # If agent_role is not in event, try to get it from event.agent
-                    if not agent_role and hasattr(event, "agent"):
-                        agent_role = getattr(event.agent, "role", None)
-
-                    # If still not found, use agent_name or a default
-                    if not agent_role:
-                        agent_role = agent_name if agent_name else "Unknown Role"
+                    # Use proper extraction methods
+                    agent_id = self._extract_agent_id(event, source)
+                    agent_data = self._extract_agent_data(event, source)
+                    
+                    agent_name = agent_data.get("name") or f"Agent {agent_id}"
+                    agent_role = agent_data.get("role") or "Unknown Role"
 
                     logger.info(
                         f"📊 Starting telemetry for agent execution: {agent_name} ({agent_id}), role: {agent_role}"
@@ -497,7 +492,8 @@ class EventListener:
                 # Add telemetry for agent execution completed
                 try:
                     crew_id = self._extract_crew_id_for_telemetry(source, event)
-                    agent_id = getattr(event, "agent_id", None)
+                    # Use proper extraction method
+                    agent_id = self._extract_agent_id(event, source)
                     output = getattr(event, "output", None)
                     logger.info(f"📊 Ending telemetry for agent execution: {agent_id}")
                     telemetry_service.end_agent_execution(crew_id, agent_id, output)
@@ -541,19 +537,12 @@ class EventListener:
                 # Add telemetry for task started
                 try:
                     crew_id = self._extract_crew_id_for_telemetry(source, event)
-                    task_id = getattr(event, "task_id", None)
-                    agent_id = getattr(event, "agent_id", None)
-
-                    # Get task description from event
-                    task_description = getattr(event, "task_description", None)
-
-                    # If task_description is not in event, try to get it from event.task
-                    if not task_description and hasattr(event, "task"):
-                        task_description = getattr(event.task, "description", None)
-
-                    # If still not found, use a default
-                    if not task_description:
-                        task_description = f"Task {task_id}"
+                    # Use proper extraction methods
+                    task_id = self._extract_task_id(event, source)
+                    task_data = self._extract_task_data(event, source)
+                    
+                    task_description = task_data.get("description") or f"Task {task_id}"
+                    agent_id = task_data.get("agent_id")  # May be None, which is fine
 
                     logger.info(
                         f"📊 Starting telemetry for task execution: {task_id}, description: {task_description}"
@@ -577,7 +566,8 @@ class EventListener:
                 # Add telemetry for task completed
                 try:
                     crew_id = self._extract_crew_id_for_telemetry(source, event)
-                    task_id = getattr(event, "task_id", None)
+                    # Use proper extraction method
+                    task_id = self._extract_task_id(event, source)
                     output = getattr(event, "output", None)
                     logger.info(f"📊 Ending telemetry for task execution: {task_id}")
                     telemetry_service.end_task_execution(crew_id, task_id, output)
@@ -1446,22 +1436,33 @@ class EventListener:
 
     def _extract_agent_id(self, event, source=None):
         """Extract consistent agent ID from event or source."""
-        # Try event first
+        # First priority: Check for agent object with ID (CrewAI event structure)
+        if hasattr(event, "agent") and event.agent:
+            # Try different ID field variations
+            if hasattr(event.agent, "id") and event.agent.id:
+                return str(event.agent.id)
+            elif hasattr(event.agent, "_id") and event.agent._id:
+                return str(event.agent._id)
+            elif hasattr(event.agent, "uuid") and event.agent.uuid:
+                return str(event.agent.uuid)
+            elif hasattr(event.agent, "fingerprint") and event.agent.fingerprint:
+                if hasattr(event.agent.fingerprint, "uuid_str"):
+                    return str(event.agent.fingerprint.uuid_str)
+                elif hasattr(event.agent.fingerprint, "uuid"):
+                    return str(event.agent.fingerprint.uuid)
+        
+        # Second priority: Direct agent_id field (LLM events, etc.)
         if hasattr(event, "agent_id") and event.agent_id:
             return str(event.agent_id)
-        elif hasattr(event, "agent") and hasattr(event.agent, "id") and event.agent.id:
-            return str(event.agent.id)
-        elif (
-            hasattr(event, "agent") and hasattr(event.agent, "_id") and event.agent._id
-        ):
-            return str(event.agent._id)
-
+        
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
                 return str(source.id)
             elif hasattr(source, "_id") and source._id:
                 return str(source._id)
+            elif hasattr(source, "uuid") and source.uuid:
+                return str(source.uuid)
 
         # Try to create consistent ID from agent name/role
         if (
@@ -1470,31 +1471,45 @@ class EventListener:
             and event.agent.role
         ):
             # Create hash-based ID for consistency
-            role_hash = abs(hash(event.agent.role)) % 100000
+            role_hash = abs(hash(event.agent.role.strip())) % 100000
             return f"agent_{role_hash}"
         elif hasattr(event, "agent_role") and event.agent_role:
-            role_hash = abs(hash(event.agent_role)) % 100000
+            role_hash = abs(hash(event.agent_role.strip())) % 100000
             return f"agent_{role_hash}"
 
-        # Fallback to event-based ID
+        # Final fallback: Don't return None, return a consistent fallback
+        logger.warning(f"Could not extract agent ID from event {type(event).__name__}, using fallback")
         return f"agent_{abs(id(event)) % 100000}"
 
     def _extract_task_id(self, event, source=None):
         """Extract consistent task ID from event or source."""
-        # Try event first
+        # First priority: Check for task object with ID (CrewAI event structure)
+        if hasattr(event, "task") and event.task:
+            # Try different ID field variations
+            if hasattr(event.task, "id") and event.task.id:
+                return str(event.task.id)
+            elif hasattr(event.task, "_id") and event.task._id:
+                return str(event.task._id)
+            elif hasattr(event.task, "uuid") and event.task.uuid:
+                return str(event.task.uuid)
+            elif hasattr(event.task, "fingerprint") and event.task.fingerprint:
+                if hasattr(event.task.fingerprint, "uuid_str"):
+                    return str(event.task.fingerprint.uuid_str)
+                elif hasattr(event.task.fingerprint, "uuid"):
+                    return str(event.task.fingerprint.uuid)
+        
+        # Second priority: Direct task_id field (LLM events, etc.)
         if hasattr(event, "task_id") and event.task_id:
             return str(event.task_id)
-        elif hasattr(event, "task") and hasattr(event.task, "id") and event.task.id:
-            return str(event.task.id)
-        elif hasattr(event, "task") and hasattr(event.task, "_id") and event.task._id:
-            return str(event.task._id)
-
+        
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
                 return str(source.id)
             elif hasattr(source, "_id") and source._id:
                 return str(source._id)
+            elif hasattr(source, "uuid") and source.uuid:
+                return str(source.uuid)
 
         # Try to create consistent ID from task description
         if (
@@ -1503,14 +1518,15 @@ class EventListener:
             and event.task.description
         ):
             desc_hash = (
-                abs(hash(event.task.description[:50])) % 100000
+                abs(hash(event.task.description[:50].strip())) % 100000
             )  # Use first 50 chars
             return f"task_{desc_hash}"
         elif hasattr(event, "task_description") and event.task_description:
-            desc_hash = abs(hash(event.task_description[:50])) % 100000
+            desc_hash = abs(hash(event.task_description[:50].strip())) % 100000
             return f"task_{desc_hash}"
 
-        # Fallback to event-based ID
+        # Final fallback: Don't return None, return a consistent fallback
+        logger.warning(f"Could not extract task ID from event {type(event).__name__}, using fallback")
         return f"task_{abs(id(event)) % 100000}"
 
     def _extract_agent_data(self, event, source=None):
