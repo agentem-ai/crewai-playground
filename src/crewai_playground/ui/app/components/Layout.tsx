@@ -26,7 +26,7 @@ function Sidebar() {
   ];
 
   return (
-    <aside className="sm:w-48 md:w-48 lg:w-64 flex-shrink-0 border-r bg-background p-4 flex flex-col">
+    <aside className="sm:w-32 md:w-40 lg:w-48 flex-shrink-0 border-r bg-background p-4 flex flex-col">
       <div className="flex items-center mb-8">
         <h2 className="text-2xl font-bold">CrewAI Playground</h2>
       </div>
@@ -59,7 +59,7 @@ export function Layout({ children, rightSidebar }: LayoutProps) {
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
       <div className="flex flex-col flex-1">
-        <header className="py-2 px-4 border-b bg-background">
+        <header className="sm:py-1 md:py-1 lg:py-2 px-4 border-b bg-background">
           <div className="flex items-center justify-end">
             <Button
               variant="ghost"
@@ -75,10 +75,10 @@ export function Layout({ children, rightSidebar }: LayoutProps) {
             </Button>
           </div>
         </header>
-        <main className="flex-grow p-4 overflow-auto flex gap-4">
+        <main className="flex-grow p-2 overflow-auto flex gap-2">
           <div className="flex-1">{children}</div>
           {rightSidebar && (
-            <div className="w-full md:w-64 lg:w-80 max-w-96 border-l bg-background p-4">
+            <div className="w-full sm:w-40 md:w-48 lg:w-64 max-w-96 border-l bg-background p-4">
               {rightSidebar}
             </div>
           )}
