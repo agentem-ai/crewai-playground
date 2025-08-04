@@ -253,9 +253,7 @@ export default function Flow() {
 
       {flowDetails && (
         <div className="p-4 rounded-lg border bg-accent/50">
-          <h3 className="text-lg font-semibold mb-2">
-            {flowDetails.name}
-          </h3>
+          <h3 className="text-lg font-semibold mb-2">{flowDetails.name}</h3>
           <p className="text-sm text-muted-foreground mb-4">
             {flowDetails.description}
           </p>
@@ -273,9 +271,7 @@ export default function Flow() {
                 id={field.name}
                 placeholder={field.description}
                 value={field.value}
-                onChange={(e) =>
-                  handleInputChange(field.name, e.target.value)
-                }
+                onChange={(e) => handleInputChange(field.name, e.target.value)}
                 className="min-h-[100px]"
               />
             ) : (
@@ -283,14 +279,10 @@ export default function Flow() {
                 id={field.name}
                 placeholder={field.description}
                 value={field.value}
-                onChange={(e) =>
-                  handleInputChange(field.name, e.target.value)
-                }
+                onChange={(e) => handleInputChange(field.name, e.target.value)}
               />
             )}
-            <p className="text-xs text-muted-foreground">
-              {field.description}
-            </p>
+            <p className="text-xs text-muted-foreground">{field.description}</p>
           </div>
         ))}
 
@@ -338,8 +330,8 @@ export default function Flow() {
           <div className="text-center max-w-md">
             <h2 className="text-2xl font-bold mb-2">Run a Flow Directly</h2>
             <p className="text-muted-foreground mb-4">
-              Select a flow from the sidebar, provide the required inputs,
-              and run it to see results here.
+              Select a flow from the sidebar, provide the required inputs, and
+              run it to see results here.
             </p>
             {loading && (
               <div className="flex justify-center mt-8">

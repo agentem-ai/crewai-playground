@@ -545,7 +545,17 @@ async def get_flow_traces_route(flow_id: str):
     Returns:
         List of trace objects with spans structure for visualization
     """
-    return await get_flow_traces(flow_id)
+    # Use telemetry service for comprehensive flow traces
+    try:
+        from crewai_playground.services.telemetry import telemetry_service
+        traces = telemetry_service.get_flow_traces(flow_id)
+        logger.info(f"Retrieved {len(traces)} telemetry traces for flow {flow_id}")
+        return {"status": "success", "traces": traces}
+    except Exception as e:
+        logger.error(f"Error getting telemetry traces for flow {flow_id}: {e}")
+        # Fallback to old implementation
+        traces = await get_flow_traces(flow_id)
+        return traces
 
 
 @router.post("/{flow_id}/events")

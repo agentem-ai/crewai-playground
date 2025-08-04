@@ -1668,6 +1668,14 @@ class EventListener:
         logger.info(f"Flow started event handler for flow: {flow_id}")
 
         flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
+        
+        # Start telemetry trace for comprehensive flow tracking
+        try:
+            telemetry_service.start_flow_trace(flow_id, flow_name)
+            logger.info(f"Started telemetry flow trace for: {flow_id}")
+        except Exception as e:
+            logger.error(f"Error starting flow telemetry trace: {e}")
+        
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "flow_started", flow_name
         )
@@ -1719,6 +1727,13 @@ class EventListener:
         if result is None and hasattr(event, "result") and event.result is not None:
             result = event.result
 
+        # End telemetry trace for comprehensive flow tracking
+        try:
+            telemetry_service.end_flow_trace(flow_id, result)
+            logger.info(f"Ended telemetry flow trace for: {flow_id}")
+        except Exception as e:
+            logger.error(f"Error ending flow telemetry trace: {e}")
+
         flow_state.update(
             {
                 "status": "completed",
@@ -1736,6 +1751,15 @@ class EventListener:
     async def _handle_method_started(self, flow_id: str, event):
         """Handle method execution started event asynchronously."""
         logger.info(f"Method started: {flow_id}, method: {event.method_name}")
+
+        # Add method execution to telemetry trace
+        try:
+            telemetry_service.add_flow_method_execution(
+                flow_id, event.method_name, "started"
+            )
+            logger.info(f"Added method started to telemetry: {event.method_name}")
+        except Exception as e:
+            logger.error(f"Error adding method started to telemetry: {e}")
 
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "method_started"
@@ -1775,13 +1799,23 @@ class EventListener:
         """Handle method execution finished event asynchronously."""
         logger.info(f"Method finished: {flow_id}, method: {event.method_name}")
 
+        outputs = getattr(event, "result", None)
+        
+        # Add method completion to telemetry trace
+        try:
+            telemetry_service.add_flow_method_execution(
+                flow_id, event.method_name, "completed", outputs=outputs
+            )
+            logger.info(f"Added method completed to telemetry: {event.method_name}")
+        except Exception as e:
+            logger.error(f"Error adding method completed to telemetry: {e}")
+
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "method_finished"
         )
 
         current_time = asyncio.get_event_loop().time()
         step_id = event.method_name
-        outputs = getattr(event, "result", None)
 
         # Locate existing step
         for step in flow_state["steps"]:
@@ -1816,13 +1850,23 @@ class EventListener:
         """Handle method execution failed event asynchronously."""
         logger.info(f"Method failed: {flow_id}, method: {event.method_name}")
 
+        error_msg = getattr(event, "error", None)
+        
+        # Add method failure to telemetry trace
+        try:
+            telemetry_service.add_flow_method_execution(
+                flow_id, event.method_name, "failed", error=str(error_msg) if error_msg else "Unknown error"
+            )
+            logger.info(f"Added method failed to telemetry: {event.method_name}")
+        except Exception as e:
+            logger.error(f"Error adding method failed to telemetry: {e}")
+
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "method_failed"
         )
 
         current_time = asyncio.get_event_loop().time()
         step_id = event.method_name
-        error_msg = getattr(event, "error", None)
 
         for step in flow_state["steps"]:
             if step["id"] == step_id and step.get("status") == "running":

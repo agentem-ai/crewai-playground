@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 # In-memory storage for traces
 traces_storage: Dict[str, Dict[str, Any]] = {}
 
+# In-memory storage for flow traces
+flow_traces_storage: Dict[str, Dict[str, Any]] = {}
+
 
 class CrewAITelemetry:
     """Telemetry service for CrewAI executions."""
@@ -724,6 +727,348 @@ class CrewAITelemetry:
 
         logger.info(f"Found {len(traces)} traces for crew_id: {crew_id}")
         return traces
+
+    # Flow Trace Methods
+    def start_flow_trace(self, flow_id: str, flow_name: str) -> str:
+        """Start a new trace for a flow execution.
+
+        Args:
+            flow_id: The ID of the flow
+            flow_name: The name of the flow
+
+        Returns:
+            The ID of the trace
+        """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+
+        logger.info(f"Starting flow trace for flow_id: {flow_id}, flow_name: {flow_name}")
+        logger.info(f"Current flow traces in storage: {len(flow_traces_storage)}")
+
+        # Register entity mapping for this flow to ensure proper ID resolution
+        try:
+            entity_service.register_entity(
+                primary_id=flow_id,
+                internal_id=flow_id,  # Use same ID as both primary and internal for now
+                entity_type="flow",
+                name=flow_name,
+            )
+            logger.info(
+                f"Registered entity mapping for flow: {flow_id}, name: {flow_name}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to register flow entity mapping: {e}")
+            # Continue even if registration fails
+
+        trace_id = str(uuid.uuid4())
+        with self.tracer.start_as_current_span(
+            name=f"flow.execute.{flow_name}",
+            attributes={
+                "llm.workflow.name": flow_name,
+                "llm.workflow.id": flow_id,
+                "flow.id": flow_id,
+                "flow.name": flow_name,
+            },
+        ) as span:
+            span_context = span.get_span_context()
+            trace_id = format(span_context.trace_id, "032x")
+
+            # Store the flow trace in memory with comprehensive structure
+            flow_traces_storage[trace_id] = {
+                "id": trace_id,
+                "flow_id": flow_id,
+                "flow_name": flow_name,
+                "start_time": datetime.utcnow().isoformat(),
+                "status": "running",
+                "events": [],
+                "crews": {},  # Crews executed within this flow
+                "agents": {},  # Agents from all crews in this flow
+                "tasks": {},   # Tasks from all crews in this flow
+                "methods": {}, # Flow methods executed
+                "llm_calls": [],  # LLM calls made during flow execution
+                "tool_executions": [],  # Tool executions during flow
+            }
+
+            # Store the active span
+            self.active_spans[flow_id] = span
+            # Remember this trace as the current active one for the flow
+            self._current_trace_for_crew[flow_id] = trace_id  # Reuse crew mapping for flows
+
+            logger.info(f"Started flow trace with ID: {trace_id} for flow_id: {flow_id}")
+            logger.info(f"Total flow traces in storage: {len(flow_traces_storage)}")
+        return trace_id
+
+    def end_flow_trace(self, flow_id: str, output: Any = None):
+        """End a trace for a flow execution.
+
+        Args:
+            flow_id: The ID of the flow
+            output: The output of the flow execution
+        """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+
+        logger.info(f"Ending flow trace for flow_id: {flow_id}")
+
+        # Find the trace for this flow
+        trace_id = None
+        for tid, tdata in flow_traces_storage.items():
+            if str(tdata.get("flow_id", "")).strip() == flow_id:
+                trace_id = tid
+                break
+
+        if not trace_id:
+            logger.error(f"No flow trace found for flow_id: {flow_id}")
+            return
+
+        logger.info(f"Found flow trace with ID: {trace_id} for flow_id: {flow_id}")
+
+        # Update the trace with the output
+        if output:
+            try:
+                output_text = output.raw if hasattr(output, "raw") else str(output)
+                logger.info(f"Flow output length: {len(output_text) if output_text else 0}")
+                flow_traces_storage[trace_id]["output"] = output_text
+            except Exception as e:
+                logger.warning(f"Failed to convert flow output to string: {e}")
+                flow_traces_storage[trace_id]["output"] = "Output conversion failed"
+
+        # Mark the trace as completed
+        flow_traces_storage[trace_id]["status"] = "completed"
+        flow_traces_storage[trace_id]["end_time"] = datetime.utcnow().isoformat()
+
+        # End the span if it exists
+        if flow_id in self.active_spans:
+            self.active_spans[flow_id].end()
+            del self.active_spans[flow_id]
+
+        logger.info(f"Completed flow trace with ID: {trace_id} for flow_id: {flow_id}")
+
+    def add_flow_method_execution(self, flow_id: str, method_name: str, status: str, 
+                                 outputs: Any = None, error: str = None):
+        """Add a method execution to a flow trace.
+
+        Args:
+            flow_id: The ID of the flow
+            method_name: The name of the method
+            status: The status of the method execution (started, completed, failed)
+            outputs: The outputs of the method execution
+            error: Error message if the method failed
+        """
+        # Find the trace for this flow
+        trace_id = None
+        for tid, tdata in flow_traces_storage.items():
+            if str(tdata.get("flow_id", "")).strip() == str(flow_id).strip():
+                trace_id = tid
+                break
+
+        if not trace_id:
+            logger.warning(f"No flow trace found for flow_id: {flow_id}")
+            return
+
+        method_id = f"{method_name}_{uuid.uuid4().hex[:8]}"
+        
+        # Add or update the method in the trace
+        if method_id not in flow_traces_storage[trace_id]["methods"]:
+            flow_traces_storage[trace_id]["methods"][method_id] = {
+                "id": method_id,
+                "name": method_name,
+                "status": status,
+                "start_time": datetime.utcnow().isoformat(),
+                "events": [],
+            }
+        else:
+            flow_traces_storage[trace_id]["methods"][method_id]["status"] = status
+
+        # Update method details based on status
+        if status == "completed":
+            flow_traces_storage[trace_id]["methods"][method_id]["end_time"] = datetime.utcnow().isoformat()
+            if outputs:
+                try:
+                    outputs_str = outputs if isinstance(outputs, str) else str(outputs)
+                    flow_traces_storage[trace_id]["methods"][method_id]["outputs"] = outputs_str
+                except Exception as e:
+                    logger.warning(f"Failed to convert method outputs to string: {e}")
+                    flow_traces_storage[trace_id]["methods"][method_id]["outputs"] = "Output conversion failed"
+        elif status == "failed":
+            flow_traces_storage[trace_id]["methods"][method_id]["end_time"] = datetime.utcnow().isoformat()
+            flow_traces_storage[trace_id]["methods"][method_id]["error"] = error or "Method execution failed"
+
+        # Add an event
+        self.add_flow_event(
+            flow_id,
+            f"method.{status}",
+            {
+                "method_id": method_id,
+                "method_name": method_name,
+                "timestamp": datetime.utcnow().isoformat(),
+                "outputs": outputs,
+                "error": error,
+            },
+        )
+
+    def add_flow_crew_execution(self, flow_id: str, crew_id: str, crew_name: str, 
+                               status: str, agents: List[Dict] = None, tasks: List[Dict] = None):
+        """Add a crew execution to a flow trace.
+
+        Args:
+            flow_id: The ID of the flow
+            crew_id: The ID of the crew
+            crew_name: The name of the crew
+            status: The status of the crew execution
+            agents: List of agent information
+            tasks: List of task information
+        """
+        # Find the trace for this flow
+        trace_id = None
+        for tid, tdata in flow_traces_storage.items():
+            if str(tdata.get("flow_id", "")).strip() == str(flow_id).strip():
+                trace_id = tid
+                break
+
+        if not trace_id:
+            logger.warning(f"No flow trace found for flow_id: {flow_id}")
+            return
+
+        # Add or update the crew in the trace
+        if crew_id not in flow_traces_storage[trace_id]["crews"]:
+            flow_traces_storage[trace_id]["crews"][crew_id] = {
+                "id": crew_id,
+                "name": crew_name,
+                "status": status,
+                "start_time": datetime.utcnow().isoformat(),
+                "events": [],
+            }
+        else:
+            flow_traces_storage[trace_id]["crews"][crew_id]["status"] = status
+
+        # Add agents to the flow trace
+        if agents:
+            for agent in agents:
+                agent_id = agent.get("id", f"agent_{uuid.uuid4().hex[:8]}")
+                flow_traces_storage[trace_id]["agents"][agent_id] = {
+                    "id": agent_id,
+                    "name": agent.get("name", "Unknown Agent"),
+                    "role": agent.get("role", "Unknown Role"),
+                    "crew_id": crew_id,
+                    "status": "initializing",
+                    "events": [],
+                }
+
+        # Add tasks to the flow trace
+        if tasks:
+            for task in tasks:
+                task_id = task.get("id", f"task_{uuid.uuid4().hex[:8]}")
+                flow_traces_storage[trace_id]["tasks"][task_id] = {
+                    "id": task_id,
+                    "description": task.get("description", "Unknown Task"),
+                    "crew_id": crew_id,
+                    "agent_id": task.get("agent_id"),
+                    "status": "pending",
+                    "events": [],
+                }
+
+        # Add an event
+        self.add_flow_event(
+            flow_id,
+            f"crew.{status}",
+            {
+                "crew_id": crew_id,
+                "crew_name": crew_name,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+    def add_flow_event(self, flow_id: str, event_type: str, event_data: Dict[str, Any] = None):
+        """Add an event to a flow trace.
+
+        Args:
+            flow_id: The ID of the flow
+            event_type: The type of event
+            event_data: The event data
+        """
+        # Find the trace for this flow
+        trace_id = None
+        for tid, tdata in flow_traces_storage.items():
+            if str(tdata.get("flow_id", "")).strip() == str(flow_id).strip():
+                trace_id = tid
+                break
+
+        if not trace_id:
+            logger.warning(f"No flow trace found for flow_id: {flow_id}")
+            return
+
+        # Add the event to the trace
+        event = {
+            "type": event_type,
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": event_data or {},
+        }
+        flow_traces_storage[trace_id]["events"].append(event)
+
+        # If the event is related to an agent, add it to the agent's events
+        if (
+            "agent_id" in event_data
+            and event_data["agent_id"] in flow_traces_storage[trace_id]["agents"]
+        ):
+            flow_traces_storage[trace_id]["agents"][event_data["agent_id"]]["events"].append(
+                event
+            )
+
+        # If the event is related to a task, add it to the task's events
+        if (
+            "task_id" in event_data
+            and event_data["task_id"] in flow_traces_storage[trace_id]["tasks"]
+        ):
+            flow_traces_storage[trace_id]["tasks"][event_data["task_id"]]["events"].append(
+                event
+            )
+
+        # If the event is related to a crew, add it to the crew's events
+        if (
+            "crew_id" in event_data
+            and event_data["crew_id"] in flow_traces_storage[trace_id]["crews"]
+        ):
+            flow_traces_storage[trace_id]["crews"][event_data["crew_id"]]["events"].append(
+                event
+            )
+
+    def get_flow_traces(self, flow_id: str) -> List[Dict[str, Any]]:
+        """Get all traces for a specific flow.
+
+        Args:
+            flow_id: The ID of the flow
+
+        Returns:
+            A list of flow traces
+        """
+        flow_id = str(flow_id).strip()
+        logger.info(f"Getting flow traces for flow_id: {flow_id}")
+        
+        # Use entity service to resolve possible flow IDs
+        possible_flow_ids = entity_service.resolve_broadcast_ids(flow_id)
+        logger.info(f"Looking for flow traces with possible flow IDs: {possible_flow_ids}")
+        
+        traces = []
+        for trace in flow_traces_storage.values():
+            stored_flow_id = str(trace.get("flow_id", ""))
+            if stored_flow_id in possible_flow_ids:
+                traces.append(trace)
+                logger.info(f"Found matching flow trace with flow_id {stored_flow_id}")
+        
+        logger.info(f"Found {len(traces)} flow traces for flow_id: {flow_id}")
+        return traces
+
+    def get_flow_trace(self, trace_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific flow trace by ID.
+
+        Args:
+            trace_id: The ID of the trace
+
+        Returns:
+            The flow trace data or None if not found
+        """
+        return flow_traces_storage.get(trace_id)
 
 
 # Create a singleton instance

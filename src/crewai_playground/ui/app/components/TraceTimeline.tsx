@@ -48,6 +48,19 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({
     {}
   );
 
+  // Initialize expansion state when spans change
+  useEffect(() => {
+    if (Object.keys(expandedSpans).length === 0 && spans.length > 0) {
+      const initialExpanded: Record<string, boolean> = {};
+      spans.forEach((s) => {
+        if (s.children && s.children.length > 0) {
+          initialExpanded[s.id] = true; // Expand all by default
+        }
+      });
+      setExpandedSpans(initialExpanded);
+    }
+  }, [spans.length]); // Only depend on spans.length to avoid infinite loops
+
   // Build a tree and a flat list of visible spans
   const visibleSpans = useMemo(() => {
     const spanMap: Record<string, TimelineSpan> = {};
@@ -63,17 +76,6 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({
         roots.push(spanMap[s.id]);
       }
     });
-
-    // Set initial expansion state
-    if (Object.keys(expandedSpans).length === 0 && spans.length > 0) {
-      const initialExpanded: Record<string, boolean> = {};
-      spans.forEach((s) => {
-        if (s.children && s.children.length > 0) {
-          initialExpanded[s.id] = true; // Expand all by default
-        }
-      });
-      setExpandedSpans(initialExpanded);
-    }
 
     const flatten = (nodes: TimelineSpan[], depth = 0): TimelineSpan[] => {
       return nodes.reduce((acc, node) => {

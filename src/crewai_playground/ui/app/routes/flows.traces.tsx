@@ -224,11 +224,85 @@ function getStatusColor(status: string) {
 }
 
 // ============================================================================
+// Telemetry Conversion Functions
+// ============================================================================
+
+// Convert new telemetry format to spans for backward compatibility
+function convertTelemetryToSpans(trace: any): TraceSpan[] {
+  if (!trace) return [];
+
+  try {
+    // If trace already has spans (old format), use them
+    if (trace.spans && Array.isArray(trace.spans)) {
+      return trace.spans;
+    }
+
+    // Convert new telemetry format to spans
+    const spans: TraceSpan[] = [];
+
+    // Convert methods to spans
+    if (trace.methods && typeof trace.methods === "object") {
+      Object.values(trace.methods).forEach((method: any) => {
+        if (method && method.id && method.name && method.start_time) {
+          try {
+            const span: TraceSpan = {
+              id: method.id,
+              name: method.name,
+              start_time: new Date(method.start_time).getTime(),
+              end_time: method.end_time
+                ? new Date(method.end_time).getTime()
+                : undefined,
+              status: method.status as any,
+              attributes: {
+                method_name: method.name,
+                outputs: method.outputs,
+                error: method.error,
+              },
+              events: Array.isArray(method.events) ? method.events : [],
+            };
+            spans.push(span);
+          } catch (error) {
+            console.warn("Error converting method to span:", method, error);
+          }
+        }
+      });
+    }
+
+    // If no methods, create a single span from the trace itself
+    if (spans.length === 0 && trace.start_time) {
+      try {
+        spans.push({
+          id: trace.id || "trace-root",
+          name: trace.flow_name || "Flow Execution",
+          start_time: new Date(trace.start_time).getTime(),
+          end_time: trace.end_time
+            ? new Date(trace.end_time).getTime()
+            : undefined,
+          status: trace.status as any,
+          attributes: {
+            flow_name: trace.flow_name,
+            output: trace.output,
+          },
+          events: Array.isArray(trace.events) ? trace.events : [],
+        });
+      } catch (error) {
+        console.warn("Error converting trace to span:", trace, error);
+      }
+    }
+
+    return spans;
+  } catch (error) {
+    console.error("Error in convertTelemetryToSpans:", error);
+    return [];
+  }
+}
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
 // Convert TraceSpan to TimelineSpan for visualization
-const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
+function convertToTimelineSpans(spans: TraceSpan[]): TimelineSpan[] {
   if (!spans || !Array.isArray(spans)) return [];
 
   return spans.map((span) => {
@@ -262,7 +336,7 @@ const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
       operation: span.attributes?.operation,
     };
   });
-};
+}
 
 // Convert raw span to TimelineSpan format
 const convertToTimelineSpan = (span: TraceSpan): TimelineSpan => {
@@ -511,7 +585,8 @@ export default function FlowTraces() {
       return null;
     };
 
-    const spans = selectedTrace.spans || [];
+    // Convert telemetry format to spans
+    const spans = convertTelemetryToSpans(selectedTrace);
     return Array.isArray(spans) ? findSpan(spans) : null;
   }, [selectedSpanId, selectedTrace]);
 
@@ -524,23 +599,24 @@ export default function FlowTraces() {
   const timelineSpans = useMemo(() => {
     if (!selectedTrace) return [];
 
-    // Handle case where spans might be undefined or not an array
-    const spans = selectedTrace.spans || [];
+    // Convert telemetry format to spans
+    const spans = convertTelemetryToSpans(selectedTrace);
     return Array.isArray(spans) ? convertToTimelineSpans(spans) : [];
   }, [selectedTrace]);
 
   // Process trace data for hierarchical view with safety checks
   const hierarchicalSpans = useMemo(() => {
-    if (!selectedTrace || !selectedTrace.spans) return [];
+    if (!selectedTrace) return [];
+
+    // Convert telemetry format to spans
+    const spans = convertTelemetryToSpans(selectedTrace);
 
     // Create a hierarchical structure from flat spans
-    const rootSpans = selectedTrace.spans.filter(
+    const rootSpans = spans.filter(
       (span) => !span.parent_id || span.parent_id === selectedTrace.id
     );
     return convertToTimelineSpans(rootSpans);
   }, [selectedTrace]);
-
-
 
   // Render the list of traces
   const renderTraceList = () => {
@@ -614,9 +690,11 @@ export default function FlowTraces() {
     <div className="space-y-6">
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Flows & Traces</h3>
-        <p className="text-sm text-muted-foreground">Select a flow and trace to view details</p>
+        <p className="text-sm text-muted-foreground">
+          Select a flow and trace to view details
+        </p>
       </div>
-      
+
       {/* Flow selection */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Flow</label>
@@ -633,7 +711,7 @@ export default function FlowTraces() {
           </SelectContent>
         </Select>
       </div>
-      
+
       {/* Trace list */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Traces</label>
@@ -680,202 +758,211 @@ export default function FlowTraces() {
                   <TabsTrigger value="methods">Methods</TabsTrigger>
                   <TabsTrigger value="events">Events</TabsTrigger>
                 </TabsList>
-              <TabsContent value="overview">
-                <div className="space-y-6">
+                <TabsContent value="overview">
+                  <div className="space-y-6">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">Timeline</CardTitle>
+                        <CardDescription>
+                          Visualization of execution spans over time
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <TraceTimeline
+                          spans={timelineSpans}
+                          onSpanClick={(span) => setSelectedSpanId(span.id)}
+                        />
+                      </CardContent>
+                    </Card>
+
+                    {selectedSpanData && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-lg">
+                            Span Details
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          {selectedSpanData && (
+                            <TraceSpanDetail span={selectedSpanData} />
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">Flow Summary</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Methods</div>
+                            <div className="flex items-center gap-2">
+                              <Badge className="text-lg" variant="outline">
+                                {selectedTrace.spans?.filter(
+                                  (s) => s.parent_id === selectedTrace.id
+                                ).length || 0}
+                              </Badge>
+                              <span className="text-sm text-muted-foreground">
+                                Total methods
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Status</div>
+                            <Badge
+                              className={getStatusColor(selectedTrace.status)}
+                              variant="outline"
+                            >
+                              {selectedTrace.status}
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Duration</div>
+                            <div className="text-sm">
+                              {calculateDuration(
+                                selectedTrace.start_time,
+                                selectedTrace.end_time
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="methods">
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">Timeline</CardTitle>
+                      <CardTitle className="text-lg">Methods</CardTitle>
                       <CardDescription>
-                        Visualization of execution spans over time
+                        Flow execution methods and their details
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <TraceTimeline
-                        spans={timelineSpans}
-                        onSpanClick={(span) => setSelectedSpanId(span.id)}
-                      />
-                    </CardContent>
-                  </Card>
-
-                  {selectedSpanData && (
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-lg">Span Details</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {selectedSpanData && (
-                          <TraceSpanDetail span={selectedSpanData} />
-                        )}
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">Flow Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Methods</div>
-                          <div className="flex items-center gap-2">
-                            <Badge className="text-lg" variant="outline">
-                              {selectedTrace.spans?.filter(
-                                (s) => s.parent_id === selectedTrace.id
-                              ).length || 0}
-                            </Badge>
-                            <span className="text-sm text-muted-foreground">
-                              Total methods
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Status</div>
-                          <Badge
-                            className={getStatusColor(selectedTrace.status)}
-                            variant="outline"
-                          >
-                            {selectedTrace.status}
-                          </Badge>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Duration</div>
-                          <div className="text-sm">
-                            {calculateDuration(
-                              selectedTrace.start_time,
-                              selectedTrace.end_time
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="methods">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">Methods</CardTitle>
-                    <CardDescription>
-                      Flow execution methods and their details
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <Accordion type="single" collapsible className="w-full">
-                        {selectedTrace.spans
-                          ?.filter(
-                            (method) => method.parent_id === selectedTrace.id
-                          )
-                          .map((method) => (
-                            <AccordionItem key={method.id} value={method.id}>
-                              <AccordionTrigger className="hover:bg-muted px-4">
-                                <div className="flex items-center justify-between w-full">
-                                  <div className="flex items-center">
-                                    <Badge
-                                      className={getStatusColor(method.status)}
-                                      variant="outline"
-                                    >
-                                      {method.status}
-                                    </Badge>
-                                    <span className="ml-2 font-medium">
-                                      {method.name}
-                                    </span>
+                      <div className="space-y-4">
+                        <Accordion type="single" collapsible className="w-full">
+                          {selectedTrace.spans
+                            ?.filter(
+                              (method) => method.parent_id === selectedTrace.id
+                            )
+                            .map((method) => (
+                              <AccordionItem key={method.id} value={method.id}>
+                                <AccordionTrigger className="hover:bg-muted px-4">
+                                  <div className="flex items-center justify-between w-full">
+                                    <div className="flex items-center">
+                                      <Badge
+                                        className={getStatusColor(
+                                          method.status
+                                        )}
+                                        variant="outline"
+                                      >
+                                        {method.status}
+                                      </Badge>
+                                      <span className="ml-2 font-medium">
+                                        {method.name}
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-muted-foreground">
+                                      {calculateDuration(
+                                        method.start_time,
+                                        method.end_time
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="text-sm text-muted-foreground">
-                                    {calculateDuration(
-                                      method.start_time,
-                                      method.end_time
+                                </AccordionTrigger>
+                                <AccordionContent className="px-4 py-2 space-y-4">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="text-sm text-muted-foreground">
+                                      Method ID
+                                    </div>
+                                    <div className="text-sm font-mono">
+                                      {method.id}
+                                    </div>
+
+                                    <div className="text-sm text-muted-foreground">
+                                      Start Time
+                                    </div>
+                                    <div>{formatTime(method.start_time)}</div>
+
+                                    {method.end_time && (
+                                      <>
+                                        <div className="text-sm text-muted-foreground">
+                                          End Time
+                                        </div>
+                                        <div>{formatTime(method.end_time)}</div>
+                                      </>
                                     )}
                                   </div>
-                                </div>
-                              </AccordionTrigger>
-                              <AccordionContent className="px-4 py-2 space-y-4">
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="text-sm text-muted-foreground">
-                                    Method ID
-                                  </div>
-                                  <div className="text-sm font-mono">
-                                    {method.id}
-                                  </div>
 
-                                  <div className="text-sm text-muted-foreground">
-                                    Start Time
-                                  </div>
-                                  <div>{formatTime(method.start_time)}</div>
-
-                                  {method.end_time && (
-                                    <>
-                                      <div className="text-sm text-muted-foreground">
-                                        End Time
+                                  {method.attributes &&
+                                    Object.keys(method.attributes).length >
+                                      0 && (
+                                      <div className="mt-4">
+                                        <div className="text-sm font-medium mb-2">
+                                          Attributes
+                                        </div>
+                                        <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
+                                          {JSON.stringify(
+                                            method.attributes,
+                                            null,
+                                            2
+                                          )}
+                                        </pre>
                                       </div>
-                                      <div>{formatTime(method.end_time)}</div>
-                                    </>
-                                  )}
-                                </div>
+                                    )}
+                                </AccordionContent>
+                              </AccordionItem>
+                            ))}
+                        </Accordion>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
 
-                                {method.attributes &&
-                                  Object.keys(method.attributes).length > 0 && (
-                                    <div className="mt-4">
-                                      <div className="text-sm font-medium mb-2">
-                                        Attributes
-                                      </div>
-                                      <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
-                                        {JSON.stringify(
-                                          method.attributes,
-                                          null,
-                                          2
-                                        )}
-                                      </pre>
+                <TabsContent value="events">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-lg">Events</CardTitle>
+                      <CardDescription>
+                        Flow execution events and their details
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div className="border rounded-md divide-y">
+                          {selectedTrace.spans
+                            ?.flatMap((span) => span.events || [])
+                            .map((event, idx) => (
+                              <div key={idx} className="p-3 hover:bg-muted">
+                                <div className="flex justify-between items-center">
+                                  <Badge variant="outline">{event.name}</Badge>
+                                  <span className="text-xs text-muted-foreground">
+                                    {formatTime(event.timestamp)}
+                                  </span>
+                                </div>
+                                {event.attributes &&
+                                  Object.keys(event.attributes).length > 0 && (
+                                    <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
+                                      {JSON.stringify(
+                                        event.attributes,
+                                        null,
+                                        2
+                                      )}
                                     </div>
                                   )}
-                              </AccordionContent>
-                            </AccordionItem>
-                          ))}
-                      </Accordion>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="events">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">Events</CardTitle>
-                    <CardDescription>
-                      Flow execution events and their details
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="border rounded-md divide-y">
-                        {selectedTrace.spans
-                          ?.flatMap((span) => span.events || [])
-                          .map((event, idx) => (
-                            <div key={idx} className="p-3 hover:bg-muted">
-                              <div className="flex justify-between items-center">
-                                <Badge variant="outline">{event.name}</Badge>
-                                <span className="text-xs text-muted-foreground">
-                                  {formatTime(event.timestamp)}
-                                </span>
                               </div>
-                              {event.attributes &&
-                                Object.keys(event.attributes).length > 0 && (
-                                  <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
-                                    {JSON.stringify(event.attributes, null, 2)}
-                                  </div>
-                                )}
-                            </div>
-                          ))}
+                            ))}
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         ) : loading ? (
