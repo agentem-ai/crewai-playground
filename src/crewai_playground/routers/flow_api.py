@@ -222,6 +222,10 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
             return {"status": "error", "message": f"Flow {flow_id} not found"}
 
         logger.info(f"Flow loaded successfully: {flow_id}")
+        
+        # Register flow entity early for proper ID mapping and WebSocket routing
+        register_flow_entity(flow, flow_id)
+        logger.info(f"Registered flow entity for WebSocket routing: {flow_id}")
 
         # Initialize flow state through the event listener
         # The event listener will handle this when it receives the flow_started event
@@ -264,18 +268,12 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         # The event listener will handle sending the initial flow state via WebSocket
         # when it receives the flow_started event
 
-        # Register the flow WebSocket event listener with the global CrewAI event bus
-        # This will capture all flow events and broadcast them via WebSocket
-        logger.info(f"Registering flow WebSocket event listener for flow: {flow_id}")
+        # Event listener is already set up in the main execute_flow function
+        # The unified event listener will capture all flow events and broadcast them via WebSocket
+        logger.info(f"Using unified event listener for flow: {flow_id}")
 
         try:
             from crewai.utilities.events.crewai_event_bus import crewai_event_bus
-
-            # Register our listener with the global event bus
-            # The listener will filter events by flow_id
-            logger.info(f"Setting up event listeners for flow: {flow_id}")
-            flow_websocket_listener.setup_listeners(crewai_event_bus)
-            logger.info(f"Successfully registered event listener for flow: {flow_id}")
 
             # Emit flow started event using the global event bus
             from crewai.utilities.events import FlowStartedEvent
@@ -364,19 +362,15 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         if hasattr(flow, "run_async"):
             logger.info(f"Executing flow via run_async method")
             result = await emit_method_events("run_async", flow.run_async)
-            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "kickoff_async"):
             logger.info(f"Executing flow via kickoff_async method")
             result = await emit_method_events("kickoff_async", flow.kickoff_async)
-            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "run"):
             logger.info(f"Executing flow via run method")
             result = await emit_method_events("run", flow.run)
-            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "kickoff"):
             logger.info(f"Executing flow via kickoff method")
             result = await emit_method_events("kickoff", flow.kickoff)
-            register_flow_entity(flow, flow_id)
         else:
             raise AttributeError(
                 f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method"
@@ -509,14 +503,37 @@ async def execute_flow(flow_id: str, request: FlowExecuteRequest) -> Dict[str, A
             "timestamp": asyncio.get_event_loop().time(),
         }
 
-        # Start the flow execution in a separate thread to not block the API
-        import threading
+        # Set up event listener in the main async context for real-time streaming
+        from crewai_playground.events.event_listener import event_listener
+        from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+        
+        # Ensure event listener has the current event loop
+        event_listener.ensure_event_loop()
+        event_listener.setup_listeners(crewai_event_bus)
+        
+        logger.info(f"Event listener setup completed for flow {flow_id}. Event loop: {event_listener.loop}")
+        logger.info(f"Connected WebSocket clients: {len(event_listener.clients)}")
 
-        thread = threading.Thread(
-            target=_execute_flow_sync, args=(flow_id, request.inputs)
-        )
-        thread.daemon = True
-        thread.start()
+        # Run flow execution asynchronously to enable real-time streaming
+        async def run_flow_async():
+            """Run flow asynchronously to enable real-time WebSocket updates."""
+            try:
+                logger.info(f"🚀 Starting async flow execution for flow_id: {flow_id}")
+                logger.info(f"Event listener clients before execution: {len(event_listener.clients)}")
+                
+                # Run the flow using async method to maintain event loop context
+                result = await _execute_flow_async(flow_id, request.inputs)
+                
+                logger.info(f"✅ Flow execution completed: {result.get('status')}")
+                logger.info(f"Event listener clients after execution: {len(event_listener.clients)}")
+                return result
+            except Exception as e:
+                logger.error(f"❌ Error in async flow execution: {e}", exc_info=True)
+                return {"status": "error", "error": str(e)}
+
+        # Start the async flow execution as a background task
+        # This allows the endpoint to return immediately while flow runs in background
+        asyncio.create_task(run_flow_async())
 
         return {
             "status": "success",
