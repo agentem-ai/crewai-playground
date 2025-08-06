@@ -1668,6 +1668,14 @@ class EventListener:
         logger.info(f"Flow started event handler for flow: {flow_id}")
 
         flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
+        
+        # Start telemetry trace for flow
+        try:
+            logger.info(f"📊 Starting telemetry trace for flow: {flow_id}, name: {flow_name}")
+            telemetry_service.start_flow_trace(flow_id, flow_name)
+        except Exception as e:
+            logger.error(f"Error starting flow telemetry trace: {e}")
+        
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "flow_started", flow_name
         )
@@ -1727,6 +1735,13 @@ class EventListener:
             }
         )
 
+        # End telemetry trace for flow
+        try:
+            logger.info(f"📊 Ending telemetry trace for flow: {flow_id}")
+            telemetry_service.end_flow_trace(flow_id, output=result)
+        except Exception as e:
+            logger.error(f"Error ending flow telemetry trace: {e}")
+
         logger.info(f"Flow {broadcast_flow_id} finished with result: {result}")
 
         await self.broadcast_update(
@@ -1736,6 +1751,23 @@ class EventListener:
     async def _handle_method_started(self, flow_id: str, event):
         """Handle method execution started event asynchronously."""
         logger.info(f"Method started: {flow_id}, method: {event.method_name}")
+
+        # Add telemetry for method execution started
+        try:
+            method_name = getattr(event, 'method_name', 'unknown_method')
+            input_state = getattr(event, 'input_state', None)
+            params = getattr(event, 'params', None)
+            
+            logger.info(f"📊 Adding telemetry for method started: {method_name}")
+            telemetry_service.add_flow_method_execution(
+                flow_id=flow_id,
+                method_name=method_name,
+                status="started",
+                input_state=input_state,
+                params=params
+            )
+        except Exception as e:
+            logger.error(f"Error adding method started telemetry: {e}")
 
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "method_started"
@@ -1774,6 +1806,21 @@ class EventListener:
     async def _handle_method_finished(self, flow_id: str, event):
         """Handle method execution finished event asynchronously."""
         logger.info(f"Method finished: {flow_id}, method: {event.method_name}")
+
+        # Add telemetry for method execution finished
+        try:
+            method_name = getattr(event, 'method_name', 'unknown_method')
+            outputs = getattr(event, 'result', None)
+            
+            logger.info(f"📊 Adding telemetry for method finished: {method_name}")
+            telemetry_service.add_flow_method_execution(
+                flow_id=flow_id,
+                method_name=method_name,
+                status="completed",
+                outputs=outputs
+            )
+        except Exception as e:
+            logger.error(f"Error adding method finished telemetry: {e}")
 
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "method_finished"
@@ -1815,6 +1862,21 @@ class EventListener:
     async def _handle_method_failed(self, flow_id: str, event):
         """Handle method execution failed event asynchronously."""
         logger.info(f"Method failed: {flow_id}, method: {event.method_name}")
+
+        # Add telemetry for method execution failed
+        try:
+            method_name = getattr(event, 'method_name', 'unknown_method')
+            error_msg = getattr(event, 'error', None)
+            
+            logger.info(f"📊 Adding telemetry for method failed: {method_name}")
+            telemetry_service.add_flow_method_execution(
+                flow_id=flow_id,
+                method_name=method_name,
+                status="failed",
+                error=str(error_msg) if error_msg else "Unknown error"
+            )
+        except Exception as e:
+            logger.error(f"Error adding method failed telemetry: {e}")
 
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "method_failed"

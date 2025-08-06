@@ -79,6 +79,8 @@ class CrewAITelemetry:
         self.active_spans: Dict[str, Span] = {}
         # Map crew_id -> currently active trace id (latest run)
         self._current_trace_for_crew: Dict[str, str] = {}
+        # Map flow_id -> currently active trace id (latest run)
+        self._current_trace_for_flow: Dict[str, str] = {}
 
     def _get_trace_id_for_crew(
         self, crew_id: str, prefer_running: bool = True
@@ -135,6 +137,63 @@ class CrewAITelemetry:
         candidates.sort(key=lambda x: x[1].get("start_time", ""))
         trace_id = candidates[-1][0]
         self._current_trace_for_crew[crew_id] = trace_id
+        return trace_id
+
+    def _get_trace_id_for_flow(
+        self, flow_id: str, prefer_running: bool = True
+    ) -> Optional[str]:
+        """Return the trace id that should be used for this flow.
+
+        If *prefer_running* is True, the most recent trace whose status is not
+        "completed" is returned. Otherwise the most recent trace regardless of
+        status is returned.  A *None* is returned when no trace exists for the
+        flow.
+        """
+        # 1. Fast path – did we record the id when the trace was started?
+        cached = self._current_trace_for_flow.get(flow_id)
+        if cached and cached in traces_storage:
+            if not prefer_running or traces_storage[cached]["status"] != "completed":
+                return cached
+
+        # 2. Use entity service to resolve all possible flow IDs
+        possible_flow_ids = entity_service.resolve_broadcast_ids(flow_id)
+        logger.info(f"Looking for traces with possible flow IDs: {possible_flow_ids}")
+
+        # Scan storage to find all traces for any of the possible flow IDs
+        candidates = []
+        for tid, tdata in traces_storage.items():
+            stored_flow_id = str(tdata.get("flow_id", ""))
+            if stored_flow_id in possible_flow_ids:
+                candidates.append((tid, tdata))
+                logger.info(f"Found matching trace with flow_id {stored_flow_id}")
+
+        # Fallback to direct string comparison if entity service doesn't have mappings
+        if not candidates:
+            logger.info(
+                f"No matches found with entity service, falling back to direct comparison"
+            )
+            candidates = [
+                (tid, tdata)
+                for tid, tdata in traces_storage.items()
+                if str(tdata.get("flow_id")) == str(flow_id)
+            ]
+        if not candidates:
+            return None
+
+        # Prefer running traces
+        if prefer_running:
+            running = [c for c in candidates if c[1].get("status") != "completed"]
+            if running:
+                # choose latest by start_time
+                running.sort(key=lambda x: x[1].get("start_time", ""))
+                trace_id = running[-1][0]
+                self._current_trace_for_flow[flow_id] = trace_id
+                return trace_id
+
+        # Fallback: choose latest by start_time
+        candidates.sort(key=lambda x: x[1].get("start_time", ""))
+        trace_id = candidates[-1][0]
+        self._current_trace_for_flow[flow_id] = trace_id
         return trace_id
 
     def start_crew_trace(self, crew_id: str, crew_name: str) -> str:
@@ -243,6 +302,113 @@ class CrewAITelemetry:
             del self.active_spans[crew_id]
 
         logger.info(f"Completed trace with ID: {trace_id} for crew_id: {crew_id}")
+
+    def start_flow_trace(self, flow_id: str, flow_name: str) -> str:
+        """Start a new trace for a flow execution.
+
+        Args:
+            flow_id: The ID of the flow
+            flow_name: The name of the flow
+
+        Returns:
+            The ID of the trace
+        """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+
+        logger.info(f"Starting trace for flow_id: {flow_id}, flow_name: {flow_name}")
+        logger.info(f"Current traces in storage: {len(traces_storage)}")
+
+        # Register entity mapping for this flow to ensure proper ID resolution
+        try:
+            entity_service.register_entity(
+                primary_id=flow_id,
+                internal_id=flow_id,  # Use same ID as both primary and internal for now
+                entity_type="flow",
+                name=flow_name,
+            )
+            logger.info(
+                f"Registered entity mapping for flow: {flow_id}, name: {flow_name}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to register entity mapping: {e}")
+            # Continue even if registration fails
+
+        trace_id = str(uuid.uuid4())
+        with self.tracer.start_as_current_span(
+            name=f"flow.execute.{flow_name}",
+            attributes={
+                "llm.workflow.name": flow_name,
+                "llm.workflow.id": flow_id,
+                "flow.id": flow_id,
+                "flow.name": flow_name,
+            },
+        ) as span:
+            span_context = span.get_span_context()
+            trace_id = format(span_context.trace_id, "032x")
+
+            # Store the trace in memory
+            traces_storage[trace_id] = {
+                "id": trace_id,
+                "flow_id": flow_id,
+                "flow_name": flow_name,
+                "start_time": datetime.utcnow().isoformat(),
+                "status": "running",
+                "events": [],
+                "methods": {},
+                "steps": [],
+            }
+
+            # Store the active span
+            self.active_spans[flow_id] = span
+            # Remember this trace as the current active one for the flow
+            self._current_trace_for_flow[flow_id] = trace_id
+
+            logger.info(f"Started trace with ID: {trace_id} for flow_id: {flow_id}")
+            logger.info(f"Total traces in storage: {len(traces_storage)}")
+        return trace_id
+
+    def end_flow_trace(self, flow_id: str, output: Any = None):
+        """End a trace for a flow execution.
+
+        Args:
+            flow_id: The ID of the flow
+            output: The output of the flow execution
+        """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+
+        logger.info(f"Ending trace for flow_id: {flow_id}")
+
+        # Locate the most relevant trace for this flow (prefer running)
+        trace_id = self._get_trace_id_for_flow(flow_id)
+
+        if not trace_id:
+            logger.error(f"No trace found for flow_id: {flow_id}")
+            return
+
+        logger.info(f"Found trace with ID: {trace_id} for flow_id: {flow_id}")
+
+        # Update the trace with the output
+        if output:
+            try:
+                output_text = output.raw if hasattr(output, "raw") else str(output)
+                logger.info(f"Output length: {len(output_text) if output_text else 0}")
+                traces_storage[trace_id]["output"] = output_text
+            except Exception as e:
+                logger.warning(f"Failed to convert output to string: {e}")
+                traces_storage[trace_id]["output"] = "Output conversion failed"
+
+        # Mark the trace as completed
+        traces_storage[trace_id]["status"] = "completed"
+        traces_storage[trace_id]["end_time"] = datetime.utcnow().isoformat()
+
+        # End the span if it exists
+        if flow_id in self.active_spans:
+            self.active_spans[flow_id].end()
+            del self.active_spans[flow_id]
+
+        logger.info(f"Completed trace with ID: {trace_id} for flow_id: {flow_id}")
 
     def start_agent_execution(
         self, crew_id: str, agent_id: str, agent_name: str, agent_role: str
@@ -723,6 +889,227 @@ class CrewAITelemetry:
                 logger.info(f"Matched crew IDs: {matched_ids}")
 
         logger.info(f"Found {len(traces)} traces for crew_id: {crew_id}")
+        return traces
+
+    def add_flow_method_execution(
+        self, flow_id: str, method_name: str, status: str, **kwargs
+    ):
+        """Add a flow method execution event to the trace.
+
+        Args:
+            flow_id: The ID of the flow
+            method_name: The name of the method being executed
+            status: The status of the method execution (started, completed, failed)
+            **kwargs: Additional data to include in the event
+        """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+
+        logger.info(
+            f"Adding flow method execution: flow_id={flow_id}, method={method_name}, status={status}"
+        )
+
+        # Find the trace for this flow
+        trace_id = self._get_trace_id_for_flow(flow_id)
+        if not trace_id:
+            logger.warning(f"No trace found for flow {flow_id}")
+            return
+
+        # Create the event
+        event = {
+            "type": "flow.method.execution",
+            "timestamp": datetime.utcnow().isoformat(),
+            "flow_id": flow_id,
+            "method_name": method_name,
+            "status": status,
+            **kwargs,
+        }
+
+        # Add to trace events
+        traces_storage[trace_id]["events"].append(event)
+
+        # Update methods tracking
+        if "methods" not in traces_storage[trace_id]:
+            traces_storage[trace_id]["methods"] = {}
+
+        if method_name not in traces_storage[trace_id]["methods"]:
+            traces_storage[trace_id]["methods"][method_name] = {
+                "name": method_name,
+                "status": "running",
+                "start_time": None,
+                "end_time": None,
+                "events": [],
+            }
+
+        method_data = traces_storage[trace_id]["methods"][method_name]
+        method_data["events"].append(event)
+
+        if status == "started":
+            method_data["status"] = "running"
+            method_data["start_time"] = event["timestamp"]
+        elif status in ["completed", "failed"]:
+            method_data["status"] = status
+            method_data["end_time"] = event["timestamp"]
+            if "outputs" in kwargs:
+                method_data["outputs"] = kwargs["outputs"]
+            if "error" in kwargs:
+                method_data["error"] = kwargs["error"]
+
+        logger.info(
+            f"Added flow method execution event for flow {flow_id}, method {method_name}"
+        )
+
+    def add_flow_step_execution(
+        self, flow_id: str, step_name: str, status: str, **kwargs
+    ):
+        """Add a flow step execution event to the trace.
+
+        Args:
+            flow_id: The ID of the flow
+            step_name: The name of the step being executed
+            status: The status of the step execution (started, completed, failed)
+            **kwargs: Additional data to include in the event
+        """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+
+        logger.info(
+            f"Adding flow step execution: flow_id={flow_id}, step={step_name}, status={status}"
+        )
+
+        # Find the trace for this flow
+        trace_id = self._get_trace_id_for_flow(flow_id)
+        if not trace_id:
+            logger.warning(f"No trace found for flow {flow_id}")
+            return
+
+        # Create the event
+        event = {
+            "type": "flow.step.execution",
+            "timestamp": datetime.utcnow().isoformat(),
+            "flow_id": flow_id,
+            "step_name": step_name,
+            "status": status,
+            **kwargs,
+        }
+
+        # Add to trace events
+        traces_storage[trace_id]["events"].append(event)
+
+        # Update steps tracking
+        if "steps" not in traces_storage[trace_id]:
+            traces_storage[trace_id]["steps"] = []
+
+        # Find or create step entry
+        step_entry = None
+        for step in traces_storage[trace_id]["steps"]:
+            if step.get("name") == step_name:
+                step_entry = step
+                break
+
+        if not step_entry:
+            step_entry = {
+                "name": step_name,
+                "status": "running",
+                "start_time": None,
+                "end_time": None,
+                "events": [],
+            }
+            traces_storage[trace_id]["steps"].append(step_entry)
+
+        step_entry["events"].append(event)
+
+        if status == "started":
+            step_entry["status"] = "running"
+            step_entry["start_time"] = event["timestamp"]
+        elif status in ["completed", "failed"]:
+            step_entry["status"] = status
+            step_entry["end_time"] = event["timestamp"]
+            if "outputs" in kwargs:
+                step_entry["outputs"] = kwargs["outputs"]
+            if "error" in kwargs:
+                step_entry["error"] = kwargs["error"]
+
+        logger.info(
+            f"Added flow step execution event for flow {flow_id}, step {step_name}"
+        )
+
+    def get_flow_traces(self, flow_id: str) -> List[Dict[str, Any]]:
+        """Get all traces for a specific flow.
+
+        Args:
+            flow_id: The ID of the flow
+
+        Returns:
+            List of trace dictionaries for the flow
+        """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+        normalized_flow_id = flow_id.strip().lower()
+
+        logger.info(f"Getting traces for flow_id: {flow_id}")
+        logger.info(f"Total traces in storage: {len(traces_storage)}")
+
+        # Use entity service to resolve all possible flow IDs
+        possible_flow_ids = entity_service.resolve_broadcast_ids(flow_id)
+        logger.info(f"Possible flow IDs from entity service: {possible_flow_ids}")
+
+        traces = []
+        if possible_flow_ids:
+            # Use entity service mappings
+            for tid, tdata in traces_storage.items():
+                stored_flow_id = str(tdata.get("flow_id", ""))
+                if stored_flow_id in possible_flow_ids:
+                    traces.append(tdata)
+                    logger.info(f"Found trace with flow_id {stored_flow_id}")
+        else:
+            # Fallback to direct matching
+            logger.info(
+                f"No entity mappings found, using direct matching for: {flow_id}"
+            )
+
+            # Try exact match first
+            traces = [
+                trace
+                for trace in traces_storage.values()
+                if trace.get("flow_id") == flow_id
+            ]
+
+            # If no exact matches, try case-insensitive comparison
+            if not traces:
+                logger.info(
+                    f"No exact matches found, trying case-insensitive comparison for: {flow_id}"
+                )
+                traces = [
+                    trace
+                    for trace in traces_storage.values()
+                    if trace.get("flow_id")
+                    and str(trace.get("flow_id")).strip().lower() == normalized_flow_id
+                ]
+
+            # If still no matches and flow_id looks like a simple name (e.g., "flow_0"), try to find any trace
+            # that might contain this as part of the flow name
+            if not traces and ("_" in flow_id or flow_id.isalnum()):
+                logger.info(
+                    f"No matches found, trying to match by flow name pattern: {flow_id}"
+                )
+                traces = [
+                    trace
+                    for trace in traces_storage.values()
+                    if trace.get("flow_name")
+                    and flow_id.lower() in str(trace.get("flow_name")).lower()
+                ]
+
+            # If we found traces by name pattern, log this information
+            if traces:
+                logger.info(
+                    f"Found {len(traces)} traces by matching flow name pattern: {flow_id}"
+                )
+                # Log the actual flow IDs that were matched
+                matched_ids = set(trace.get("flow_id") for trace in traces)
+                logger.info(f"Matched flow IDs: {matched_ids}")
+
+        logger.info(f"Found {len(traces)} traces for flow_id: {flow_id}")
         return traces
 
 
