@@ -185,6 +185,243 @@ def _execute_flow_sync(flow_id: str, inputs: Dict[str, Any]):
         return {"status": "error", "message": str(e)}
 
 
+async def _execute_flow_with_real_time_events(flow, flow_id: str, inputs: Dict[str, Any]):
+    """
+    Execute a flow with real-time event emission by intercepting method calls.
+    This enables progressive visualization updates like crew execution.
+    
+    Args:
+        flow: The flow instance to execute
+        flow_id: ID of the flow
+        inputs: Input parameters for the flow
+        
+    Returns:
+        Flow execution result
+    """
+    import inspect
+    import asyncio
+    from crewai.flow.flow import FlowStartedEvent, FlowFinishedEvent
+    from crewai.flow.flow import MethodExecutionStartedEvent, MethodExecutionFinishedEvent, MethodExecutionFailedEvent
+    from crewai.utilities.events import crewai_event_bus
+    
+    logger.info(f"🔄 Starting real-time flow execution for: {flow_id}")
+    
+    # Emit flow started event
+    flow_started_event = FlowStartedEvent(
+        flow_name=flow.__class__.__name__,
+        flow_id=flow_id,
+        inputs=inputs
+    )
+    crewai_event_bus.emit(flow, flow_started_event)
+    logger.info(f"📡 Emitted FlowStartedEvent for: {flow_id}")
+    
+    try:
+        # Get all methods that should be tracked for real-time updates
+        flow_methods = _get_flow_execution_methods(flow)
+        logger.info(f"🔍 Found {len(flow_methods)} methods to track: {[m.__name__ for m in flow_methods]}")
+        
+        # Wrap each method with event emission
+        original_methods = {}
+        for method in flow_methods:
+            method_name = method.__name__
+            original_methods[method_name] = getattr(flow, method_name)
+            
+            # Create wrapped method that emits events
+            wrapped_method = _create_event_emitting_wrapper(
+                original_methods[method_name], 
+                method_name, 
+                flow, 
+                flow_id
+            )
+            setattr(flow, method_name, wrapped_method)
+            logger.info(f"🎯 Wrapped method: {method_name}")
+        
+        # Execute the flow using the appropriate method
+        result = None
+        if hasattr(flow, 'run_async'):
+            logger.info(f"✅ Using flow.run_async() for real-time execution")
+            result = await flow.run_async()
+        elif hasattr(flow, 'kickoff_async'):
+            logger.info(f"✅ Using flow.kickoff_async() for real-time execution")
+            result = await flow.kickoff_async(inputs=inputs)
+        elif hasattr(flow, 'run'):
+            logger.info(f"⚠️ Using flow.run() in thread pool")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: flow.run())
+        elif hasattr(flow, 'kickoff'):
+            logger.info(f"⚠️ Using flow.kickoff() in thread pool")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: flow.kickoff(inputs=inputs))
+        else:
+            raise AttributeError(
+                f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method"
+            )
+        
+        # Restore original methods
+        for method_name, original_method in original_methods.items():
+            setattr(flow, method_name, original_method)
+            
+        logger.info(f"✅ Flow execution completed successfully")
+        
+        # Emit flow finished event
+        flow_finished_event = FlowFinishedEvent(
+            flow_name=flow.__class__.__name__,
+            flow_id=flow_id,
+            result=result
+        )
+        crewai_event_bus.emit(flow, flow_finished_event)
+        logger.info(f"📡 Emitted FlowFinishedEvent for: {flow_id}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Flow execution failed: {e}")
+        
+        # Emit flow finished event with error
+        flow_finished_event = FlowFinishedEvent(
+            flow_name=flow.__class__.__name__,
+            flow_id=flow_id,
+            error=str(e)
+        )
+        crewai_event_bus.emit(flow, flow_finished_event)
+        
+        raise
+
+
+def _get_flow_execution_methods(flow):
+    """
+    Get all methods in a flow that should be tracked for real-time updates.
+    This includes methods decorated with @start, @listen, @router, etc.
+    """
+    import inspect
+    
+    methods = []
+    for name, method in inspect.getmembers(flow, predicate=inspect.ismethod):
+        # Skip private methods and built-in methods
+        if name.startswith('_') or name in ['run', 'kickoff', 'run_async', 'kickoff_async']:
+            continue
+            
+        # Check if method has flow decorators or is likely a flow step
+        if _is_flow_step_method(method):
+            methods.append(method)
+            
+    return methods
+
+
+def _is_flow_step_method(method):
+    """
+    Check if a method is likely a flow step that should be tracked.
+    """
+    # Check for common flow decorators
+    if hasattr(method, '__wrapped__') or hasattr(method, '__annotations__'):
+        method_str = str(method)
+        flow_decorators = ['start', 'listen', 'router', 'persist', 'step']
+        if any(decorator in method_str for decorator in flow_decorators):
+            return True
+    
+    # Check method name patterns common in flows
+    method_name = method.__name__
+    flow_patterns = ['generate', 'process', 'create', 'save', 'analyze', 'execute', 'run']
+    if any(pattern in method_name.lower() for pattern in flow_patterns):
+        return True
+        
+    return False
+
+
+def _create_event_emitting_wrapper(original_method, method_name, flow, flow_id):
+    """
+    Create a wrapper around a flow method that emits events before and after execution.
+    """
+    import functools
+    import asyncio
+    from crewai.flow.flow import MethodExecutionStartedEvent, MethodExecutionFinishedEvent, MethodExecutionFailedEvent
+    from crewai.utilities.events import crewai_event_bus
+    
+    @functools.wraps(original_method)
+    def sync_wrapper(*args, **kwargs):
+        # Emit method started event
+        started_event = MethodExecutionStartedEvent(
+            method_name=method_name,
+            flow_id=flow_id,
+            params=kwargs,
+            input_state=getattr(flow, 'state', None)
+        )
+        crewai_event_bus.emit(flow, started_event)
+        logger.info(f"📡 Emitted MethodExecutionStartedEvent for: {method_name}")
+        
+        try:
+            # Execute the original method
+            result = original_method(*args, **kwargs)
+            
+            # Emit method finished event
+            finished_event = MethodExecutionFinishedEvent(
+                method_name=method_name,
+                flow_id=flow_id,
+                result=result
+            )
+            crewai_event_bus.emit(flow, finished_event)
+            logger.info(f"📡 Emitted MethodExecutionFinishedEvent for: {method_name}")
+            
+            return result
+            
+        except Exception as e:
+            # Emit method failed event
+            failed_event = MethodExecutionFailedEvent(
+                method_name=method_name,
+                flow_id=flow_id,
+                error=str(e)
+            )
+            crewai_event_bus.emit(flow, failed_event)
+            logger.error(f"📡 Emitted MethodExecutionFailedEvent for: {method_name}, error: {e}")
+            
+            raise
+    
+    @functools.wraps(original_method)
+    async def async_wrapper(*args, **kwargs):
+        # Emit method started event
+        started_event = MethodExecutionStartedEvent(
+            method_name=method_name,
+            flow_id=flow_id,
+            params=kwargs,
+            input_state=getattr(flow, 'state', None)
+        )
+        crewai_event_bus.emit(flow, started_event)
+        logger.info(f"📡 Emitted MethodExecutionStartedEvent for: {method_name}")
+        
+        try:
+            # Execute the original method
+            result = await original_method(*args, **kwargs)
+            
+            # Emit method finished event
+            finished_event = MethodExecutionFinishedEvent(
+                method_name=method_name,
+                flow_id=flow_id,
+                result=result
+            )
+            crewai_event_bus.emit(flow, finished_event)
+            logger.info(f"📡 Emitted MethodExecutionFinishedEvent for: {method_name}")
+            
+            return result
+            
+        except Exception as e:
+            # Emit method failed event
+            failed_event = MethodExecutionFailedEvent(
+                method_name=method_name,
+                flow_id=flow_id,
+                error=str(e)
+            )
+            crewai_event_bus.emit(flow, failed_event)
+            logger.error(f"📡 Emitted MethodExecutionFailedEvent for: {method_name}, error: {e}")
+            
+            raise
+    
+    # Return appropriate wrapper based on whether original method is async
+    if asyncio.iscoroutinefunction(original_method):
+        return async_wrapper
+    else:
+        return sync_wrapper
+
+
 async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
     """
     Execute a flow asynchronously following the same pattern as crew execution
@@ -220,42 +457,13 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         register_flow_entity(flow, flow_id)
         logger.info(f"Registered flow entity for WebSocket routing: {flow_id}")
 
-        # Run the flow asynchronously using the same pattern as crew execution
+        # Run the flow with real-time event emission using custom execution wrapper
         input_dict = inputs or {}
         
         logger.info(f"🚀 FlowHandler: Starting flow execution with inputs: {input_dict}")
-
-        # Check if flow has async execution method (similar to crew pattern)
-        if hasattr(flow, 'run_async'):
-            logger.info(f"✅ Using flow.run_async() for real-time execution")
-            result = await flow.run_async()
-            logger.info(f"✅ flow.run_async() completed successfully")
-        elif hasattr(flow, 'kickoff_async'):
-            logger.info(f"✅ Using flow.kickoff_async() for real-time execution")
-            result = await flow.kickoff_async(inputs=input_dict)
-            logger.info(f"✅ flow.kickoff_async() completed successfully")
-        elif hasattr(flow, 'run'):
-            # Fallback to sync method in thread pool to avoid blocking
-            logger.info(f"⚠️ Fallback to flow.run() in thread pool")
-            import asyncio
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, lambda: flow.run()
-            )
-            logger.info(f"✅ flow.run() in thread pool completed successfully")
-        elif hasattr(flow, 'kickoff'):
-            # Fallback to sync method in thread pool to avoid blocking
-            logger.info(f"⚠️ Fallback to flow.kickoff() in thread pool")
-            import asyncio
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, lambda: flow.kickoff(inputs=input_dict)
-            )
-            logger.info(f"✅ flow.kickoff() in thread pool completed successfully")
-        else:
-            raise AttributeError(
-                f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method"
-            )
+        
+        # Use custom real-time execution wrapper that emits events as each method executes
+        result = await _execute_flow_with_real_time_events(flow, flow_id, input_dict)
 
         logger.info(f"🎉 Flow execution result type: {type(result)}, status: success")
         return {"status": "success", "result": result}
