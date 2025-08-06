@@ -15,6 +15,8 @@ from crewai.utilities.events import (
     # Flow Events
     FlowStartedEvent,
     FlowFinishedEvent,
+    FlowCreatedEvent,
+    FlowPlotEvent,
     MethodExecutionStartedEvent,
     MethodExecutionFinishedEvent,
     MethodExecutionFailedEvent,
@@ -118,6 +120,13 @@ class EventListener:
         self.ensure_event_loop()
 
         # Flow Events
+        @crewai_event_bus.on(FlowCreatedEvent)
+        def handle_flow_created(source, event):
+            """Handle flow created event."""
+            flow_id = self._extract_execution_id(source, event)
+            if flow_id:
+                self._schedule(self._handle_flow_created(flow_id, event, source))
+
         @crewai_event_bus.on(FlowStartedEvent)
         def handle_flow_started(source, event):
             """Handle flow started event."""
@@ -132,26 +141,33 @@ class EventListener:
             if flow_id:
                 self._schedule(self._handle_flow_finished(flow_id, event, source))
 
+        @crewai_event_bus.on(FlowPlotEvent)
+        def handle_flow_plot(source, event):
+            """Handle flow plot event."""
+            flow_id = self._extract_execution_id(source, event)
+            if flow_id:
+                self._schedule(self._handle_flow_plot(flow_id, event, source))
+
         @crewai_event_bus.on(MethodExecutionStartedEvent)
         def handle_method_execution_started(source, event):
             """Handle method execution started event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
-                self._schedule(self._handle_method_started(flow_id, event))
+                self._schedule(self._handle_method_started(flow_id, event, source))
 
         @crewai_event_bus.on(MethodExecutionFinishedEvent)
         def handle_method_execution_finished(source, event):
             """Handle method execution finished event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
-                self._schedule(self._handle_method_finished(flow_id, event))
+                self._schedule(self._handle_method_finished(flow_id, event, source))
 
         @crewai_event_bus.on(MethodExecutionFailedEvent)
         def handle_method_execution_failed(source, event):
             """Handle method execution failed event."""
             flow_id = self._extract_execution_id(source, event)
             if flow_id:
-                self._schedule(self._handle_method_failed(flow_id, event))
+                self._schedule(self._handle_method_failed(flow_id, event, source))
 
         # Crew Events
         @crewai_event_bus.on(CrewKickoffStartedEvent)
@@ -454,7 +470,7 @@ class EventListener:
                     # Use proper extraction methods
                     agent_id = self._extract_agent_id(event, source)
                     agent_data = self._extract_agent_data(event, source)
-                    
+
                     agent_name = agent_data.get("name") or f"Agent {agent_id}"
                     agent_role = agent_data.get("role") or "Unknown Role"
 
@@ -540,7 +556,7 @@ class EventListener:
                     # Use proper extraction methods
                     task_id = self._extract_task_id(event, source)
                     task_data = self._extract_task_data(event, source)
-                    
+
                     task_description = task_data.get("description") or f"Task {task_id}"
                     agent_id = task_data.get("agent_id")  # May be None, which is fine
 
@@ -1157,35 +1173,54 @@ class EventListener:
         """Handle flow-specific broadcasting logic."""
         from crewai_playground.events.websocket_utils import flow_websocket_queues
 
-        # Debug: Check if flow_id is actually an object ID instead of the API flow ID
-        if isinstance(flow_id, int) or (isinstance(flow_id, str) and flow_id.isdigit()):
-            # Try to find the correct API flow ID from the entity service
-            try:
-                from crewai_playground.services.entities import entity_service
+        print(f"Websocket queues: {flow_websocket_queues}")
 
-                api_flow_id = entity_service.get_primary_id(str(flow_id))
-                if api_flow_id:
-                    flow_id = api_flow_id  # Use the API flow ID for broadcasting
-                else:
-                    pass
-            except ImportError as e:
-                pass
+        # Use entity service to resolve all possible flow IDs for broadcasting
+        try:
+            from crewai_playground.services.entities import entity_service
+
+            # Get all possible flow IDs (API ID, internal ID, aliases)
+            broadcast_ids = entity_service.resolve_broadcast_ids(flow_id)
+            api_flow_id = entity_service.get_primary_id(flow_id) or flow_id
+
+            print(f"broadcast_ids: {broadcast_ids}")
+            print(f"api_flow_id: {api_flow_id}")
+
+            logger.info(
+                f"🔍 Flow broadcast - Input ID: {flow_id}, API ID: {api_flow_id}, All IDs: {broadcast_ids}"
+            )
+        except ImportError:
+            # Fallback if entity service not available
+            broadcast_ids = [flow_id]
+            api_flow_id = flow_id
+            logger.warning(f"Entity service not available, using single ID: {flow_id}")
 
         flow_clients_updated = 0
 
-        # Broadcast to flow WebSocket queues (existing flow system)
-        if flow_id in flow_websocket_queues:
-            connection_count = len(flow_websocket_queues[flow_id])
+        # Try to broadcast to WebSocket queues using all possible IDs
+        for broadcast_id in broadcast_ids:
+            if broadcast_id in flow_websocket_queues:
+                connection_count = len(flow_websocket_queues[broadcast_id])
+                logger.info(
+                    f"📡 Found {connection_count} WebSocket connections for flow ID: {broadcast_id}"
+                )
 
-            message = {"type": "flow_state", "payload": flow_state}
-            for connection_id, queue in flow_websocket_queues[flow_id].items():
-                try:
-                    await queue.put(message)
-                    flow_clients_updated += 1
-                except Exception as e:
-                    pass
-        else:
-            pass
+                message = {"type": "flow_state", "payload": flow_state}
+                for connection_id, queue in flow_websocket_queues[broadcast_id].items():
+                    try:
+                        await queue.put(message)
+                        flow_clients_updated += 1
+                        logger.debug(
+                            f"✅ Sent flow update to connection {connection_id} via ID {broadcast_id}"
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            f"❌ Error sending to connection {connection_id}: {e}"
+                        )
+            else:
+                logger.debug(
+                    f"🔍 No WebSocket connections found for flow ID: {broadcast_id}"
+                )
 
         # Also broadcast to crew clients if they might be interested in flow updates
         crew_clients_updated = 0
@@ -1312,22 +1347,49 @@ class EventListener:
             return str(event.execution_id)
         elif hasattr(event, "crew_id"):
             return str(event.crew_id)
+        elif hasattr(event, "flow_id"):
+            return str(event.flow_id)
         elif hasattr(event, "id"):
             return str(event.id)
         elif hasattr(event, "_id"):
             return str(event._id)
-        elif hasattr(event, "flow_id"):
-            return str(event.flow_id)
 
-        # Try to get from source
-        if hasattr(source, "id"):
-            return str(source.id)
+        # Try to get from source - prioritize flow-specific attributes
+        if hasattr(source, "flow_id"):
+            return str(source.flow_id)
+        elif hasattr(source, "id"):
+            # Check if this looks like a UUID (flow ID) vs object ID
+            source_id = str(source.id)
+            if "-" in source_id and len(source_id) > 20:  # Likely a UUID
+                return source_id
         elif hasattr(source, "_id"):
             return str(source._id)
         elif hasattr(source, "execution_id"):
             return str(source.execution_id)
         elif hasattr(source, "crew_id"):
             return str(source.crew_id)
+
+        # For flow objects, check for flow-specific attributes
+        if source and hasattr(source, "__class__"):
+            class_name = source.__class__.__name__
+            if "flow" in class_name.lower():
+                # Try to find flow ID in various places
+                if hasattr(source, "_flow_id"):
+                    return str(source._flow_id)
+                elif hasattr(source, "flow_execution_id"):
+                    return str(source.flow_execution_id)
+                elif hasattr(source, "state") and hasattr(source.state, "id"):
+                    return str(source.state.id)
+                # Use entity service to find registered flow ID
+                try:
+                    from ..services.entities import entity_service
+
+                    python_id = str(id(source))
+                    flow_id = entity_service.get_primary_id(python_id)
+                    if flow_id and flow_id != python_id:
+                        return flow_id
+                except Exception as e:
+                    logger.debug(f"Could not resolve flow ID via entity service: {e}")
 
         # For crew objects, try to get name or other identifiers
         if hasattr(source, "name"):
@@ -1450,11 +1512,11 @@ class EventListener:
                     return str(event.agent.fingerprint.uuid_str)
                 elif hasattr(event.agent.fingerprint, "uuid"):
                     return str(event.agent.fingerprint.uuid)
-        
+
         # Second priority: Direct agent_id field (LLM events, etc.)
         if hasattr(event, "agent_id") and event.agent_id:
             return str(event.agent_id)
-        
+
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
@@ -1478,7 +1540,9 @@ class EventListener:
             return f"agent_{role_hash}"
 
         # Final fallback: Don't return None, return a consistent fallback
-        logger.warning(f"Could not extract agent ID from event {type(event).__name__}, using fallback")
+        logger.warning(
+            f"Could not extract agent ID from event {type(event).__name__}, using fallback"
+        )
         return f"agent_{abs(id(event)) % 100000}"
 
     def _extract_task_id(self, event, source=None):
@@ -1497,11 +1561,11 @@ class EventListener:
                     return str(event.task.fingerprint.uuid_str)
                 elif hasattr(event.task.fingerprint, "uuid"):
                     return str(event.task.fingerprint.uuid)
-        
+
         # Second priority: Direct task_id field (LLM events, etc.)
         if hasattr(event, "task_id") and event.task_id:
             return str(event.task_id)
-        
+
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
@@ -1526,7 +1590,9 @@ class EventListener:
             return f"task_{desc_hash}"
 
         # Final fallback: Don't return None, return a consistent fallback
-        logger.warning(f"Could not extract task ID from event {type(event).__name__}, using fallback")
+        logger.warning(
+            f"Could not extract task ID from event {type(event).__name__}, using fallback"
+        )
         return f"task_{abs(id(event)) % 100000}"
 
     def _extract_agent_data(self, event, source=None):
@@ -1663,19 +1729,82 @@ class EventListener:
         return broadcast_flow_id, self.flow_states[broadcast_flow_id]
 
     # Async Implementation Methods
+    async def _handle_flow_created(self, flow_id: str, event, source=None):
+        """Handle flow created event asynchronously."""
+        logger.info(f"Flow created event handler for flow: {flow_id}")
+
+        flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
+
+        # Initialize telemetry trace for comprehensive flow tracking
+        try:
+            telemetry_service.initialize_flow_trace(flow_id, flow_name)
+            logger.info(f"Initialized telemetry flow trace for: {flow_id}")
+        except Exception as e:
+            logger.error(f"Error initializing flow telemetry trace: {e}")
+
+        broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
+            flow_id, "flow_created", flow_name
+        )
+
+        flow_state.update(
+            {
+                "name": flow_name,
+                "status": "created",
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+        )
+
+        await self.broadcast_update(
+            flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
+        )
+
+    async def _handle_flow_plot(self, flow_id: str, event, source=None):
+        """Handle flow plot event asynchronously."""
+        logger.info(f"Flow plot event handler for flow: {flow_id}")
+
+        flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
+
+        # Add plot event to telemetry trace
+        try:
+            telemetry_service.add_flow_event(
+                flow_id,
+                "flow.plot",
+                {
+                    "flow_name": flow_name,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
+            logger.info(f"Added plot event to telemetry for: {flow_id}")
+        except Exception as e:
+            logger.error(f"Error adding plot event to telemetry: {e}")
+
+        broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
+            flow_id, "flow_plot", flow_name
+        )
+
+        # Add plot information to flow state
+        if "metadata" not in flow_state:
+            flow_state["metadata"] = {}
+        flow_state["metadata"]["plot_generated"] = True
+        flow_state["timestamp"] = asyncio.get_event_loop().time()
+
+        await self.broadcast_update(
+            flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
+        )
+
     async def _handle_flow_started(self, flow_id: str, event, source=None):
         """Handle flow started event asynchronously."""
         logger.info(f"Flow started event handler for flow: {flow_id}")
 
         flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
-        
+
         # Start telemetry trace for comprehensive flow tracking
         try:
             telemetry_service.start_flow_trace(flow_id, flow_name)
             logger.info(f"Started telemetry flow trace for: {flow_id}")
         except Exception as e:
             logger.error(f"Error starting flow telemetry trace: {e}")
-        
+
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "flow_started", flow_name
         )
@@ -1748,14 +1877,46 @@ class EventListener:
             flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
-    async def _handle_method_started(self, flow_id: str, event):
+    async def _handle_method_started(self, flow_id: str, event, source=None):
         """Handle method execution started event asynchronously."""
         logger.info(f"Method started: {flow_id}, method: {event.method_name}")
 
-        # Add method execution to telemetry trace
+        # Extract comprehensive method execution data
+        method_data = {}
+
+        # Capture state snapshot if available
+        if hasattr(event, "state") and event.state:
+            try:
+                if hasattr(event.state, "__dict__"):
+                    state_dict = {
+                        k: v for k, v in event.state.__dict__.items() if k != "id"
+                    }
+                    method_data["input_state"] = state_dict
+                elif isinstance(event.state, dict):
+                    state_dict = {k: v for k, v in event.state.items() if k != "id"}
+                    method_data["input_state"] = state_dict
+            except Exception as e:
+                logger.warning(f"Error capturing state snapshot: {e}")
+
+        # Capture method parameters if available
+        if hasattr(event, "params") and event.params:
+            method_data["params"] = event.params
+
+        # Capture flow context if available from source
+        if source:
+            try:
+                if hasattr(source, "name"):
+                    method_data["flow_name"] = source.name
+                if hasattr(source, "flow_id"):
+                    # Skip flow_id - already passed as positional argument
+                    pass
+            except Exception as e:
+                logger.warning(f"Error capturing flow context: {e}")
+
+        # Add method execution to telemetry trace with comprehensive data
         try:
             telemetry_service.add_flow_method_execution(
-                flow_id, event.method_name, "started"
+                flow_id, event.method_name, "started", **method_data
             )
             logger.info(f"Added method started to telemetry: {event.method_name}")
         except Exception as e:
@@ -1795,16 +1956,63 @@ class EventListener:
             flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
-    async def _handle_method_finished(self, flow_id: str, event):
+    async def _handle_method_finished(self, flow_id: str, event, source=None):
         """Handle method execution finished event asynchronously."""
         logger.info(f"Method finished: {flow_id}, method: {event.method_name}")
 
         outputs = getattr(event, "result", None)
-        
-        # Add method completion to telemetry trace
+
+        # Extract comprehensive method execution data
+        method_data = {
+            "outputs": outputs,
+        }
+
+        # Capture output state snapshot if available
+        if hasattr(event, "state") and event.state:
+            try:
+                if hasattr(event.state, "__dict__"):
+                    state_dict = {
+                        k: v for k, v in event.state.__dict__.items() if k != "id"
+                    }
+                    method_data["output_state"] = state_dict
+                elif isinstance(event.state, dict):
+                    state_dict = {k: v for k, v in event.state.items() if k != "id"}
+                    method_data["output_state"] = state_dict
+            except Exception as e:
+                logger.warning(f"Error capturing output state snapshot: {e}")
+
+        # Capture flow context if available from source
+        if source:
+            try:
+                if hasattr(source, "name"):
+                    method_data["flow_name"] = source.name
+                if hasattr(source, "flow_id"):
+                    # Skip flow_id - already passed as positional argument
+                    pass
+                # Try to extract final state from source for comprehensive tracking
+                if hasattr(source, "state"):
+                    try:
+                        if hasattr(source.state, "__dict__"):
+                            final_state = {
+                                k: v
+                                for k, v in source.state.__dict__.items()
+                                if k != "id"
+                            }
+                            method_data["final_flow_state"] = final_state
+                        elif isinstance(source.state, dict):
+                            final_state = {
+                                k: v for k, v in source.state.items() if k != "id"
+                            }
+                            method_data["final_flow_state"] = final_state
+                    except Exception as e:
+                        logger.warning(f"Error capturing final flow state: {e}")
+            except Exception as e:
+                logger.warning(f"Error capturing flow context: {e}")
+
+        # Add method completion to telemetry trace with comprehensive data
         try:
             telemetry_service.add_flow_method_execution(
-                flow_id, event.method_name, "completed", outputs=outputs
+                flow_id, event.method_name, "completed", **method_data
             )
             logger.info(f"Added method completed to telemetry: {event.method_name}")
         except Exception as e:
@@ -1846,16 +2054,47 @@ class EventListener:
             flow_id=broadcast_flow_id, flow_state=flow_state, update_type="flow_state"
         )
 
-    async def _handle_method_failed(self, flow_id: str, event):
+    async def _handle_method_failed(self, flow_id: str, event, source=None):
         """Handle method execution failed event asynchronously."""
         logger.info(f"Method failed: {flow_id}, method: {event.method_name}")
 
         error_msg = getattr(event, "error", None)
-        
-        # Add method failure to telemetry trace
+
+        # Extract comprehensive method failure data
+        method_data = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": str(error_msg) if error_msg else "Unknown error",
+        }
+
+        # Capture state snapshot at failure if available
+        if hasattr(event, "state") and event.state:
+            try:
+                if hasattr(event.state, "__dict__"):
+                    state_dict = {
+                        k: v for k, v in event.state.__dict__.items() if k != "id"
+                    }
+                    method_data["failure_state"] = state_dict
+                elif isinstance(event.state, dict):
+                    state_dict = {k: v for k, v in event.state.items() if k != "id"}
+                    method_data["failure_state"] = state_dict
+            except Exception as e:
+                logger.warning(f"Error capturing failure state snapshot: {e}")
+
+        # Capture flow context if available from source
+        if source:
+            try:
+                if hasattr(source, "name"):
+                    method_data["flow_name"] = source.name
+                if hasattr(source, "flow_id"):
+                    # Skip flow_id - already passed as positional argument
+                    pass
+            except Exception as e:
+                logger.warning(f"Error capturing flow context: {e}")
+
+        # Add method failure to telemetry trace with comprehensive data
         try:
             telemetry_service.add_flow_method_execution(
-                flow_id, event.method_name, "failed", error=str(error_msg) if error_msg else "Unknown error"
+                flow_id, event.method_name, "failed", **method_data
             )
             logger.info(f"Added method failed to telemetry: {event.method_name}")
         except Exception as e:

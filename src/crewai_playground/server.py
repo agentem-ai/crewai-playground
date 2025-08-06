@@ -33,6 +33,18 @@ log.setLevel(logging.ERROR)
 # Create logger for this module
 logger = logging.getLogger(__name__)
 
+# Global WebSocket client registry for crew WebSockets
+websocket_clients = {}
+
+# Import WebSocket utilities for flow WebSockets
+from crewai_playground.events.websocket_utils import (
+    flow_websocket_queues,
+    register_websocket_queue,
+    unregister_websocket_queue,
+    broadcast_flow_update
+)
+
+
 # Load environment variables from a .env file if present
 try:
     from dotenv import load_dotenv, find_dotenv
@@ -997,92 +1009,120 @@ async def websocket_endpoint(websocket: WebSocket, crew_id: str = None):
 
 @app.websocket("/ws/flow/{flow_id}")
 async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
-    """WebSocket endpoint for real-time flow execution visualization."""
-    logging.info(f"New WebSocket connection request for flow {flow_id}")
-    await websocket.accept()
-    logging.info(f"WebSocket connection attempt for flow: {flow_id}")
+    """
+    WebSocket endpoint for flow execution updates
 
+    Args:
+        websocket: WebSocket connection
+        flow_id: ID of the flow
+    """
     try:
-        # Check if this is an API flow ID that needs to be mapped to internal flow ID
+        await websocket.accept()
+        logging.info(f"WebSocket connection accepted for flow ID: {flow_id}")
+
+        # Get all possible flow IDs for this flow
         from crewai_playground.services.entities import entity_service
+        all_flow_ids = entity_service.resolve_broadcast_ids(flow_id)
+        logging.info(f"Resolved flow ID aliases: {all_flow_ids}")
 
-        internal_flow_id = entity_service.get_internal_id(flow_id) or flow_id
+        # Get the primary ID (API ID) for this flow
+        primary_id = entity_service.get_primary_id(flow_id) or flow_id
+        
+        # Check if the flow is active using any of the possible IDs
+        from crewai_playground.routers.flow_api import get_active_execution, is_execution_active, active_flows
+        from crewai_playground.events.event_listener import event_listener
+        
+        # Try to find the execution using any of the possible IDs
+        execution = None
+        for alias_id in all_flow_ids:
+            execution = get_active_execution(alias_id)
+            if execution:
+                logging.info(f"Found active execution using alias ID: {alias_id}")
+                # Register this flow ID with the execution data to ensure future lookups succeed
+                for other_id in all_flow_ids:
+                    active_flows[other_id] = execution
+                break
 
-        # Check if flow execution exists using the API flow ID (since active flows are stored with API flow ID)
-        execution = get_active_execution(flow_id)
-
-        # If no active execution is found, wait a short time for it to be created
-        # This helps with race conditions where the WebSocket connects before the flow is fully initialized
+        # Wait for the flow to become active if it's not already
+        # This handles race conditions where the WebSocket connects before the flow is registered
         if not execution:
-            logging.info(
-                f"No active execution found for API flow {flow_id}, waiting for initialization..."
-            )
-            # Wait up to 5 seconds for the flow execution to be created
-            for i in range(10):
+            logging.info(f"No active execution found immediately, waiting for registration...")
+            # Wait for up to 10 seconds for the flow to become active
+            for i in range(20):  # 20 * 0.5s = 10s
                 await asyncio.sleep(0.5)
-                execution = get_active_execution(flow_id)
+                
+                # Try each possible ID on each attempt
+                for alias_id in all_flow_ids:
+                    execution = get_active_execution(alias_id)
+                    if execution:
+                        logging.info(f"Found active execution on attempt {i+1} using alias ID: {alias_id}")
+                        # Register this flow ID with the execution data to ensure future lookups succeed
+                        for other_id in all_flow_ids:
+                            active_flows[other_id] = execution
+                        break
+                
                 if execution:
-                    logging.info(
-                        f"Flow execution for API flow {flow_id} found after waiting"
-                    )
                     break
 
-        # If still no execution found after waiting, send error
+        # If still no execution found, send error and close connection
         if not execution:
-            logging.error(
-                f"No active execution found for API flow {flow_id} after waiting"
-            )
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": f"No active execution found for flow {flow_id}. Please try running the flow again.",
+            logging.error(f"No active execution found for flow {flow_id} after waiting. Available executions: {list(active_flows.keys())}")
+            await websocket.send_json({
+                "type": "error",
+                "data": {
+                    "message": f"No active execution found for flow {flow_id} or any aliases {all_flow_ids}. Please try running the flow again."
                 }
-            )
-            logging.info(f"Closing WebSocket for flow {flow_id} - no execution found")
+            })
             await websocket.close()
             return
 
-        # Create a queue for this connection
-        queue: asyncio.Queue = asyncio.Queue()
+        # Send initial state
+        await websocket.send_json({
+            "type": "flow_state",
+            "data": execution
+        })
+        logging.info(f"Sent initial flow state to WebSocket client")
 
-        # Register this connection with the API flow ID (for UI compatibility)
+        # Create a queue for this connection
+        queue = asyncio.Queue()
         connection_id = str(uuid.uuid4())
 
-        register_websocket_queue(flow_id, connection_id, queue)
-
-        # Also register with internal flow ID if different (for event compatibility)
-        if internal_flow_id != flow_id:
-            register_websocket_queue(
-                internal_flow_id, f"{connection_id}_internal", queue
-            )
+        # Register this connection with ALL possible flow IDs to ensure we catch all events
+        for alias_id in all_flow_ids:
+            queue_id = f"{connection_id}_{alias_id}" if alias_id != flow_id else connection_id
+            register_websocket_queue(alias_id, queue_id, queue)
+            logging.debug(f"Registered WebSocket queue for ID: {alias_id} with connection: {queue_id}")
 
         try:
-            # Send initial state using the API flow ID (where states are now stored)
-            initial_state = flow_websocket_listener.get_flow_state(flow_id)
-            if initial_state:
-                await websocket.send_json(
-                    {"type": "flow_state", "payload": initial_state}
-                )
-                logging.info(f"Initial state sent for flow {flow_id}")
-
             # Listen for updates from the flow execution
             while True:
                 try:
                     # Wait for messages with a timeout
                     message = await asyncio.wait_for(queue.get(), timeout=1.0)
                     await websocket.send_json(message)
+                    logging.debug(f"Sent message to client for flow {flow_id}: {message.get('type')}")
                 except asyncio.TimeoutError:
-                    # Check if the flow execution is still active using API flow ID
-                    if not is_execution_active(flow_id):
-                        # Send final state before closing using API flow ID
-                        final_state = flow_websocket_listener.get_flow_state(flow_id)
+                    # Check if the flow execution is still active using any of the possible IDs
+                    execution_active = False
+                    for alias_id in all_flow_ids:
+                        if is_execution_active(alias_id):
+                            execution_active = True
+                            break
+                    
+                    if not execution_active:
+                        # Flow execution completed, send final state if available
+                        final_state = None
+                        for alias_id in all_flow_ids:
+                            final_state = event_listener.get_flow_state(alias_id)
+                            if final_state:
+                                break
+                                
                         if final_state:
-                            await websocket.send_json(
-                                {"type": "flow_state", "payload": final_state}
-                            )
-                        logging.info(
-                            f"Flow execution completed for {flow_id}, closing WebSocket"
-                        )
+                            await websocket.send_json({
+                                "type": "flow_state", 
+                                "data": final_state
+                            })
+                        logging.info(f"Flow execution completed for {flow_id}, closing WebSocket")
                         break
                     # Otherwise continue waiting
                     continue
@@ -1091,18 +1131,20 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
         except Exception as e:
             logging.error(f"Error in flow WebSocket: {str(e)}")
         finally:
-            # Unregister this connection
-            unregister_websocket_queue(flow_id, connection_id)
-
-            # Also unregister internal flow ID if it was registered
-            if internal_flow_id != flow_id:
-                unregister_websocket_queue(
-                    internal_flow_id, f"{connection_id}_internal"
-                )
+            # Unregister this connection from all possible IDs
+            for alias_id in all_flow_ids:
+                queue_id = f"{connection_id}_{alias_id}" if alias_id != flow_id else connection_id
+                unregister_websocket_queue(alias_id, queue_id)
+                logging.debug(f"Unregistered WebSocket queue for ID: {alias_id} with connection: {queue_id}")
     except Exception as e:
         logging.error(f"Flow WebSocket error: {str(e)}", exc_info=True)
     finally:
-        await websocket.close()
+        # Only close WebSocket if it's still open
+        try:
+            if websocket.client_state.name != 'DISCONNECTED':
+                await websocket.close()
+        except Exception as close_error:
+            logging.debug(f"WebSocket already closed or error closing: {close_error}")
 
 
 @app.get("/{full_path:path}")

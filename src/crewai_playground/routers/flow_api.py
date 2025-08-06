@@ -361,22 +361,21 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
         logger.info(f"Has run: {hasattr(flow, 'run')}")
         logger.info(f"Has kickoff: {hasattr(flow, 'kickoff')}")
 
+        # Register flow entity BEFORE execution for proper WebSocket mapping
+        register_flow_entity(flow, flow_id)
+        
         if hasattr(flow, "run_async"):
             logger.info(f"Executing flow via run_async method")
             result = await emit_method_events("run_async", flow.run_async)
-            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "kickoff_async"):
             logger.info(f"Executing flow via kickoff_async method")
             result = await emit_method_events("kickoff_async", flow.kickoff_async)
-            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "run"):
             logger.info(f"Executing flow via run method")
             result = await emit_method_events("run", flow.run)
-            register_flow_entity(flow, flow_id)
         elif hasattr(flow, "kickoff"):
             logger.info(f"Executing flow via kickoff method")
             result = await emit_method_events("kickoff", flow.kickoff)
-            register_flow_entity(flow, flow_id)
         else:
             raise AttributeError(
                 f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method"
@@ -503,11 +502,24 @@ async def execute_flow(flow_id: str, request: FlowExecuteRequest) -> Dict[str, A
 
         # Initialize a simple reference in active_flows for tracking
         # The event listener will handle the full flow state management
-        active_flows[flow_id] = {
-            "id": flow_id,
+        
+        # Get all possible flow ID aliases to ensure WebSocket can find the execution
+        from crewai_playground.services.entities import entity_service
+        all_possible_ids = entity_service.resolve_broadcast_ids(flow_id)
+        
+        # Register the execution under ALL possible flow IDs to ensure WebSocket can find it
+        # regardless of which ID variant the client uses
+        execution_data = {
+            "id": flow_id,  # Always store the API flow ID as the canonical ID
             "status": "initializing",
             "timestamp": asyncio.get_event_loop().time(),
         }
+        
+        # Register under all possible IDs to ensure WebSocket can find it
+        for alias_id in all_possible_ids:
+            active_flows[alias_id] = execution_data
+            
+        logging.info(f"Registered flow execution for IDs: {all_possible_ids}")
 
         # Start the flow execution in a separate thread to not block the API
         import threading
@@ -600,214 +612,156 @@ def record_flow_event(flow_id: str, event_type: str, data: Dict[str, Any] = None
 
 async def get_flow_traces(flow_id: str):
     """
-    Get execution traces for a flow
+    Get execution traces for a flow with comprehensive telemetry data
 
     Args:
         flow_id: ID of the flow
 
     Returns:
-        List of trace objects with spans structure for visualization
+        List of trace objects with detailed spans structure for visualization
     """
-    logger.info(f"Fetching traces for flow_id: {flow_id}")
+    logger.info(f"Fetching comprehensive traces for flow_id: {flow_id}")
 
-    # Check if flow exists in flows_cache
-    if flow_id not in flows_cache:
-        logger.warning(f"Flow ID {flow_id} not found in flows_cache")
-
-    # Check if flow has any traces
-    if flow_id not in flow_traces:
-        logger.info(f"No traces found for flow_id: {flow_id}")
-        # Create an initializing trace if none exists
-        flow_name = flows_cache.get(
-            flow_id,
-            FlowInfo(
-                id=flow_id,
-                name="Unknown",
-                description="",
-                file_path="",
-                class_name="",
-                flow_class=None,
-            ),
-        ).name
-        initial_trace = {
-            "id": f"trace_{uuid.uuid4()}",
-            "flow_id": flow_id,
-            "flow_name": flow_name,
-            "status": "initializing",
-            "start_time": datetime.now().timestamp(),
-            "spans": [],  # Empty spans array for initialization
-            "events": [],
-        }
-        flow_traces[flow_id] = [initial_trace]
-        return {"status": "success", "traces": [initial_trace]}
-
-    # Get flow state to access steps information
-    flow_state = flow_states.get(flow_id, {})
-    steps = flow_state.get("steps", [])
-
-    # Format flow traces to match the structure expected by TraceTimeline
-    formatted_traces = []
-    current_time = datetime.now().timestamp()
-
-    for trace in flow_traces[flow_id]:
-        try:
-            # Create a copy of the trace to avoid modifying the original
-            formatted_trace = dict(trace)
-
-            # Validate and fix timestamps
-            if (
-                formatted_trace.get("start_time") is None
-                or formatted_trace.get("start_time") > current_time
-            ):
-                formatted_trace["start_time"] = (
-                    current_time - 60
-                )  # Default to 1 minute ago
-
-            # Ensure we have a valid end_time for the trace
-            if (
-                formatted_trace.get("end_time") is None
-                or formatted_trace.get("end_time") > current_time
-            ):
-                formatted_trace["end_time"] = current_time
-
-            # Create a root span for the flow execution
-            trace_id = formatted_trace.get("id", str(uuid.uuid4()))
-            root_span = {
+    # First, try to get traces from the enhanced telemetry service
+    from crewai_playground.services.telemetry import telemetry_service, flow_traces_storage
+    
+    comprehensive_traces = []
+    
+    # Get traces from telemetry service storage
+    for trace_id, trace_data in flow_traces_storage.items():
+        if trace_data.get("flow_id") == flow_id:
+            logger.info(f"Found telemetry trace {trace_id} for flow {flow_id}")
+            
+            # Build comprehensive trace with detailed spans
+            comprehensive_trace = {
                 "id": trace_id,
-                "name": formatted_trace.get("flow_name", "Flow Execution"),
-                "start_time": formatted_trace.get("start_time"),
-                "end_time": formatted_trace.get("end_time"),
-                "status": formatted_trace.get("status", "initializing"),
-                "children": [],
-                "attributes": {
-                    "flow_id": flow_id,
-                    "inputs": formatted_trace.get("inputs", {}),
-                },
+                "flow_id": flow_id,
+                "flow_name": trace_data.get("flow_name", "Unknown Flow"),
+                "status": trace_data.get("status", "unknown"),
+                "start_time": trace_data.get("start_time"),
+                "end_time": trace_data.get("end_time"),
+                "created_time": trace_data.get("created_time"),
+                "events": trace_data.get("events", []),
+                "metadata": trace_data.get("metadata", {}),
+                "spans": [],
             }
-
-            # Create some dummy method steps if this is a completed trace with no steps
-            # This ensures we have visualization data even for older traces
-            use_dummy_steps = (
-                formatted_trace.get("status") == "completed"
-                and len(steps) == 0
-                and formatted_trace.get("start_time")
-                and formatted_trace.get("end_time")
-            )
-
-            if use_dummy_steps:
-                # Create dummy steps based on the flow start and end time
-                start_time = formatted_trace.get("start_time")
-                end_time = formatted_trace.get("end_time")
-                duration = end_time - start_time
-
-                # Create some representative method steps
-                dummy_steps = [
-                    {
-                        "id": f"{trace_id}_method_1",
-                        "name": "initialize",
-                        "status": "completed",
-                        "start_time": start_time + (duration * 0.05),
-                        "end_time": start_time + (duration * 0.15),
-                        "outputs": "Flow initialized",
-                    },
-                    {
-                        "id": f"{trace_id}_method_2",
-                        "name": "process",
-                        "status": "completed",
-                        "start_time": start_time + (duration * 0.2),
-                        "end_time": start_time + (duration * 0.8),
-                        "outputs": "Flow processing complete",
-                    },
-                    {
-                        "id": f"{trace_id}_method_3",
-                        "name": "finalize",
-                        "status": "completed",
-                        "start_time": start_time + (duration * 0.85),
-                        "end_time": start_time + (duration * 0.95),
-                        "outputs": "Flow finalized",
-                    },
-                ]
-
-                # Use these dummy steps instead of the empty flow state steps
-                steps = dummy_steps
-
-            # Process steps and events into spans
-            spans = [root_span]  # Start with just the root span
-
-            # Add each step as a child span of the root span
-            for step in steps:
-                # Use the step's actual timing information or generate meaningful defaults
-                step_start = step.get("start_time")
-                if step_start is None or step_start > current_time:
-                    # Default to 1ms after the root start if no timestamp
-                    step_start = root_span["start_time"] + 0.001
-
-                step_end = step.get("end_time")
-                if step_end is None or step_end > current_time:
-                    # If we have a start but no end, use current time or root end
-                    if step.get("status") in ["completed", "failed"]:
-                        # For completed/failed steps without end time, use 1ms before root end
-                        step_end = root_span["end_time"] - 0.001
-                    else:
-                        # For running/pending steps, use current time
-                        step_end = current_time
-
-                step_span = {
-                    "id": step.get("id", str(uuid.uuid4())),
-                    "name": step.get("name", "Unknown Method"),
-                    "parent_id": root_span["id"],
-                    "start_time": step_start,
-                    "end_time": step_end,
-                    "status": step.get("status", "unknown"),
+            
+            # Convert method executions to detailed spans
+            methods = trace_data.get("methods", {})
+            for method_name, method_data in methods.items():
+                # Create main method span
+                method_span = {
+                    "id": f"method_{method_name}_{trace_id}",
+                    "name": method_name,
+                    "type": "method",
+                    "status": method_data.get("status", "unknown"),
+                    "start_time": method_data.get("start_time"),
+                    "end_time": method_data.get("end_time"),
+                    "duration": None,
                     "children": [],
-                    "attributes": {
-                        "outputs": step.get("outputs"),
-                        "error": step.get("error"),
-                    },
+                    "metadata": {
+                        "method_name": method_name,
+                        "executions_count": len(method_data.get("executions", [])),
+                    }
                 }
-                spans.append(step_span)  # Add to flat spans list
-                root_span["children"].append(step_span)  # Add to hierarchy
-
-            # Add events as additional spans if they're not already represented
-            for event in formatted_trace.get("events", []):
-                if event.get("type") == "status_change":
-                    continue  # Skip status change events as they're already represented
-
-                event_time = event.get("timestamp")
-                if event_time is None or event_time > current_time:
-                    event_time = root_span["start_time"] + 0.0005
-
-                # Create a span for this event
-                event_id = f"{trace_id}_event_{uuid.uuid4().hex[:8]}"
-                event_span = {
-                    "id": event_id,
-                    "name": f"Event: {event.get('type', 'unknown')}",
-                    "parent_id": root_span["id"],
-                    "start_time": event_time,
-                    "end_time": event_time + 0.0001,  # Very short duration for events
-                    "status": "completed",
-                    "children": [],
-                    "attributes": event.get("data", {}),
+                
+                # Calculate duration if both times are available
+                if method_span["start_time"] and method_span["end_time"]:
+                    try:
+                        start = datetime.fromisoformat(method_span["start_time"].replace('Z', '+00:00'))
+                        end = datetime.fromisoformat(method_span["end_time"].replace('Z', '+00:00'))
+                        method_span["duration"] = (end - start).total_seconds()
+                    except Exception as e:
+                        logger.warning(f"Error calculating duration for method {method_name}: {e}")
+                
+                # Add detailed execution spans as children
+                for i, execution in enumerate(method_data.get("executions", [])):
+                    execution_span = {
+                        "id": f"execution_{method_name}_{i}_{trace_id}",
+                        "name": f"{method_name} Execution {i+1}",
+                        "type": "execution",
+                        "status": execution.get("status", "unknown"),
+                        "timestamp": execution.get("timestamp"),
+                        "metadata": {
+                            "execution_index": i,
+                            "input_state": execution.get("input_state"),
+                            "output_state": execution.get("output_state"),
+                            "final_flow_state": execution.get("final_flow_state"),
+                            "params": execution.get("params"),
+                            "outputs": execution.get("outputs"),
+                            "error": execution.get("error"),
+                            "flow_name": execution.get("flow_name"),
+                        }
+                    }
+                    method_span["children"].append(execution_span)
+                
+                comprehensive_trace["spans"].append(method_span)
+            
+            # Add crew associations as spans
+            crews = trace_data.get("crews", {})
+            for crew_id, crew_data in crews.items():
+                crew_span = {
+                    "id": f"crew_{crew_id}_{trace_id}",
+                    "name": f"Crew: {crew_data.get('name', 'Unknown')}",
+                    "type": "crew",
+                    "status": "associated",
+                    "timestamp": crew_data.get("associated_at"),
+                    "metadata": {
+                        "crew_id": crew_id,
+                        "crew_name": crew_data.get("name"),
+                        "associated_at": crew_data.get("associated_at"),
+                    }
                 }
-                spans.append(event_span)  # Add to flat spans list
-                root_span["children"].append(event_span)  # Add to hierarchy
+                comprehensive_trace["spans"].append(crew_span)
+            
+            comprehensive_traces.append(comprehensive_trace)
+    
+    # If no telemetry traces found, fall back to legacy flow traces
+    if not comprehensive_traces:
+        logger.info(f"No telemetry traces found, checking legacy flow traces for {flow_id}")
+        
+        # Check if flow exists in flows_cache
+        if flow_id not in flows_cache:
+            logger.warning(f"Flow ID {flow_id} not found in flows_cache")
 
-            # Replace nodes, edges with properly structured spans
-            formatted_trace["spans"] = spans
-
-            # Remove fields that aren't used by the visualization
-            if "nodes" in formatted_trace:
-                del formatted_trace["nodes"]
-            if "edges" in formatted_trace:
-                del formatted_trace["edges"]
-
-            formatted_traces.append(formatted_trace)
-        except Exception as e:
-            logger.error(f"Error formatting trace: {e}", exc_info=True)
-            # Skip this trace if there was an error
-
-    logger.info(f"Formatted {len(formatted_traces)} traces for flow_id: {flow_id}")
-    return {"status": "success", "traces": formatted_traces}
+        # Check if flow has any traces
+        if flow_id not in flow_traces:
+            logger.info(f"No traces found for flow_id: {flow_id}")
+            # Create an initializing trace if none exists
+            flow_name = flows_cache.get(
+                flow_id,
+                FlowInfo(
+                    id=flow_id,
+                    name="Unknown",
+                    description="",
+                    file_path="",
+                    class_name="",
+                    flow_class=None,
+                ),
+            ).name
+            initial_trace = {
+                "id": f"trace_{uuid.uuid4()}",
+                "flow_id": flow_id,
+                "flow_name": flow_name,
+                "status": "initializing",
+                "start_time": datetime.now().timestamp(),
+                "spans": [],  # Empty spans array for initialization
+                "events": [],
+                "metadata": {"source": "legacy"},
+            }
+            flow_traces[flow_id] = [initial_trace]
+            return {"status": "success", "traces": [initial_trace]}
+        
+        # Convert legacy traces to new format
+        legacy_traces = flow_traces.get(flow_id, [])
+        for legacy_trace in legacy_traces:
+            comprehensive_traces.append({
+                **legacy_trace,
+                "metadata": {"source": "legacy", **legacy_trace.get("metadata", {})}
+            })
+    
+    logger.info(f"Returning {len(comprehensive_traces)} comprehensive traces for flow {flow_id}")
+    return {"status": "success", "traces": comprehensive_traces}
 
 
 @router.get("/{flow_id}/structure")
@@ -904,7 +858,24 @@ def get_active_execution(flow_id: str):
     Returns:
         Active flow execution or None if not found
     """
+    # First try direct lookup
     result = active_flows.get(flow_id)
+    
+    # If not found, try resolving aliases
+    if not result:
+        from crewai_playground.services.entities import entity_service
+        all_possible_ids = entity_service.resolve_broadcast_ids(flow_id)
+        
+        # Try each possible ID
+        for alias_id in all_possible_ids:
+            if alias_id != flow_id:  # Skip the one we already tried
+                result = active_flows.get(alias_id)
+                if result:
+                    logging.info(f"Found active execution for {flow_id} using alias {alias_id}")
+                    # Register this ID too for future lookups
+                    active_flows[flow_id] = result
+                    break
+    
     return result
 
 
