@@ -454,7 +454,7 @@ class EventListener:
                     # Use proper extraction methods
                     agent_id = self._extract_agent_id(event, source)
                     agent_data = self._extract_agent_data(event, source)
-                    
+
                     agent_name = agent_data.get("name") or f"Agent {agent_id}"
                     agent_role = agent_data.get("role") or "Unknown Role"
 
@@ -540,7 +540,7 @@ class EventListener:
                     # Use proper extraction methods
                     task_id = self._extract_task_id(event, source)
                     task_data = self._extract_task_data(event, source)
-                    
+
                     task_description = task_data.get("description") or f"Task {task_id}"
                     agent_id = task_data.get("agent_id")  # May be None, which is fine
 
@@ -1450,11 +1450,11 @@ class EventListener:
                     return str(event.agent.fingerprint.uuid_str)
                 elif hasattr(event.agent.fingerprint, "uuid"):
                     return str(event.agent.fingerprint.uuid)
-        
+
         # Second priority: Direct agent_id field (LLM events, etc.)
         if hasattr(event, "agent_id") and event.agent_id:
             return str(event.agent_id)
-        
+
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
@@ -1478,7 +1478,9 @@ class EventListener:
             return f"agent_{role_hash}"
 
         # Final fallback: Don't return None, return a consistent fallback
-        logger.warning(f"Could not extract agent ID from event {type(event).__name__}, using fallback")
+        logger.warning(
+            f"Could not extract agent ID from event {type(event).__name__}, using fallback"
+        )
         return f"agent_{abs(id(event)) % 100000}"
 
     def _extract_task_id(self, event, source=None):
@@ -1497,11 +1499,11 @@ class EventListener:
                     return str(event.task.fingerprint.uuid_str)
                 elif hasattr(event.task.fingerprint, "uuid"):
                     return str(event.task.fingerprint.uuid)
-        
+
         # Second priority: Direct task_id field (LLM events, etc.)
         if hasattr(event, "task_id") and event.task_id:
             return str(event.task_id)
-        
+
         # Try source if provided
         if source:
             if hasattr(source, "id") and source.id:
@@ -1526,7 +1528,9 @@ class EventListener:
             return f"task_{desc_hash}"
 
         # Final fallback: Don't return None, return a consistent fallback
-        logger.warning(f"Could not extract task ID from event {type(event).__name__}, using fallback")
+        logger.warning(
+            f"Could not extract task ID from event {type(event).__name__}, using fallback"
+        )
         return f"task_{abs(id(event)) % 100000}"
 
     def _extract_agent_data(self, event, source=None):
@@ -1668,14 +1672,25 @@ class EventListener:
         logger.info(f"Flow started event handler for flow: {flow_id}")
 
         flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
-        
-        # Start telemetry trace for flow
+
+        # Start telemetry trace for flow with proper ID mapping
         try:
-            logger.info(f"📊 Starting telemetry trace for flow: {flow_id}, name: {flow_name}")
-            telemetry_service.start_flow_trace(flow_id, flow_name)
+            from crewai_playground.services.entities import entity_service
+
+            # Get the API flow ID (primary ID) for telemetry
+            api_flow_id = entity_service.get_primary_id(str(flow_id))
+            if not api_flow_id:
+                api_flow_id = str(flow_id)  # Fallback to original ID
+
+            logger.info(
+                f"📊 Starting telemetry trace for flow: api_id={api_flow_id}, internal_id={flow_id}, name: {flow_name}"
+            )
+            telemetry_service.start_flow_trace(
+                api_flow_id, flow_name, internal_flow_id=str(flow_id)
+            )
         except Exception as e:
             logger.error(f"Error starting flow telemetry trace: {e}")
-        
+
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
             flow_id, "flow_started", flow_name
         )
@@ -1711,9 +1726,7 @@ class EventListener:
                 state_dict = (
                     source.state.__dict__ if hasattr(source.state, "__dict__") else {}
                 )
-                if "poem" in state_dict:
-                    result = state_dict["poem"]
-                elif "result" in state_dict:
+                if "result" in state_dict:
                     result = state_dict["result"]
                 elif "output" in state_dict:
                     result = state_dict["output"]
@@ -1737,8 +1750,15 @@ class EventListener:
 
         # End telemetry trace for flow
         try:
-            logger.info(f"📊 Ending telemetry trace for flow: {flow_id}")
-            telemetry_service.end_flow_trace(flow_id, output=result)
+            from crewai_playground.services.entities import entity_service
+
+            # Use API flow ID for telemetry
+            api_flow_id = entity_service.get_primary_id(str(flow_id)) or str(flow_id)
+
+            logger.info(
+                f"📊 Ending telemetry trace for flow: {flow_id} (api_id={api_flow_id})"
+            )
+            telemetry_service.end_flow_trace(api_flow_id, output=result)
         except Exception as e:
             logger.error(f"Error ending flow telemetry trace: {e}")
 
@@ -1754,17 +1774,24 @@ class EventListener:
 
         # Add telemetry for method execution started
         try:
-            method_name = getattr(event, 'method_name', 'unknown_method')
-            input_state = getattr(event, 'input_state', None)
-            params = getattr(event, 'params', None)
-            
-            logger.info(f"📊 Adding telemetry for method started: {method_name}")
+            from crewai_playground.services.entities import entity_service
+
+            method_name = getattr(event, "method_name", "unknown_method")
+            input_state = getattr(event, "input_state", None)
+            params = getattr(event, "params", None)
+
+            # Use API flow ID for telemetry
+            api_flow_id = entity_service.get_primary_id(str(flow_id)) or str(flow_id)
+
+            logger.info(
+                f"📊 Adding telemetry for method started: {method_name} (api_id={api_flow_id})"
+            )
             telemetry_service.add_flow_method_execution(
-                flow_id=flow_id,
+                flow_id=api_flow_id,
                 method_name=method_name,
                 status="started",
                 input_state=input_state,
-                params=params
+                params=params,
             )
         except Exception as e:
             logger.error(f"Error adding method started telemetry: {e}")
@@ -1809,15 +1836,22 @@ class EventListener:
 
         # Add telemetry for method execution finished
         try:
-            method_name = getattr(event, 'method_name', 'unknown_method')
-            outputs = getattr(event, 'result', None)
-            
-            logger.info(f"📊 Adding telemetry for method finished: {method_name}")
+            from crewai_playground.services.entities import entity_service
+
+            method_name = getattr(event, "method_name", "unknown_method")
+            outputs = getattr(event, "result", None)
+
+            # Use API flow ID for telemetry
+            api_flow_id = entity_service.get_primary_id(str(flow_id)) or str(flow_id)
+
+            logger.info(
+                f"📊 Adding telemetry for method finished: {method_name} (api_id={api_flow_id})"
+            )
             telemetry_service.add_flow_method_execution(
-                flow_id=flow_id,
+                flow_id=api_flow_id,
                 method_name=method_name,
                 status="completed",
-                outputs=outputs
+                outputs=outputs,
             )
         except Exception as e:
             logger.error(f"Error adding method finished telemetry: {e}")
@@ -1865,15 +1899,22 @@ class EventListener:
 
         # Add telemetry for method execution failed
         try:
-            method_name = getattr(event, 'method_name', 'unknown_method')
-            error_msg = getattr(event, 'error', None)
-            
-            logger.info(f"📊 Adding telemetry for method failed: {method_name}")
+            from crewai_playground.services.entities import entity_service
+
+            method_name = getattr(event, "method_name", "unknown_method")
+            error_msg = getattr(event, "error", None)
+
+            # Use API flow ID for telemetry
+            api_flow_id = entity_service.get_primary_id(str(flow_id)) or str(flow_id)
+
+            logger.info(
+                f"📊 Adding telemetry for method failed: {method_name} (api_id={api_flow_id})"
+            )
             telemetry_service.add_flow_method_execution(
-                flow_id=flow_id,
+                flow_id=api_flow_id,
                 method_name=method_name,
                 status="failed",
-                error=str(error_msg) if error_msg else "Unknown error"
+                error=str(error_msg) if error_msg else "Unknown error",
             )
         except Exception as e:
             logger.error(f"Error adding method failed telemetry: {e}")
