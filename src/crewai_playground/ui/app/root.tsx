@@ -26,15 +26,26 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  const { isDarkMode } = useChatStore()
+
+  useEffect(() => {
+    // Update the document class when dark mode changes
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+  }, [isDarkMode])
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={isDarkMode ? 'dark' : ''} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         {children}
         <ScrollRestoration />
         <Scripts />
@@ -55,41 +66,17 @@ export default function Root() {
     }
   }, [isDarkMode])
 
-  return (
-    <html lang="en" className={isDarkMode ? 'dark' : ''} suppressHydrationWarning>
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <Meta />
-        <Links />
-      </head>
-      <body>
-        <Outlet />
-        <Scripts />
-      </body>
-    </html>
-  )
+  return <Outlet />;
 }
 
 export function HydrateFallback() {
   return (
-    <html lang="en">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <Meta />
-        <Links />
-      </head>
-      <body>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto mb-4"></div>
-            <h2 className="text-xl font-semibold">Loading CrewAI...</h2>
-          </div>
-        </div>
-        <Scripts />
-      </body>
-    </html>
+    <div className="flex items-center justify-center h-screen">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto mb-4"></div>
+        <h2 className="text-xl font-semibold">Loading CrewAI...</h2>
+      </div>
+    </div>
   );
 }
 
