@@ -443,8 +443,6 @@ export default function FlowTraces() {
   const timelineSpans = useMemo((): TimelineSpan[] => {
     if (!selectedTrace) return [];
 
-
-
     const spans: TimelineSpan[] = [];
 
     // Create flow span (root)
@@ -473,38 +471,44 @@ export default function FlowTraces() {
     // Extract method execution data from events (similar to how crews extracts agent data)
     if (selectedTrace.events && selectedTrace.events.length > 0) {
       // Group events by method to reconstruct method execution spans
-      const methodExecutions = new Map<string, {
-        name: string;
-        startTime: Date | null;
-        endTime: Date | null;
-        status: string;
-        events: any[];
-      }>();
+      const methodExecutions = new Map<
+        string,
+        {
+          name: string;
+          startTime: Date | null;
+          endTime: Date | null;
+          status: string;
+          events: any[];
+        }
+      >();
 
       // Process events to extract method execution information
       selectedTrace.events.forEach((event) => {
-        if (event.type === 'flow.method.execution') {
-          const methodName = event.method_name || 'unknown_method';
-          
+        if (event.type === "flow.method.execution") {
+          const methodName = event.method_name || "unknown_method";
+
           if (!methodExecutions.has(methodName)) {
             methodExecutions.set(methodName, {
               name: methodName,
               startTime: null,
               endTime: null,
-              status: 'unknown',
-              events: []
+              status: "unknown",
+              events: [],
             });
           }
-          
+
           const methodData = methodExecutions.get(methodName)!;
           methodData.events.push(event);
-          
+
           const eventTime = new Date(event.timestamp);
-          
-          if (event.status === 'started') {
+
+          if (event.status === "started") {
             methodData.startTime = eventTime;
-            methodData.status = 'running';
-          } else if (event.status === 'completed' || event.status === 'failed') {
+            methodData.status = "running";
+          } else if (
+            event.status === "completed" ||
+            event.status === "failed"
+          ) {
             methodData.endTime = eventTime;
             methodData.status = event.status;
           }
@@ -546,8 +550,6 @@ export default function FlowTraces() {
         parent.children.push(span);
       }
     });
-
-
 
     return spans;
   }, [selectedTrace]);
@@ -714,7 +716,7 @@ export default function FlowTraces() {
                 <TabsContent value="overview">
                   <div className="space-y-6">
                     {/* Telemetry Metrics */}
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <Card>
                         <CardContent className="p-4">
                           <div className="flex items-center space-x-2">
@@ -777,29 +779,6 @@ export default function FlowTraces() {
                           </div>
                         </CardContent>
                       </Card>
-
-                      <Card>
-                        <CardContent className="p-4">
-                          <div className="flex items-center space-x-2">
-                            <BarChart2 className="h-5 w-5 text-purple-600" />
-                            <div>
-                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                                Output Size
-                              </p>
-                              <p className="text-2xl font-bold">
-                                {telemetryMetrics?.totalOutputSize
-                                  ? `${Math.round(
-                                      telemetryMetrics.totalOutputSize / 1024
-                                    )}KB`
-                                  : "0KB"}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Total output data
-                              </p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
                     </div>
 
                     {/* Flow Summary */}
@@ -846,7 +825,7 @@ export default function FlowTraces() {
                             <div className="text-sm font-medium mb-2">
                               Output
                             </div>
-                            <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
+                            <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[400px] whitespace-pre-wrap break-words">
                               {typeof selectedTrace.output === "string"
                                 ? selectedTrace.output
                                 : JSON.stringify(selectedTrace.output, null, 2)}
