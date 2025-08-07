@@ -103,6 +103,9 @@ app.include_router(flow_router)
 app.include_router(evaluation_router)
 
 
+# Global shutdown event for graceful shutdown
+shutdown_event = asyncio.Event()
+
 # Startup event to ensure event loop is available for unified event listener
 @app.on_event("startup")
 async def startup_event():
@@ -113,6 +116,31 @@ async def startup_event():
         logger.info("Event loop initialized for unified event listeners")
     except Exception as e:
         logger.error(f"Error initializing event loop for unified event listeners: {e}")
+
+# Shutdown event for graceful cleanup
+@app.on_event("shutdown")
+async def shutdown_event_handler():
+    """Handle graceful shutdown by cleaning up resources."""
+    logger.info("Starting graceful shutdown...")
+    
+    # Signal all WebSocket connections to close gracefully
+    shutdown_event.set()
+    
+    # Give WebSocket connections time to close gracefully
+    await asyncio.sleep(0.5)
+    
+    # Clean up any remaining resources
+    try:
+        # Clear active flows and crews
+        active_flows.clear()
+        active_crews.clear()
+        
+        # Clear WebSocket queues
+        websocket_queues.clear()
+        
+        logger.info("Graceful shutdown completed")
+    except Exception as e:
+        logger.error(f"Error during shutdown cleanup: {e}")
 
 
 # Dashboard API endpoint
@@ -938,9 +966,14 @@ async def websocket_endpoint(websocket: WebSocket, crew_id: str = None):
 
         # Keep the connection open and handle messages
         while True:
+            # Check for shutdown signal
+            if shutdown_event.is_set():
+                logging.info(f"Shutdown signal received, closing WebSocket for crew {crew_id}")
+                break
+            
             # Wait for messages from the client
             try:
-                data = await websocket.receive_text()
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
                 logging.debug(f"Received message from client {client_id}: {data}")
 
                 try:
@@ -972,7 +1005,13 @@ async def websocket_endpoint(websocket: WebSocket, crew_id: str = None):
                     logging.error(
                         f"Invalid JSON message from client {client_id}: {data}"
                     )
-
+            
+            except asyncio.TimeoutError:
+                # Timeout is expected, continue the loop
+                continue
+            except asyncio.CancelledError:
+                logging.info(f"Crew WebSocket task cancelled for client {client_id}, closing gracefully")
+                break
             except WebSocketDisconnect:
                 # Handle disconnection
                 logging.info(f"WebSocket client {client_id} disconnected")
@@ -1068,6 +1107,11 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
             # Listen for updates from the flow execution
             while True:
                 try:
+                    # Check for shutdown signal
+                    if shutdown_event.is_set():
+                        logging.info(f"Shutdown signal received, closing WebSocket for flow {flow_id}")
+                        break
+                    
                     # Wait for messages with a timeout
                     message = await asyncio.wait_for(queue.get(), timeout=1.0)
                     await websocket.send_json(message)
@@ -1086,6 +1130,9 @@ async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
                         break
                     # Otherwise continue waiting
                     continue
+                except asyncio.CancelledError:
+                    logging.info(f"Flow WebSocket task cancelled for {flow_id}, closing gracefully")
+                    break
         except WebSocketDisconnect:
             logging.info(f"WebSocket client disconnected: {connection_id}")
         except Exception as e:
@@ -1247,11 +1294,29 @@ def start_server():
         )
         click.echo(click.style("Press Ctrl+C to stop the server", fg="yellow"))
 
-        # Run the FastAPI app with uvicorn
-        uvicorn.run(app, host=host, port=port, log_level="error")
+        # Configure uvicorn for graceful shutdown
+        config = uvicorn.Config(
+            app=app,
+            host=host,
+            port=port,
+            log_level="error",
+            access_log=False,
+            # Enable graceful shutdown
+            timeout_graceful_shutdown=5,
+            # Reduce worker timeout to speed up shutdown
+            timeout_keep_alive=2,
+        )
+        
+        server = uvicorn.Server(config)
+        
+        try:
+            # Run the server with proper signal handling
+            server.run()
+        except KeyboardInterrupt:
+            click.echo("\n" + click.style("Gracefully shutting down server...", fg="yellow"))
+        finally:
+            click.echo(click.style("Server stopped", fg="green"))
 
-    except KeyboardInterrupt:
-        click.echo("\nServer stopped")
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(1)
