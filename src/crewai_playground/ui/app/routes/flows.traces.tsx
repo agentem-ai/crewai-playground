@@ -240,22 +240,29 @@ const getStatusIcon = (status: string) => {
 function extractTelemetryMetrics(trace: FlowTrace): FlowTelemetryMetrics {
   const totalMethods = Object.keys(trace.methods || {}).length;
   const totalEvents = trace.events?.length || 0;
-  
+
   const startTime = new Date(trace.start_time).getTime();
-  const endTime = trace.end_time ? new Date(trace.end_time).getTime() : Date.now();
+  const endTime = trace.end_time
+    ? new Date(trace.end_time).getTime()
+    : Date.now();
   const executionTime = endTime - startTime;
-  
+
   const completedMethods = Object.values(trace.methods || {}).filter(
-    method => method.status === 'completed'
-  ).length;
-  
-  const failedMethods = Object.values(trace.methods || {}).filter(
-    method => method.status === 'failed'
+    (method) => method.status === "completed"
   ).length;
 
-  const totalOutputSize = Object.values(trace.methods || {}).reduce((total, method) => {
-    return total + (method.outputs ? JSON.stringify(method.outputs).length : 0);
-  }, 0);
+  const failedMethods = Object.values(trace.methods || {}).filter(
+    (method) => method.status === "failed"
+  ).length;
+
+  const totalOutputSize = Object.values(trace.methods || {}).reduce(
+    (total, method) => {
+      return (
+        total + (method.outputs ? JSON.stringify(method.outputs).length : 0)
+      );
+    },
+    0
+  );
 
   return {
     totalMethods,
@@ -265,7 +272,7 @@ function extractTelemetryMetrics(trace: FlowTrace): FlowTelemetryMetrics {
     failedMethods,
     totalOutputSize,
   };
-};
+}
 
 export default function FlowTraces() {
   const navigate = useNavigate();
@@ -318,7 +325,7 @@ export default function FlowTraces() {
   useEffect(() => {
     const fetchFlows = async () => {
       try {
-        const response = await fetch("/api/flows");
+        const response = await fetch("http://localhost:8000/api/flows");
         const data = await response.json();
         if (data.flows) {
           setFlows(data.flows);
@@ -371,7 +378,9 @@ export default function FlowTraces() {
           setSearchParams({ flowId: selectedFlowId });
         }
 
-        const response = await fetch(`/api/flows/${selectedFlowId}/traces`);
+        const response = await fetch(
+          `http://localhost:8000/api/flows/${selectedFlowId}/traces`
+        );
         const data = await response.json();
 
         if (data.status === "success" && Array.isArray(data.traces)) {
@@ -438,7 +447,9 @@ export default function FlowTraces() {
 
     // Create flow span (root)
     const flowStartTime = new Date(selectedTrace.start_time);
-    const flowEndTime = selectedTrace.end_time ? new Date(selectedTrace.end_time) : null;
+    const flowEndTime = selectedTrace.end_time
+      ? new Date(selectedTrace.end_time)
+      : null;
     const flowDuration = flowEndTime
       ? flowEndTime.getTime() - flowStartTime.getTime()
       : 0;
@@ -458,10 +469,12 @@ export default function FlowTraces() {
     spans.push(flowSpan);
 
     // Add method spans as children of flow
-    if (selectedTrace.methods && typeof selectedTrace.methods === 'object') {
+    if (selectedTrace.methods && typeof selectedTrace.methods === "object") {
       Object.entries(selectedTrace.methods).forEach(([methodKey, method]) => {
         const methodStartTime = new Date(method.start_time);
-        const methodEndTime = method.end_time ? new Date(method.end_time) : null;
+        const methodEndTime = method.end_time
+          ? new Date(method.end_time)
+          : null;
         const methodDuration = methodEndTime
           ? methodEndTime.getTime() - methodStartTime.getTime()
           : 0;
@@ -487,7 +500,7 @@ export default function FlowTraces() {
             const eventStartTime = new Date(event.timestamp);
             // Estimate end time for events (small duration)
             const eventEndTime = new Date(eventStartTime.getTime() + 500); // 500ms default
-            
+
             const eventSpan: TimelineSpan = {
               id: `${methodSpan.id}-event-${index}`,
               name: `Event: ${event.type}`,
@@ -657,7 +670,7 @@ export default function FlowTraces() {
                 onValueChange={setActiveTab}
                 className="w-full"
               >
-                <TabsList className="grid grid-cols-4 mb-4">
+                <TabsList className="grid grid-cols-3 mb-4">
                   <TabsTrigger
                     value="overview"
                     className="flex items-center gap-1"
@@ -665,15 +678,17 @@ export default function FlowTraces() {
                     <Info className="h-4 w-4" />
                     <span>Overview</span>
                   </TabsTrigger>
-                  <TabsTrigger value="methods" className="flex items-center gap-1">
+                  <TabsTrigger
+                    value="methods"
+                    className="flex items-center gap-1"
+                  >
                     <Play className="h-4 w-4" />
                     <span>Methods</span>
                   </TabsTrigger>
-                  <TabsTrigger value="timeline" className="flex items-center gap-1">
-                    <BarChart2 className="h-4 w-4" />
-                    <span>Timeline</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="events" className="flex items-center gap-1">
+                  <TabsTrigger
+                    value="events"
+                    className="flex items-center gap-1"
+                  >
                     <Clock className="h-4 w-4" />
                     <span>Events</span>
                   </TabsTrigger>
@@ -694,7 +709,8 @@ export default function FlowTraces() {
                                 {telemetryMetrics?.totalMethods || 0}
                               </p>
                               <p className="text-xs text-gray-500">
-                                {telemetryMetrics?.completedMethods || 0} completed,{" "}
+                                {telemetryMetrics?.completedMethods || 0}{" "}
+                                completed,{" "}
                                 {telemetryMetrics?.failedMethods || 0} failed
                               </p>
                             </div>
@@ -731,7 +747,9 @@ export default function FlowTraces() {
                               </p>
                               <p className="text-2xl font-bold">
                                 {telemetryMetrics?.executionTime
-                                  ? `${Math.round(telemetryMetrics.executionTime / 1000)}s`
+                                  ? `${Math.round(
+                                      telemetryMetrics.executionTime / 1000
+                                    )}s`
                                   : "0s"}
                               </p>
                               <p className="text-xs text-gray-500">
@@ -752,7 +770,9 @@ export default function FlowTraces() {
                               </p>
                               <p className="text-2xl font-bold">
                                 {telemetryMetrics?.totalOutputSize
-                                  ? `${Math.round(telemetryMetrics.totalOutputSize / 1024)}KB`
+                                  ? `${Math.round(
+                                      telemetryMetrics.totalOutputSize / 1024
+                                    )}KB`
                                   : "0KB"}
                               </p>
                               <p className="text-xs text-gray-500">
@@ -805,9 +825,11 @@ export default function FlowTraces() {
 
                         {selectedTrace.output && (
                           <div className="mt-4">
-                            <div className="text-sm font-medium mb-2">Output</div>
+                            <div className="text-sm font-medium mb-2">
+                              Output
+                            </div>
                             <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
-                              {typeof selectedTrace.output === 'string'
+                              {typeof selectedTrace.output === "string"
                                 ? selectedTrace.output
                                 : JSON.stringify(selectedTrace.output, null, 2)}
                             </pre>
@@ -815,16 +837,16 @@ export default function FlowTraces() {
                         )}
                       </CardContent>
                     </Card>
-                  </div>
-                </TabsContent>
 
-                <TabsContent value="timeline">
-                  <div className="space-y-6">
+                    {/* Execution Timeline */}
                     <Card>
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-lg">Execution Timeline</CardTitle>
+                        <CardTitle className="text-lg">
+                          Execution Timeline
+                        </CardTitle>
                         <CardDescription>
-                          Visual timeline of flow execution with methods and events
+                          Visual timeline of flow execution with methods and
+                          events
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
@@ -839,9 +861,12 @@ export default function FlowTraces() {
                     {selectedSpan && (
                       <Card>
                         <CardHeader className="pb-2">
-                          <CardTitle className="text-lg">Span Details</CardTitle>
+                          <CardTitle className="text-lg">
+                            Span Details
+                          </CardTitle>
                           <CardDescription>
-                            Detailed information for the selected span: {selectedSpan.name}
+                            Detailed information for the selected span:{" "}
+                            {selectedSpan.name}
                           </CardDescription>
                         </CardHeader>
                         <CardContent>
@@ -954,50 +979,69 @@ export default function FlowTraces() {
                       <ScrollArea className="h-[600px]">
                         <div className="space-y-2">
                           {selectedTrace.events
-                            ?.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                            ?.sort(
+                              (a, b) =>
+                                new Date(a.timestamp).getTime() -
+                                new Date(b.timestamp).getTime()
+                            )
                             ?.map((event, idx) => {
                               const eventType = event.type.toLowerCase();
-                              const isCompleted = event.status === 'completed';
-                              const isFailed = event.status === 'failed';
-                              const isStarted = event.status === 'started';
-                              
+                              const isCompleted = event.status === "completed";
+                              const isFailed = event.status === "failed";
+                              const isStarted = event.status === "started";
+
                               let bgColor = "bg-gray-50 dark:bg-gray-900/20";
-                              let borderColor = "border-gray-200 dark:border-gray-700";
+                              let borderColor =
+                                "border-gray-200 dark:border-gray-700";
                               let iconColor = "text-gray-500";
                               let StatusIcon = Info;
-                              
+
                               if (isCompleted) {
                                 bgColor = "bg-green-50 dark:bg-green-900/20";
-                                borderColor = "border-green-200 dark:border-green-700";
+                                borderColor =
+                                  "border-green-200 dark:border-green-700";
                                 iconColor = "text-green-600";
                                 StatusIcon = CheckCircle;
                               } else if (isFailed) {
                                 bgColor = "bg-red-50 dark:bg-red-900/20";
-                                borderColor = "border-red-200 dark:border-red-700";
+                                borderColor =
+                                  "border-red-200 dark:border-red-700";
                                 iconColor = "text-red-600";
                                 StatusIcon = XCircle;
                               } else if (isStarted) {
                                 bgColor = "bg-blue-50 dark:bg-blue-900/20";
-                                borderColor = "border-blue-200 dark:border-blue-700";
+                                borderColor =
+                                  "border-blue-200 dark:border-blue-700";
                                 iconColor = "text-blue-600";
                                 StatusIcon = Clock;
                               }
-                              
-                              if (eventType.includes('method')) {
+
+                              if (eventType.includes("method")) {
                                 StatusIcon = Play;
                                 if (!isFailed && !isCompleted && !isStarted) {
                                   iconColor = "text-purple-600";
                                 }
                               }
-                              
+
                               return (
-                                <div key={idx} className={`border rounded-md p-3 ${bgColor} ${borderColor}`}>
+                                <div
+                                  key={idx}
+                                  className={`border rounded-md p-3 ${bgColor} ${borderColor}`}
+                                >
                                   <div className="flex justify-between items-start">
                                     <div className="flex items-center gap-2">
-                                      <StatusIcon className={`h-4 w-4 ${iconColor}`} />
+                                      <StatusIcon
+                                        className={`h-4 w-4 ${iconColor}`}
+                                      />
                                       <div>
-                                        <Badge 
-                                          variant={isCompleted ? 'default' : isFailed ? 'destructive' : 'secondary'}
+                                        <Badge
+                                          variant={
+                                            isCompleted
+                                              ? "default"
+                                              : isFailed
+                                              ? "destructive"
+                                              : "secondary"
+                                          }
                                           className="text-xs"
                                         >
                                           {event.type}
@@ -1014,8 +1058,11 @@ export default function FlowTraces() {
                                       {formatTime(event.timestamp)}
                                     </div>
                                   </div>
-                                  
-                                  {(event.outputs || event.params || event.input_state || event.error) && (
+
+                                  {(event.outputs ||
+                                    event.params ||
+                                    event.input_state ||
+                                    event.error) && (
                                     <details className="mt-3">
                                       <summary className="text-sm font-medium cursor-pointer hover:text-primary">
                                         View Event Data
@@ -1023,10 +1070,18 @@ export default function FlowTraces() {
                                       <div className="mt-2 text-xs font-mono bg-background/50 p-2 rounded border">
                                         {JSON.stringify(
                                           {
-                                            ...(event.outputs && { outputs: event.outputs }),
-                                            ...(event.params && { params: event.params }),
-                                            ...(event.input_state && { input_state: event.input_state }),
-                                            ...(event.error && { error: event.error }),
+                                            ...(event.outputs && {
+                                              outputs: event.outputs,
+                                            }),
+                                            ...(event.params && {
+                                              params: event.params,
+                                            }),
+                                            ...(event.input_state && {
+                                              input_state: event.input_state,
+                                            }),
+                                            ...(event.error && {
+                                              error: event.error,
+                                            }),
                                           },
                                           null,
                                           2
