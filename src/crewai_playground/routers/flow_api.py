@@ -863,13 +863,13 @@ async def get_flow_traces(flow_id: str):
         List of trace objects with spans structure for visualization
     """
     logger.info(f"Fetching traces for flow_id: {flow_id}")
-    
+
     # Use telemetry service to get traces with proper ID resolution
     try:
         from crewai_playground.services.telemetry import telemetry_service
-        
+
         traces = telemetry_service.get_traces_for_flow(flow_id)
-        
+
         if traces:
             logger.info(f"Found {len(traces)} traces for flow_id: {flow_id}")
             return {"status": "success", "traces": traces}
@@ -901,7 +901,7 @@ async def get_flow_traces(flow_id: str):
         logger.error(f"Error fetching traces from telemetry service: {e}")
         # Fallback to original logic
         logger.info(f"Falling back to original trace logic for flow_id: {flow_id}")
-        
+
         # Check if flow has any traces in old system
         if flow_id not in flow_traces:
             logger.info(f"No traces found for flow_id: {flow_id}")
@@ -1174,12 +1174,6 @@ async def get_flow_structure(flow_id: str):
         raise HTTPException(
             status_code=500, detail=f"Error getting flow structure: {str(e)}"
         )
-
-
-# WebSocket management functions moved to websocket_utils.py
-
-
-# WebSocket broadcasting functions moved to websocket_utils.py
 
 
 def get_active_execution(flow_id: str):

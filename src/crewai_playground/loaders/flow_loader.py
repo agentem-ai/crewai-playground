@@ -2,19 +2,24 @@
 Flow Loader for CrewAI Playground
 
 This module provides functionality to discover and load CrewAI flows from
-the user's environment, similar to how crews are discovered.
+the user's environment, with comprehensive analysis of flow structure,
+methods, dependencies, and relationships for reliable visualizations.
+
+Based on official CrewAI visualization utilities for accurate flow parsing.
 """
 
 import os
 import sys
 import importlib.util
 import inspect
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Dict, List, Any, Optional, Tuple, Union, Set
 import logging
 import uuid
 from pydantic import BaseModel
 import ast
 import re
+import textwrap
+from collections import defaultdict, deque
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,8 +46,12 @@ class FlowMethod(BaseModel):
     is_start: bool = False
     is_listener: bool = False
     listens_to: List[str] = []
+    listener_condition: str = "OR"  # "OR" or "AND"
     is_router: bool = False
+    router_paths: List[str] = []  # Possible return paths for router methods
     has_persist: bool = False
+    calls_crew: bool = False  # Whether method calls .crew()
+    level: int = 0  # Hierarchical level in flow graph
 
 
 class FlowInfo(BaseModel):
@@ -58,6 +67,12 @@ class FlowInfo(BaseModel):
     methods: List[FlowMethod] = []
     state_type: str = "unstructured"  # "structured" or "unstructured"
     state_model: Optional[str] = None
+    # Flow structure for visualization
+    listeners: Dict[str, Tuple[str, List[str]]] = {}  # method_name -> (condition_type, trigger_methods)
+    routers: Set[str] = set()  # Router method names
+    router_paths: Dict[str, List[str]] = {}  # router_method -> possible_paths
+    start_methods: List[str] = []  # Start method names
+    method_levels: Dict[str, int] = {}  # method_name -> hierarchical_level
 
     class Config:
         arbitrary_types_allowed = True
@@ -317,60 +332,77 @@ def _is_flow_class(obj) -> bool:
     # CrewAI Flows typically have:
     # 1. Methods with @start, @listen, @router decorators
     # 2. A kickoff method (inherited)
-    # 3. A state attribute
+    # 3. Flow-specific attributes like _methods, _listeners
 
     has_flow_decorators = False
     has_kickoff = hasattr(obj, "kickoff")
+    has_flow_attributes = any(hasattr(obj, attr) for attr in ["_methods", "_listeners", "_routers"])
 
-    # Check for methods with flow decorators
-    for method_name, method in inspect.getmembers(obj, predicate=inspect.ismethod):
-        if hasattr(method, "__annotations__") or hasattr(method, "__wrapped__"):
-            # Look for decorator indicators in the method
-            method_str = str(method)
-            if any(
-                decorator in method_str
-                for decorator in ["start", "listen", "router", "persist"]
-            ):
-                has_flow_decorators = True
-                break
-
-    # Also check unbound methods
-    for method_name, method in inspect.getmembers(obj, predicate=inspect.isfunction):
-        if hasattr(method, "__annotations__") or hasattr(method, "__wrapped__"):
-            method_str = str(method)
-            if any(
-                decorator in method_str
-                for decorator in ["start", "listen", "router", "persist"]
-            ):
-                has_flow_decorators = True
-                break
-
-    return has_flow_decorators or (has_kickoff and _has_flow_methods(obj))
-
-
-def _has_flow_methods(obj) -> bool:
-    """
-    Check if class has typical flow methods by examining source code.
-
-    Args:
-        obj: Class object to check
-
-    Returns:
-        True if it has flow-like methods, False otherwise
-    """
+    # Check for methods with flow decorators using AST analysis
     try:
         source = inspect.getsource(obj)
-        flow_patterns = [
-            r"@start\(\)",
-            r"@listen\(",
-            r"@router\(",
-            r"@persist\(",
-            r"def\s+\w+.*:\s*.*self\.state",
-        ]
+        has_flow_decorators = _has_flow_decorators_in_source(source)
+    except:
+        # Fallback to method inspection
+        for method_name, method in inspect.getmembers(obj, predicate=inspect.isfunction):
+            if _method_has_flow_decorators(method):
+                has_flow_decorators = True
+                break
 
-        return any(re.search(pattern, source) for pattern in flow_patterns)
+    return has_flow_decorators or (has_kickoff and has_flow_attributes)
+
+
+def _has_flow_decorators_in_source(source: str) -> bool:
+    """
+    Check if source code contains flow decorators using AST analysis.
+
+    Args:
+        source: Source code as string
+
+    Returns:
+        True if it has flow decorators, False otherwise
+    """
+    try:
+        tree = ast.parse(source)
+        
+        class FlowDecoratorVisitor(ast.NodeVisitor):
+            def __init__(self):
+                self.found_decorators = False
+            
+            def visit_FunctionDef(self, node):
+                for decorator in node.decorator_list:
+                    if isinstance(decorator, ast.Name):
+                        if decorator.id in ["start", "listen", "router", "persist"]:
+                            self.found_decorators = True
+                    elif isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name):
+                        if decorator.func.id in ["start", "listen", "router", "persist"]:
+                            self.found_decorators = True
+                self.generic_visit(node)
+        
+        visitor = FlowDecoratorVisitor()
+        visitor.visit(tree)
+        return visitor.found_decorators
     except:
         return False
+
+
+def _method_has_flow_decorators(method) -> bool:
+    """
+    Check if a method has flow decorators by examining attributes.
+
+    Args:
+        method: Method object to check
+
+    Returns:
+        True if it has flow decorators, False otherwise
+    """
+    flow_attributes = [
+        "__is_start_method__",
+        "__is_router__",
+        "__is_listener__",
+        "__persist__"
+    ]
+    return any(hasattr(method, attr) for attr in flow_attributes)
 
 
 def _extract_flow_info(
@@ -395,8 +427,11 @@ def _extract_flow_info(
     # Extract required inputs by inspecting the __init__ method
     required_inputs = _extract_flow_inputs(flow_class)
 
-    # Extract methods information
-    methods = _extract_flow_methods(flow_class, file_content)
+    # Extract comprehensive flow structure
+    flow_structure = _extract_comprehensive_flow_structure(flow_class, file_content)
+    
+    # Extract methods information with enhanced analysis
+    methods = flow_structure["methods"]
 
     # Determine state type
     state_type, state_model = _determine_state_type(flow_class, file_content)
@@ -412,6 +447,11 @@ def _extract_flow_info(
         methods=methods,
         state_type=state_type,
         state_model=state_model,
+        listeners=flow_structure["listeners"],
+        routers=flow_structure["routers"],
+        router_paths=flow_structure["router_paths"],
+        start_methods=flow_structure["start_methods"],
+        method_levels=flow_structure["method_levels"],
     )
 
 
@@ -470,151 +510,550 @@ def _extract_flow_inputs(flow_class) -> List[FlowInput]:
     return inputs
 
 
-def _extract_flow_methods(flow_class, file_content: str) -> List[FlowMethod]:
+def _extract_comprehensive_flow_structure(flow_class, file_content: str) -> Dict[str, Any]:
     """
-    Extract method information from a Flow class.
+    Extract comprehensive flow structure including methods, listeners, routers, and dependencies.
+    
+    Based on official CrewAI visualization utilities for accurate flow parsing.
 
     Args:
         flow_class: The Flow class to inspect
         file_content: Content of the file as string
 
     Returns:
-        List of FlowMethod objects
+        Dictionary containing comprehensive flow structure
     """
-    methods = []
+    try:
+        # Initialize flow structure
+        structure = {
+            "methods": [],
+            "listeners": {},
+            "routers": set(),
+            "router_paths": {},
+            "start_methods": [],
+            "method_levels": {}
+        }
+        
+        # Try to get flow attributes if available (for instantiated flows)
+        flow_methods = {}
+        flow_listeners = {}
+        flow_routers = set()
+        flow_router_paths = {}
+        
+        # Check if flow has internal attributes (for instantiated flows)
+        if hasattr(flow_class, '_methods'):
+            flow_methods = getattr(flow_class, '_methods', {})
+        if hasattr(flow_class, '_listeners'):
+            flow_listeners = getattr(flow_class, '_listeners', {})
+        if hasattr(flow_class, '_routers'):
+            flow_routers = getattr(flow_class, '_routers', set())
+        if hasattr(flow_class, '_router_paths'):
+            flow_router_paths = getattr(flow_class, '_router_paths', {})
+            
+        # Extract methods using AST analysis and inspection
+        methods_info = _extract_methods_with_ast_analysis(flow_class, file_content)
+        
+        # Build comprehensive method information
+        for method_name, method_data in methods_info.items():
+            # Create FlowMethod object
+            flow_method = FlowMethod(
+                name=method_name,
+                description=method_data.get('description', f'Flow method: {method_name}'),
+                is_start=method_data.get('is_start', False),
+                is_listener=method_data.get('is_listener', False),
+                listens_to=method_data.get('listens_to', []),
+                listener_condition=method_data.get('listener_condition', 'OR'),
+                is_router=method_data.get('is_router', False),
+                router_paths=method_data.get('router_paths', []),
+                has_persist=method_data.get('has_persist', False),
+                calls_crew=method_data.get('calls_crew', False),
+                level=0  # Will be calculated later
+            )
+            structure["methods"].append(flow_method)
+            
+            # Track start methods
+            if method_data.get('is_start', False):
+                structure["start_methods"].append(method_name)
+                
+            # Track routers
+            if method_data.get('is_router', False):
+                structure["routers"].add(method_name)
+                if method_data.get('router_paths'):
+                    structure["router_paths"][method_name] = method_data['router_paths']
+                    
+            # Track listeners
+            if method_data.get('is_listener', False):
+                structure["listeners"][method_name] = (
+                    method_data.get('listener_condition', 'OR'),
+                    method_data.get('listens_to', [])
+                )
+        
+        # Merge with flow internal attributes if available
+        if flow_listeners:
+            structure["listeners"].update(flow_listeners)
+        if flow_routers:
+            structure["routers"].update(flow_routers)
+        if flow_router_paths:
+            structure["router_paths"].update(flow_router_paths)
+            
+        # Calculate method levels using BFS (similar to official CrewAI)
+        structure["method_levels"] = _calculate_method_levels(structure)
+        
+        # Update method levels in FlowMethod objects
+        for method in structure["methods"]:
+            method.level = structure["method_levels"].get(method.name, 0)
+            
+        return structure
+        
+    except Exception as e:
+        logger.debug(f"Error extracting comprehensive flow structure: {str(e)}")
+        # Return minimal structure
+        return {
+            "methods": [],
+            "listeners": {},
+            "routers": set(),
+            "router_paths": {},
+            "start_methods": [],
+            "method_levels": {}
+        }
 
+
+def _extract_methods_with_ast_analysis(flow_class, file_content: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Extract method information using AST analysis and inspection.
+    
+    Based on official CrewAI approach for accurate decorator and dependency detection.
+
+    Args:
+        flow_class: The Flow class to inspect
+        file_content: Content of the file as string
+
+    Returns:
+        Dictionary mapping method names to their extracted information
+    """
+    methods_info = {}
+    
+    try:
+        # Parse the source code into AST
+        tree = ast.parse(file_content)
+        
+        # Find the class definition
+        class_node = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and hasattr(flow_class, '__name__') and node.name == flow_class.__name__:
+                class_node = node
+                break
+        
+        if not class_node:
+            # Fallback to inspection-based method
+            return _extract_methods_with_inspection(flow_class)
+            
+        # Analyze each method in the class
+        for node in class_node.body:
+            if isinstance(node, ast.FunctionDef):
+                method_name = node.name
+                
+                # Skip private methods and inherited methods
+                if method_name.startswith("_") or method_name in ["kickoff", "plot"]:
+                    continue
+                    
+                method_info = {
+                    'description': _extract_docstring_from_node(node),
+                    'is_start': False,
+                    'is_listener': False,
+                    'listens_to': [],
+                    'listener_condition': 'OR',
+                    'is_router': False,
+                    'router_paths': [],
+                    'has_persist': False,
+                    'calls_crew': False
+                }
+                
+                # Analyze decorators
+                for decorator in node.decorator_list:
+                    decorator_info = _analyze_decorator(decorator)
+                    if decorator_info:
+                        method_info.update(decorator_info)
+                
+                # Analyze method body for .crew() calls
+                method_info['calls_crew'] = _method_calls_crew_ast(node)
+                
+                # Extract router paths if it's a router method
+                if method_info['is_router']:
+                    method_info['router_paths'] = _extract_router_paths_from_method(node, file_content)
+                
+                methods_info[method_name] = method_info
+                
+    except Exception as e:
+        logger.debug(f"Error in AST analysis: {str(e)}")
+        # Fallback to inspection-based method
+        return _extract_methods_with_inspection(flow_class)
+    
+    return methods_info
+
+
+def _extract_methods_with_inspection(flow_class) -> Dict[str, Dict[str, Any]]:
+    """
+    Fallback method extraction using inspection when AST analysis fails.
+    
+    Args:
+        flow_class: The Flow class to inspect
+        
+    Returns:
+        Dictionary mapping method names to their extracted information
+    """
+    methods_info = {}
+    
     try:
         # Get all methods from the class
         class_methods = inspect.getmembers(flow_class, predicate=inspect.isfunction)
-
+        
         for method_name, method in class_methods:
             # Skip private methods and inherited methods
             if method_name.startswith("_") or method_name in ["kickoff", "plot"]:
                 continue
-
-            # Extract method information from source code
-            method_info = _analyze_method_from_source(method_name, file_content)
-
-            if method_info:
-                methods.append(method_info)
-
+                
+            method_info = {
+                'description': method.__doc__ or f'Flow method: {method_name}',
+                'is_start': hasattr(method, '__is_start_method__'),
+                'is_listener': hasattr(method, '__is_listener__'),
+                'listens_to': getattr(method, '__listens_to__', []),
+                'listener_condition': getattr(method, '__listener_condition__', 'OR'),
+                'is_router': hasattr(method, '__is_router__'),
+                'router_paths': getattr(method, '__router_paths__', []),
+                'has_persist': hasattr(method, '__persist__'),
+                'calls_crew': _method_calls_crew_inspection(method)
+            }
+            
+            methods_info[method_name] = method_info
+            
     except Exception as e:
-        logger.debug(f"Error extracting methods from flow class: {str(e)}")
+        logger.debug(f"Error in inspection-based method extraction: {str(e)}")
+    
+    return methods_info
 
+
+def _analyze_decorator(decorator) -> Optional[Dict[str, Any]]:
+    """
+    Analyze a decorator node to extract flow-specific information.
+    
+    Args:
+        decorator: AST decorator node
+        
+    Returns:
+        Dictionary with decorator information or None
+    """
+    decorator_info = {}
+    
+    try:
+        # Handle simple decorators like @start
+        if isinstance(decorator, ast.Name):
+            if decorator.id == 'start':
+                decorator_info['is_start'] = True
+            elif decorator.id == 'router':
+                decorator_info['is_router'] = True
+            elif decorator.id == 'persist':
+                decorator_info['has_persist'] = True
+                
+        # Handle decorator calls like @start(), @listen(...), @router(...)
+        elif isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name):
+            decorator_name = decorator.func.id
+            
+            if decorator_name == 'start':
+                decorator_info['is_start'] = True
+            elif decorator_name == 'router':
+                decorator_info['is_router'] = True
+            elif decorator_name == 'persist':
+                decorator_info['has_persist'] = True
+            elif decorator_name == 'listen':
+                decorator_info['is_listener'] = True
+                # Extract listen targets and condition
+                listen_info = _extract_listen_info(decorator)
+                decorator_info.update(listen_info)
+                
+    except Exception as e:
+        logger.debug(f"Error analyzing decorator: {str(e)}")
+        
+    return decorator_info if decorator_info else None
+
+
+def _extract_listen_info(decorator_call) -> Dict[str, Any]:
+    """
+    Extract information from @listen decorator.
+    
+    Handles both simple method references and and_/or_ function calls.
+    
+    Args:
+        decorator_call: AST Call node for @listen decorator
+        
+    Returns:
+        Dictionary with listen information
+    """
+    listen_info = {
+        'listens_to': [],
+        'listener_condition': 'OR'
+    }
+    
+    try:
+        # Extract positional arguments (trigger methods or and_/or_ calls)
+        for arg in decorator_call.args:
+            if isinstance(arg, ast.Name):
+                # Simple method name reference
+                listen_info['listens_to'].append(arg.id)
+            elif isinstance(arg, ast.Attribute):
+                # Handle self.method_name references
+                if isinstance(arg.value, ast.Name) and arg.value.id == 'self':
+                    listen_info['listens_to'].append(arg.attr)
+            elif isinstance(arg, ast.Call):
+                # Handle and_() or or_() function calls
+                if isinstance(arg.func, ast.Name):
+                    func_name = arg.func.id
+                    if func_name == 'and_':
+                        listen_info['listener_condition'] = 'AND'
+                        # Extract methods from and_() call
+                        listen_info['listens_to'].extend(_extract_methods_from_logical_call(arg))
+                    elif func_name == 'or_':
+                        listen_info['listener_condition'] = 'OR'
+                        # Extract methods from or_() call
+                        listen_info['listens_to'].extend(_extract_methods_from_logical_call(arg))
+                    
+        # Extract keyword arguments (condition type) - fallback for explicit condition
+        for keyword in decorator_call.keywords:
+            if keyword.arg == 'condition' and isinstance(keyword.value, ast.Constant):
+                if keyword.value.value in ['AND', 'OR']:
+                    listen_info['listener_condition'] = keyword.value.value
+                    
+    except Exception as e:
+        logger.debug(f"Error extracting listen info: {str(e)}")
+        
+    return listen_info
+
+
+def _extract_methods_from_logical_call(call_node) -> List[str]:
+    """
+    Extract method names from and_() or or_() function calls.
+    
+    Args:
+        call_node: AST Call node for and_() or or_() function
+        
+    Returns:
+        List of method names
+    """
+    methods = []
+    
+    try:
+        for arg in call_node.args:
+            if isinstance(arg, ast.Name):
+                # Direct method name reference
+                methods.append(arg.id)
+            elif isinstance(arg, ast.Attribute):
+                # Handle self.method_name references
+                if isinstance(arg.value, ast.Name) and arg.value.id == 'self':
+                    methods.append(arg.attr)
+            # Note: Could also handle nested and_/or_ calls if needed
+                    
+    except Exception as e:
+        logger.debug(f"Error extracting methods from logical call: {str(e)}")
+        
     return methods
 
 
-def _analyze_method_from_source(
-    method_name: str, file_content: str
-) -> Optional[FlowMethod]:
+def _method_calls_crew_ast(method_node) -> bool:
     """
-    Analyze a method from source code to extract Flow-specific information.
-
+    Check if method calls .crew() using AST analysis.
+    
     Args:
-        method_name: Name of the method
-        file_content: Content of the file as string
-
+        method_node: AST FunctionDef node
+        
     Returns:
-        FlowMethod object or None if not a flow method
+        True if method calls .crew(), False otherwise
     """
     try:
-        # Find the method definition in the source
-        method_pattern = rf"def\s+{method_name}\s*\("
-        match = re.search(method_pattern, file_content)
-
-        if not match:
-            return None
-
-        # Extract the method section (including decorators)
-        start_pos = match.start()
-
-        # Find the start of decorators (look backwards for @)
-        lines = file_content[:start_pos].split("\n")
-        decorator_start = len(lines) - 1
-
-        # Look for decorators above the method
-        for i in range(len(lines) - 1, -1, -1):
-            line = lines[i].strip()
-            if line.startswith("@"):
-                decorator_start = i
-            elif line and not line.startswith("@"):
-                break
-
-        # Get the method section
-        method_section = "\n".join(lines[decorator_start:])
-
-        # Add the method definition and some content
-        remaining_content = file_content[start_pos:]
-        method_lines = remaining_content.split("\n")
-
-        # Find the end of the method (next method or class end)
-        method_end = 0
-        indent_level = None
-
-        for i, line in enumerate(method_lines):
-            if i == 0:
-                continue
-            stripped = line.strip()
-            if not stripped:
-                continue
-
-            # Determine indentation level from first non-empty line
-            if indent_level is None:
-                indent_level = len(line) - len(line.lstrip())
-
-            # If we find a line with same or less indentation, we've reached the end
-            current_indent = len(line) - len(line.lstrip())
-            if (
-                current_indent <= indent_level
-                and stripped
-                and not stripped.startswith("#")
-            ):
-                method_end = i
-                break
-
-        if method_end > 0:
-            method_section += "\n" + "\n".join(method_lines[:method_end])
-        else:
-            method_section += "\n" + "\n".join(method_lines[:10])  # Take first 10 lines
-
-        # Analyze decorators and content
-        is_start = "@start()" in method_section
-        is_listener = "@listen(" in method_section
-        is_router = "@router(" in method_section
-        has_persist = "@persist(" in method_section or "@persist" in method_section
-
-        # Extract listen targets
-        listens_to = []
-        if is_listener:
-            listen_matches = re.findall(r"@listen\(([^)]+)\)", method_section)
-            for match in listen_matches:
-                # Clean up the match and extract method names
-                targets = re.findall(r"[\w\.]+", match)
-                listens_to.extend(targets)
-
-        # Extract description from docstring
-        description = ""
-        docstring_match = re.search(
-            rf'def\s+{method_name}\s*\([^)]*\):\s*"""([^"]+)"""', method_section
-        )
-        if docstring_match:
-            description = docstring_match.group(1).strip()
-        else:
-            description = f"Flow method: {method_name}"
-
-        return FlowMethod(
-            name=method_name,
-            description=description,
-            is_start=is_start,
-            is_listener=is_listener,
-            listens_to=listens_to,
-            is_router=is_router,
-            has_persist=has_persist,
-        )
-
+        class CrewCallVisitor(ast.NodeVisitor):
+            def __init__(self):
+                self.found = False
+                
+            def visit_Call(self, node):
+                if isinstance(node.func, ast.Attribute):
+                    if node.func.attr == "crew":
+                        self.found = True
+                self.generic_visit(node)
+        
+        visitor = CrewCallVisitor()
+        visitor.visit(method_node)
+        return visitor.found
+        
     except Exception as e:
-        logger.debug(f"Error analyzing method {method_name}: {str(e)}")
-        return None
+        logger.debug(f"Error checking crew calls: {str(e)}")
+        return False
+
+
+def _method_calls_crew_inspection(method) -> bool:
+    """
+    Check if method calls .crew() using inspection (fallback).
+    
+    Args:
+        method: Method object
+        
+    Returns:
+        True if method calls .crew(), False otherwise
+    """
+    try:
+        source = inspect.getsource(method)
+        return '.crew(' in source
+    except:
+        return False
+
+
+def _extract_docstring_from_node(node) -> str:
+    """
+    Extract docstring from AST function node.
+    
+    Args:
+        node: AST FunctionDef node
+        
+    Returns:
+        Docstring or default description
+    """
+    try:
+        if (node.body and 
+            isinstance(node.body[0], ast.Expr) and 
+            isinstance(node.body[0].value, ast.Constant) and 
+            isinstance(node.body[0].value.value, str)):
+            return node.body[0].value.value.strip()
+    except:
+        pass
+    return f"Flow method: {node.name}"
+
+
+def _extract_router_paths_from_method(method_node, file_content: str) -> List[str]:
+    """
+    Extract possible return paths from router method using AST analysis.
+    
+    Args:
+        method_node: AST FunctionDef node
+        file_content: Full file content
+        
+    Returns:
+        List of possible return paths
+    """
+    paths = []
+    
+    try:
+        # Use similar logic to official CrewAI get_possible_return_constants
+        class ReturnVisitor(ast.NodeVisitor):
+            def __init__(self):
+                self.return_values = set()
+                self.dict_definitions = {}
+                
+            def visit_Assign(self, node):
+                # Check for dictionary assignments
+                if isinstance(node.value, ast.Dict) and len(node.targets) == 1:
+                    target = node.targets[0]
+                    if isinstance(target, ast.Name):
+                        var_name = target.id
+                        dict_values = []
+                        for val in node.value.values:
+                            if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                                dict_values.append(val.value)
+                        if dict_values:
+                            self.dict_definitions[var_name] = dict_values
+                self.generic_visit(node)
+                
+            def visit_Return(self, node):
+                # Direct string return
+                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    self.return_values.add(node.value.value)
+                # Dictionary-based return
+                elif isinstance(node.value, ast.Subscript):
+                    if isinstance(node.value.value, ast.Name):
+                        var_name = node.value.value.id
+                        if var_name in self.dict_definitions:
+                            for v in self.dict_definitions[var_name]:
+                                self.return_values.add(v)
+                self.generic_visit(node)
+        
+        visitor = ReturnVisitor()
+        visitor.visit(method_node)
+        paths = list(visitor.return_values)
+        
+    except Exception as e:
+        logger.debug(f"Error extracting router paths: {str(e)}")
+        
+    return paths
+
+
+def _calculate_method_levels(structure: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Calculate hierarchical levels for methods using BFS.
+    
+    Based on official CrewAI calculate_node_levels function.
+    
+    Args:
+        structure: Flow structure dictionary
+        
+    Returns:
+        Dictionary mapping method names to their levels
+    """
+    levels = {}
+    queue = deque()
+    visited = set()
+    pending_and_listeners = {}
+    
+    # Start methods at level 0
+    for method_name in structure["start_methods"]:
+        levels[method_name] = 0
+        queue.append(method_name)
+    
+    # Precompute listener dependencies
+    or_listeners = defaultdict(list)
+    and_listeners = defaultdict(set)
+    
+    for listener_name, (condition_type, trigger_methods) in structure["listeners"].items():
+        if condition_type == "OR":
+            for method in trigger_methods:
+                or_listeners[method].append(listener_name)
+        elif condition_type == "AND":
+            and_listeners[listener_name] = set(trigger_methods)
+    
+    # BFS traversal to assign levels
+    while queue:
+        current = queue.popleft()
+        current_level = levels[current]
+        visited.add(current)
+        
+        # Handle OR listeners
+        for listener_name in or_listeners[current]:
+            if listener_name not in levels or levels[listener_name] > current_level + 1:
+                levels[listener_name] = current_level + 1
+                if listener_name not in visited:
+                    queue.append(listener_name)
+        
+        # Handle AND listeners
+        for listener_name, required_methods in and_listeners.items():
+            if current in required_methods:
+                if listener_name not in pending_and_listeners:
+                    pending_and_listeners[listener_name] = set()
+                pending_and_listeners[listener_name].add(current)
+                
+                if required_methods == pending_and_listeners[listener_name]:
+                    if listener_name not in levels or levels[listener_name] > current_level + 1:
+                        levels[listener_name] = current_level + 1
+                        if listener_name not in visited:
+                            queue.append(listener_name)
+        
+        # Handle router connections
+        if current in structure["routers"]:
+            paths = structure["router_paths"].get(current, [])
+            for path in paths:
+                for listener_name, (condition_type, trigger_methods) in structure["listeners"].items():
+                    if path in trigger_methods:
+                        if listener_name not in levels or levels[listener_name] > current_level + 1:
+                            levels[listener_name] = current_level + 1
+                            if listener_name not in visited:
+                                queue.append(listener_name)
+    
+    return levels
 
 
 import types
@@ -853,6 +1292,63 @@ def validate_flow_inputs(flow_info: FlowInfo, inputs: Dict[str, Any]) -> List[st
     return errors
 
 
+def get_flow_structure(flow_info: FlowInfo) -> Dict[str, Any]:
+    """
+    Get comprehensive flow structure for visualization.
+    
+    Returns structure compatible with official CrewAI visualization utilities.
+
+    Args:
+        flow_info: FlowInfo object
+
+    Returns:
+        Dictionary with comprehensive flow structure for visualization
+    """
+    # Build methods dictionary (similar to flow._methods)
+    methods_dict = {}
+    for method in flow_info.methods:
+        # Create a mock method object with the required attributes
+        class MockMethod:
+            def __init__(self, method_info: FlowMethod):
+                self.name = method_info.name
+                self.__name__ = method_info.name
+                if method_info.is_start:
+                    self.__is_start_method__ = True
+                if method_info.is_router:
+                    self.__is_router__ = True
+                if method_info.is_listener:
+                    self.__is_listener__ = True
+                if method_info.has_persist:
+                    self.__persist__ = True
+                    
+        methods_dict[method.name] = MockMethod(method)
+    
+    return {
+        "_methods": methods_dict,
+        "_listeners": flow_info.listeners,
+        "_routers": flow_info.routers,
+        "_router_paths": flow_info.router_paths,
+        "start_methods": flow_info.start_methods,
+        "method_levels": flow_info.method_levels,
+        "methods_info": {
+            method.name: {
+                "name": method.name,
+                "description": method.description,
+                "is_start": method.is_start,
+                "is_listener": method.is_listener,
+                "listens_to": method.listens_to,
+                "listener_condition": method.listener_condition,
+                "is_router": method.is_router,
+                "router_paths": method.router_paths,
+                "has_persist": method.has_persist,
+                "calls_crew": method.calls_crew,
+                "level": method.level
+            }
+            for method in flow_info.methods
+        }
+    }
+
+
 def get_flow_summary(flow_info: FlowInfo) -> Dict[str, Any]:
     """
     Get a summary of flow information.
@@ -874,4 +1370,8 @@ def get_flow_summary(flow_info: FlowInfo) -> Dict[str, Any]:
         "start_methods": [m.name for m in flow_info.methods if m.is_start],
         "listener_methods": [m.name for m in flow_info.methods if m.is_listener],
         "router_methods": [m.name for m in flow_info.methods if m.is_router],
+        "crew_methods": [m.name for m in flow_info.methods if m.calls_crew],
+        "method_levels": flow_info.method_levels,
+        "listeners": flow_info.listeners,
+        "router_paths": flow_info.router_paths,
     }
