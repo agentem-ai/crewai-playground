@@ -39,6 +39,9 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import { useChatStore } from "../lib/store";
+import { TraceTimeline } from "../components/TraceTimeline";
+import { TraceSpanView } from "../components/TraceSpanView";
+import { TraceSpanDetail } from "../components/TraceSpanDetail";
 import { Separator } from "../components/ui/separator";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
@@ -93,6 +96,15 @@ interface FlowTrace {
   methods: Record<string, FlowMethod>;
   steps: any[];
   output?: string;
+}
+
+interface FlowTelemetryMetrics {
+  totalMethods: number;
+  totalEvents: number;
+  executionTime: number;
+  completedMethods: number;
+  failedMethods: number;
+  totalOutputSize: number;
 }
 
 interface FlowTracesResponse {
@@ -225,26 +237,33 @@ const getStatusIcon = (status: string) => {
 };
 
 // Extract telemetry metrics from trace
-const extractTelemetryMetrics = (trace: FlowTrace) => {
-  const methods = Object.values(trace.methods || {});
-  const totalMethods = methods.length;
-  const completedMethods = methods.filter(
-    (m) => m.status === "completed"
+function extractTelemetryMetrics(trace: FlowTrace): FlowTelemetryMetrics {
+  const totalMethods = Object.keys(trace.methods || {}).length;
+  const totalEvents = trace.events?.length || 0;
+  
+  const startTime = new Date(trace.start_time).getTime();
+  const endTime = trace.end_time ? new Date(trace.end_time).getTime() : Date.now();
+  const executionTime = endTime - startTime;
+  
+  const completedMethods = Object.values(trace.methods || {}).filter(
+    method => method.status === 'completed'
   ).length;
-  const failedMethods = methods.filter((m) => m.status === "failed").length;
+  
+  const failedMethods = Object.values(trace.methods || {}).filter(
+    method => method.status === 'failed'
+  ).length;
 
-  const totalDuration =
-    trace.end_time && trace.start_time
-      ? new Date(trace.end_time).getTime() -
-        new Date(trace.start_time).getTime()
-      : 0;
+  const totalOutputSize = Object.values(trace.methods || {}).reduce((total, method) => {
+    return total + (method.outputs ? JSON.stringify(method.outputs).length : 0);
+  }, 0);
 
   return {
     totalMethods,
+    totalEvents,
+    executionTime,
     completedMethods,
     failedMethods,
-    totalDuration,
-    successRate: totalMethods > 0 ? (completedMethods / totalMethods) * 100 : 0,
+    totalOutputSize,
   };
 };
 
@@ -258,6 +277,7 @@ export default function FlowTraces() {
   const [traces, setTraces] = useState<FlowTrace[]>([]);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [selectedSpan, setSelectedSpan] = useState<TimelineSpan | null>(null);
   const [activeTab, setActiveTab] = useState<string>("overview");
 
   // Get selected trace from traces array with safety checks
@@ -410,6 +430,103 @@ export default function FlowTraces() {
     return extractTelemetryMetrics(selectedTrace);
   }, [selectedTrace]);
 
+  // Create timeline spans from flow trace data
+  const timelineSpans = useMemo((): TimelineSpan[] => {
+    if (!selectedTrace) return [];
+
+    const spans: TimelineSpan[] = [];
+
+    // Create flow span (root)
+    const flowStartTime = new Date(selectedTrace.start_time);
+    const flowEndTime = selectedTrace.end_time ? new Date(selectedTrace.end_time) : null;
+    const flowDuration = flowEndTime
+      ? flowEndTime.getTime() - flowStartTime.getTime()
+      : 0;
+
+    const flowSpan: TimelineSpan = {
+      id: selectedTrace.id,
+      name: `Flow: ${selectedTrace.flow_name}`,
+      startTime: flowStartTime,
+      endTime: flowEndTime,
+      status: selectedTrace.status,
+      depth: 0,
+      duration: flowDuration,
+      serviceName: "flow",
+      operation: "execution",
+      children: [],
+    };
+    spans.push(flowSpan);
+
+    // Add method spans as children of flow
+    if (selectedTrace.methods && typeof selectedTrace.methods === 'object') {
+      Object.entries(selectedTrace.methods).forEach(([methodKey, method]) => {
+        const methodStartTime = new Date(method.start_time);
+        const methodEndTime = method.end_time ? new Date(method.end_time) : null;
+        const methodDuration = methodEndTime
+          ? methodEndTime.getTime() - methodStartTime.getTime()
+          : 0;
+
+        const methodSpan: TimelineSpan = {
+          id: `${selectedTrace.id}-method-${methodKey}`,
+          name: `Method: ${method.name || methodKey}`,
+          startTime: methodStartTime,
+          endTime: methodEndTime,
+          status: method.status,
+          parentId: selectedTrace.id,
+          depth: 1,
+          duration: methodDuration,
+          serviceName: "method",
+          operation: method.name || methodKey,
+          children: [],
+        };
+        spans.push(methodSpan);
+
+        // Add method events as children of method
+        if (method.events && method.events.length > 0) {
+          method.events.forEach((event, index) => {
+            const eventStartTime = new Date(event.timestamp);
+            // Estimate end time for events (small duration)
+            const eventEndTime = new Date(eventStartTime.getTime() + 500); // 500ms default
+            
+            const eventSpan: TimelineSpan = {
+              id: `${methodSpan.id}-event-${index}`,
+              name: `Event: ${event.type}`,
+              startTime: eventStartTime,
+              endTime: eventEndTime,
+              status: event.status,
+              parentId: methodSpan.id,
+              depth: 2,
+              duration: 500,
+              serviceName: "event",
+              operation: event.type,
+              children: [],
+            };
+            spans.push(eventSpan);
+          });
+        }
+      });
+    }
+
+    // Build parent-child relationships
+    const spanMap = new Map<string, TimelineSpan>();
+    spans.forEach((span) => spanMap.set(span.id, span));
+
+    spans.forEach((span) => {
+      if (span.parentId && spanMap.has(span.parentId)) {
+        const parent = spanMap.get(span.parentId)!;
+        parent.children.push(span);
+      }
+    });
+
+    return spans;
+  }, [selectedTrace]);
+
+  // Handle span selection from timeline
+  const handleSpanClick = (span: TimelineSpan) => {
+    setSelectedSpan(span);
+    setSelectedSpanId(span.id);
+  };
+
   // Render the list of traces
   const renderTraceList = () => {
     if (loading) {
@@ -446,6 +563,7 @@ export default function FlowTraces() {
             onClick={() => {
               setSelectedTraceId(trace.id);
               setSelectedSpanId(null); // Reset selected span when changing traces
+              setSelectedSpan(null); // Reset selected span object
             }}
           >
             <div className="flex justify-between items-center">
@@ -539,7 +657,7 @@ export default function FlowTraces() {
                 onValueChange={setActiveTab}
                 className="w-full"
               >
-                <TabsList className="grid grid-cols-3 mb-4">
+                <TabsList className="grid grid-cols-4 mb-4">
                   <TabsTrigger
                     value="overview"
                     className="flex items-center gap-1"
@@ -547,26 +665,119 @@ export default function FlowTraces() {
                     <Info className="h-4 w-4" />
                     <span>Overview</span>
                   </TabsTrigger>
-                  <TabsTrigger value="methods">Methods</TabsTrigger>
-                  <TabsTrigger value="events">Events</TabsTrigger>
+                  <TabsTrigger value="methods" className="flex items-center gap-1">
+                    <Play className="h-4 w-4" />
+                    <span>Methods</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="timeline" className="flex items-center gap-1">
+                    <BarChart2 className="h-4 w-4" />
+                    <span>Timeline</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="events" className="flex items-center gap-1">
+                    <Clock className="h-4 w-4" />
+                    <span>Events</span>
+                  </TabsTrigger>
                 </TabsList>
                 <TabsContent value="overview">
                   <div className="space-y-6">
+                    {/* Telemetry Metrics */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <Card>
+                        <CardContent className="p-4">
+                          <div className="flex items-center space-x-2">
+                            <Play className="h-5 w-5 text-blue-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                Methods
+                              </p>
+                              <p className="text-2xl font-bold">
+                                {telemetryMetrics?.totalMethods || 0}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {telemetryMetrics?.completedMethods || 0} completed,{" "}
+                                {telemetryMetrics?.failedMethods || 0} failed
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="p-4">
+                          <div className="flex items-center space-x-2">
+                            <Clock className="h-5 w-5 text-green-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                Events
+                              </p>
+                              <p className="text-2xl font-bold">
+                                {telemetryMetrics?.totalEvents || 0}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Total events captured
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="p-4">
+                          <div className="flex items-center space-x-2">
+                            <Timer className="h-5 w-5 text-orange-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                Execution Time
+                              </p>
+                              <p className="text-2xl font-bold">
+                                {telemetryMetrics?.executionTime
+                                  ? `${Math.round(telemetryMetrics.executionTime / 1000)}s`
+                                  : "0s"}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Total duration
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="p-4">
+                          <div className="flex items-center space-x-2">
+                            <BarChart2 className="h-5 w-5 text-purple-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                Output Size
+                              </p>
+                              <p className="text-2xl font-bold">
+                                {telemetryMetrics?.totalOutputSize
+                                  ? `${Math.round(telemetryMetrics.totalOutputSize / 1024)}KB`
+                                  : "0KB"}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Total output data
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Flow Summary */}
                     <Card>
                       <CardHeader className="pb-2">
                         <CardTitle className="text-lg">Flow Summary</CardTitle>
+                        <CardDescription>
+                          Overview of flow execution and status
+                        </CardDescription>
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="space-y-2">
-                            <div className="text-sm font-medium">Methods</div>
-                            <div className="flex items-center gap-2">
-                              <Badge className="text-lg" variant="outline">
-                                {telemetryMetrics?.totalMethods || 0}
-                              </Badge>
-                              <span className="text-sm text-muted-foreground">
-                                Total methods
-                              </span>
+                            <div className="text-sm font-medium">Flow Name</div>
+                            <div className="text-sm font-mono">
+                              {selectedTrace.flow_name}
                             </div>
                           </div>
 
@@ -576,6 +787,7 @@ export default function FlowTraces() {
                               className={getStatusColor(selectedTrace.status)}
                               variant="outline"
                             >
+                              {getStatusIcon(selectedTrace.status)}
                               {selectedTrace.status}
                             </Badge>
                           </div>
@@ -590,8 +802,53 @@ export default function FlowTraces() {
                             </div>
                           </div>
                         </div>
+
+                        {selectedTrace.output && (
+                          <div className="mt-4">
+                            <div className="text-sm font-medium mb-2">Output</div>
+                            <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
+                              {typeof selectedTrace.output === 'string'
+                                ? selectedTrace.output
+                                : JSON.stringify(selectedTrace.output, null, 2)}
+                            </pre>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="timeline">
+                  <div className="space-y-6">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">Execution Timeline</CardTitle>
+                        <CardDescription>
+                          Visual timeline of flow execution with methods and events
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <TraceTimeline
+                          spans={timelineSpans}
+                          onSpanClick={handleSpanClick}
+                        />
+                      </CardContent>
+                    </Card>
+
+                    {/* Span Details */}
+                    {selectedSpan && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-lg">Span Details</CardTitle>
+                          <CardDescription>
+                            Detailed information for the selected span: {selectedSpan.name}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <TraceSpanDetail span={selectedSpan} />
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
                 </TabsContent>
 
@@ -690,56 +947,98 @@ export default function FlowTraces() {
                     <CardHeader className="pb-2">
                       <CardTitle className="text-lg">Events</CardTitle>
                       <CardDescription>
-                        Flow execution events and their details
+                        Chronological timeline of flow execution events
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-4">
-                        <div className="border rounded-md divide-y">
-                          {selectedTrace.events?.map((event, idx) => (
-                            <div key={idx} className="p-3 hover:bg-muted">
-                              <div className="flex justify-between items-center">
-                                <Badge variant="outline">{event.type}</Badge>
-                                <span className="text-xs text-muted-foreground">
-                                  {formatTime(event.timestamp)}
-                                </span>
-                              </div>
-                              <div className="mt-2 text-sm">
-                                <div>
-                                  <strong>Method:</strong> {event.method_name}
-                                </div>
-                                <div>
-                                  <strong>Status:</strong> {event.status}
-                                </div>
-                              </div>
-                              {(event.outputs ||
-                                event.params ||
-                                event.input_state) && (
-                                <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
-                                  {JSON.stringify(
-                                    {
-                                      ...(event.outputs && {
-                                        outputs: event.outputs,
-                                      }),
-                                      ...(event.params && {
-                                        params: event.params,
-                                      }),
-                                      ...(event.input_state && {
-                                        input_state: event.input_state,
-                                      }),
-                                      ...(event.error && {
-                                        error: event.error,
-                                      }),
-                                    },
-                                    null,
-                                    2
+                      <ScrollArea className="h-[600px]">
+                        <div className="space-y-2">
+                          {selectedTrace.events
+                            ?.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                            ?.map((event, idx) => {
+                              const eventType = event.type.toLowerCase();
+                              const isCompleted = event.status === 'completed';
+                              const isFailed = event.status === 'failed';
+                              const isStarted = event.status === 'started';
+                              
+                              let bgColor = "bg-gray-50 dark:bg-gray-900/20";
+                              let borderColor = "border-gray-200 dark:border-gray-700";
+                              let iconColor = "text-gray-500";
+                              let StatusIcon = Info;
+                              
+                              if (isCompleted) {
+                                bgColor = "bg-green-50 dark:bg-green-900/20";
+                                borderColor = "border-green-200 dark:border-green-700";
+                                iconColor = "text-green-600";
+                                StatusIcon = CheckCircle;
+                              } else if (isFailed) {
+                                bgColor = "bg-red-50 dark:bg-red-900/20";
+                                borderColor = "border-red-200 dark:border-red-700";
+                                iconColor = "text-red-600";
+                                StatusIcon = XCircle;
+                              } else if (isStarted) {
+                                bgColor = "bg-blue-50 dark:bg-blue-900/20";
+                                borderColor = "border-blue-200 dark:border-blue-700";
+                                iconColor = "text-blue-600";
+                                StatusIcon = Clock;
+                              }
+                              
+                              if (eventType.includes('method')) {
+                                StatusIcon = Play;
+                                if (!isFailed && !isCompleted && !isStarted) {
+                                  iconColor = "text-purple-600";
+                                }
+                              }
+                              
+                              return (
+                                <div key={idx} className={`border rounded-md p-3 ${bgColor} ${borderColor}`}>
+                                  <div className="flex justify-between items-start">
+                                    <div className="flex items-center gap-2">
+                                      <StatusIcon className={`h-4 w-4 ${iconColor}`} />
+                                      <div>
+                                        <Badge 
+                                          variant={isCompleted ? 'default' : isFailed ? 'destructive' : 'secondary'}
+                                          className="text-xs"
+                                        >
+                                          {event.type}
+                                        </Badge>
+                                        <div className="text-sm font-medium mt-1">
+                                          Method: {event.method_name}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                          Status: {event.status}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {formatTime(event.timestamp)}
+                                    </div>
+                                  </div>
+                                  
+                                  {(event.outputs || event.params || event.input_state || event.error) && (
+                                    <details className="mt-3">
+                                      <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                        View Event Data
+                                      </summary>
+                                      <div className="mt-2 text-xs font-mono bg-background/50 p-2 rounded border">
+                                        {JSON.stringify(
+                                          {
+                                            ...(event.outputs && { outputs: event.outputs }),
+                                            ...(event.params && { params: event.params }),
+                                            ...(event.input_state && { input_state: event.input_state }),
+                                            ...(event.error && { error: event.error }),
+                                          },
+                                          null,
+                                          2
+                                        )}
+                                      </div>
+                                    </details>
                                   )}
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                              );
+                            })}
                         </div>
-                      </div>
+                      </ScrollArea>
                     </CardContent>
                   </Card>
                 </TabsContent>

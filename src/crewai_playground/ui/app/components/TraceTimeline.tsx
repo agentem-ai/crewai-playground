@@ -28,6 +28,9 @@ const getBarColor = (span: TimelineSpan): string => {
   if (service.includes("task")) return "#3b82f6"; // blue
   if (service.includes("llm")) return "#8b5cf6"; // violet for LLM calls
   if (service.includes("tool")) return "#f97316"; // orange for tool executions
+  if (service.includes("flow")) return "#ec4899"; // pink for flows
+  if (service.includes("method")) return "#06b6d4"; // cyan for methods
+  if (service.includes("event")) return "#84cc16"; // lime for events
   return "#6b7280"; // gray for others
 };
 
