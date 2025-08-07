@@ -80,7 +80,11 @@ function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                 transition-all duration-200 hover:scale-105
                 ${location.pathname === item.path ? "shadow-md" : ""}
               `}
-              onClick={() => navigate(item.path)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate(item.path);
+              }}
               title={isCollapsed ? item.label : undefined}
             >
               <item.icon className={`h-5 w-5 ${isCollapsed ? "" : "mr-2"}`} />
@@ -100,14 +104,46 @@ interface LayoutProps {
 
 export function Layout({ children, rightSidebar }: LayoutProps) {
   const { isDarkMode, toggleDarkMode } = useChatStore();
-  const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
-  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
+  
+  // Persist sidebar collapse states in localStorage
+  const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('crewai-left-sidebar-collapsed');
+      return saved ? JSON.parse(saved) : false;
+    }
+    return false;
+  });
+  
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('crewai-right-sidebar-collapsed');
+      return saved ? JSON.parse(saved) : false;
+    }
+    return false;
+  });
+
+  // Update localStorage when collapse states change
+  const toggleLeftSidebar = () => {
+    const newState = !isLeftSidebarCollapsed;
+    setIsLeftSidebarCollapsed(newState);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('crewai-left-sidebar-collapsed', JSON.stringify(newState));
+    }
+  };
+
+  const toggleRightSidebar = () => {
+    const newState = !isRightSidebarCollapsed;
+    setIsRightSidebarCollapsed(newState);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('crewai-right-sidebar-collapsed', JSON.stringify(newState));
+    }
+  };
 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar
         isCollapsed={isLeftSidebarCollapsed}
-        onToggle={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
+        onToggle={toggleLeftSidebar}
       />
       <div className="flex flex-col flex-1">
         <header className="sm:py-1 md:py-1 lg:py-2 px-4 border-b bg-background">
@@ -143,9 +179,7 @@ export function Layout({ children, rightSidebar }: LayoutProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() =>
-                  setIsRightSidebarCollapsed(!isRightSidebarCollapsed)
-                }
+                onClick={toggleRightSidebar}
                 className="absolute -left-3 top-4 z-10 h-6 w-6 rounded-full border bg-background shadow-md hover:shadow-lg transition-all duration-200"
               >
                 {isRightSidebarCollapsed ? (
