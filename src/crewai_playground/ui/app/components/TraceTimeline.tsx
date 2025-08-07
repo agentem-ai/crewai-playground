@@ -215,7 +215,11 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({
       )
       .html((d) => {
         const service = d.serviceName?.toLowerCase() || "";
-        if (service.includes("crew") || service.includes("agent")) {
+        if (
+          service.includes("crew") ||
+          service.includes("agent") ||
+          service.includes("method")
+        ) {
           return UserIcon(getBarColor(d));
         }
         return "";

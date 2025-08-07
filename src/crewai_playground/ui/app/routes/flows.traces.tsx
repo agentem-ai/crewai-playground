@@ -443,6 +443,8 @@ export default function FlowTraces() {
   const timelineSpans = useMemo((): TimelineSpan[] => {
     if (!selectedTrace) return [];
 
+
+
     const spans: TimelineSpan[] = [];
 
     // Create flow span (root)
@@ -468,55 +470,69 @@ export default function FlowTraces() {
     };
     spans.push(flowSpan);
 
-    // Add method spans as children of flow
-    if (selectedTrace.methods && typeof selectedTrace.methods === "object") {
-      Object.entries(selectedTrace.methods).forEach(([methodKey, method]) => {
-        const methodStartTime = new Date(method.start_time);
-        const methodEndTime = method.end_time
-          ? new Date(method.end_time)
-          : null;
+    // Extract method execution data from events (similar to how crews extracts agent data)
+    if (selectedTrace.events && selectedTrace.events.length > 0) {
+      // Group events by method to reconstruct method execution spans
+      const methodExecutions = new Map<string, {
+        name: string;
+        startTime: Date | null;
+        endTime: Date | null;
+        status: string;
+        events: any[];
+      }>();
+
+      // Process events to extract method execution information
+      selectedTrace.events.forEach((event) => {
+        if (event.type === 'flow.method.execution') {
+          const methodName = event.method_name || 'unknown_method';
+          
+          if (!methodExecutions.has(methodName)) {
+            methodExecutions.set(methodName, {
+              name: methodName,
+              startTime: null,
+              endTime: null,
+              status: 'unknown',
+              events: []
+            });
+          }
+          
+          const methodData = methodExecutions.get(methodName)!;
+          methodData.events.push(event);
+          
+          const eventTime = new Date(event.timestamp);
+          
+          if (event.status === 'started') {
+            methodData.startTime = eventTime;
+            methodData.status = 'running';
+          } else if (event.status === 'completed' || event.status === 'failed') {
+            methodData.endTime = eventTime;
+            methodData.status = event.status;
+          }
+        }
+      });
+
+      // Create method spans from extracted data
+      methodExecutions.forEach((methodData, methodName) => {
+        const methodStartTime = methodData.startTime || flowStartTime;
+        const methodEndTime = methodData.endTime || null;
         const methodDuration = methodEndTime
           ? methodEndTime.getTime() - methodStartTime.getTime()
           : 0;
 
         const methodSpan: TimelineSpan = {
-          id: `${selectedTrace.id}-method-${methodKey}`,
-          name: `Method: ${method.name || methodKey}`,
+          id: `${selectedTrace.id}-method-${methodName}`,
+          name: `Method: ${methodData.name}`,
           startTime: methodStartTime,
           endTime: methodEndTime,
-          status: method.status,
+          status: methodData.status,
           parentId: selectedTrace.id,
           depth: 1,
           duration: methodDuration,
           serviceName: "method",
-          operation: method.name || methodKey,
+          operation: methodData.name,
           children: [],
         };
         spans.push(methodSpan);
-
-        // Add method events as children of method
-        if (method.events && method.events.length > 0) {
-          method.events.forEach((event, index) => {
-            const eventStartTime = new Date(event.timestamp);
-            // Estimate end time for events (small duration)
-            const eventEndTime = new Date(eventStartTime.getTime() + 500); // 500ms default
-
-            const eventSpan: TimelineSpan = {
-              id: `${methodSpan.id}-event-${index}`,
-              name: `Event: ${event.type}`,
-              startTime: eventStartTime,
-              endTime: eventEndTime,
-              status: event.status,
-              parentId: methodSpan.id,
-              depth: 2,
-              duration: 500,
-              serviceName: "event",
-              operation: event.type,
-              children: [],
-            };
-            spans.push(eventSpan);
-          });
-        }
       });
     }
 
@@ -530,6 +546,8 @@ export default function FlowTraces() {
         parent.children.push(span);
       }
     });
+
+
 
     return spans;
   }, [selectedTrace]);
