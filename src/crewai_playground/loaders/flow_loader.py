@@ -650,7 +650,8 @@ def _extract_methods_with_ast_analysis(flow_class, file_content: str) -> Dict[st
             
         # Analyze each method in the class
         for node in class_node.body:
-            if isinstance(node, ast.FunctionDef):
+            # Handle both regular and async function definitions
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 method_name = node.name
                 
                 # Skip private methods and inherited methods
