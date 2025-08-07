@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crewai-playground"
-version = "0.1.0-alpha.10"
+version = "0.1.0-alpha.11"
 authors = [{ name = "Lennex Zinyando", email = "brizdigital@gmail.com" }]
 description = "CrewAI playground web interface"
 readme = "README.md"
