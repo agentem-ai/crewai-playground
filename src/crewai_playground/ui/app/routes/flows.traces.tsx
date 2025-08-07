@@ -24,6 +24,12 @@ import {
   List,
   BarChart2,
   Info,
+  CheckCircle,
+  XCircle,
+  Play,
+  Timer,
+  Brain,
+  Wrench,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import {
@@ -33,9 +39,6 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import { useChatStore } from "../lib/store";
-import { TraceTimeline } from "../components/TraceTimeline";
-import { TraceSpanView } from "../components/TraceSpanView";
-import { TraceSpanDetail } from "../components/TraceSpanDetail";
 import { Separator } from "../components/ui/separator";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
@@ -57,37 +60,48 @@ export function meta() {
   ];
 }
 
-// Define trace data types
-interface TraceEvent {
+// Define trace data types based on new backend payload
+interface FlowMethodEvent {
   type: string;
   timestamp: string;
-  data: Record<string, any>;
+  flow_id: string;
+  method_name: string;
+  status: string;
+  input_state?: any;
+  params?: any;
+  outputs?: any;
+  error?: string;
 }
 
-interface TraceMethod {
-  id: string;
+interface FlowMethod {
   name: string;
   status: string;
   start_time: string;
   end_time?: string;
-  output?: string;
-  events: TraceEvent[];
+  events: FlowMethodEvent[];
+  outputs?: any;
 }
 
-interface Trace {
+interface FlowTrace {
   id: string;
   flow_id: string;
   flow_name: string;
   start_time: string;
   end_time?: string;
   status: string;
+  events: FlowMethodEvent[];
+  methods: Record<string, FlowMethod>;
+  steps: any[];
   output?: string;
-  events: TraceEvent[];
-  methods: Record<string, TraceMethod>;
 }
 
-// Original trace types for backward compatibility
-interface TraceSpan {
+interface FlowTracesResponse {
+  status: string;
+  traces: FlowTrace[];
+}
+
+// Legacy trace types for backward compatibility (renamed to avoid conflicts)
+interface LegacyTraceSpan {
   id: string;
   name: string;
   start_time: number;
@@ -100,18 +114,18 @@ interface TraceSpan {
     timestamp: number;
     attributes?: Record<string, any>;
   }[];
-  children?: TraceSpan[];
+  children?: LegacyTraceSpan[];
   level?: number; // For flattened view
 }
 
-interface FlowTrace {
+interface LegacyFlowTrace {
   id: string;
   flow_id: string;
   flow_name: string;
   start_time: number;
   end_time?: number;
   status: "running" | "completed" | "failed" | "initializing";
-  spans: TraceSpan[];
+  spans: LegacyTraceSpan[];
 }
 
 // Visualization data types
@@ -133,208 +147,111 @@ interface TimelineSpan {
 // Helper Functions
 // ============================================================================
 
-// Helper function to flatten spans into a single array with level information
-const flattenSpans = (
-  spans: TraceSpan[],
-  level = 0,
-  result: Array<TraceSpan & { level: number }> = []
-) => {
-  if (!spans || !Array.isArray(spans)) return result;
-
-  spans.forEach((span) => {
-    if (span) {
-      result.push({ ...span, level });
-      if (
-        span.children &&
-        Array.isArray(span.children) &&
-        span.children.length > 0
-      ) {
-        flattenSpans(span.children, level + 1, result);
-      }
-    }
-  });
-  return result;
-};
-
 // Helper function to format timestamp
-function formatTime(timestamp: string | number) {
+const formatTime = (timestamp: string): string => {
   try {
-    const date =
-      typeof timestamp === "number"
-        ? new Date(timestamp * 1000)
-        : new Date(timestamp);
-    return date.toLocaleString();
-  } catch (e) {
-    return "Invalid time";
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+    });
+  } catch {
+    return "--:--:--";
   }
-}
+};
 
 // Helper function to calculate duration between two timestamps
-function calculateDuration(
-  startTime: string | number,
-  endTime?: string | number
-) {
+const calculateDuration = (startTime: string, endTime?: string): string => {
   try {
-    const start =
-      typeof startTime === "number"
-        ? new Date(startTime * 1000)
-        : new Date(startTime);
+    const start = new Date(startTime).getTime();
+    const end = endTime ? new Date(endTime).getTime() : Date.now();
+    const durationMs = end - start;
 
-    if (!endTime) {
-      return "In progress";
-    }
-
-    const end =
-      typeof endTime === "number"
-        ? new Date(endTime * 1000)
-        : new Date(endTime);
-
-    const durationMs = end.getTime() - start.getTime();
-    const seconds = Math.floor((durationMs / 1000) % 60);
-    const minutes = Math.floor((durationMs / (1000 * 60)) % 60);
-    const hours = Math.floor(durationMs / (1000 * 60 * 60));
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${seconds}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds}s`;
+    if (durationMs < 1000) {
+      return `${durationMs}ms`;
+    } else if (durationMs < 60000) {
+      return `${(durationMs / 1000).toFixed(1)}s`;
     } else {
-      return `${seconds}s`;
+      const minutes = Math.floor(durationMs / 60000);
+      const seconds = Math.floor((durationMs % 60000) / 1000);
+      return `${minutes}m ${seconds}s`;
     }
-  } catch (e) {
-    return "Invalid time";
+  } catch {
+    return "--";
   }
-}
+};
 
 // Get status color based on status
-function getStatusColor(status: string) {
+const getStatusColor = (status: string): string => {
   switch (status.toLowerCase()) {
-    case "running":
-    case "initializing":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300 border-blue-200 dark:border-blue-800";
     case "completed":
-      return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300 border-green-200 dark:border-green-800";
+    case "success":
+      return "bg-green-100 text-green-800";
     case "failed":
-      return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300 border-red-200 dark:border-red-800";
+    case "error":
+      return "bg-red-100 text-red-800";
+    case "running":
+    case "started":
+      return "bg-blue-100 text-blue-800";
+    case "initializing":
     case "pending":
-      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800";
+      return "bg-yellow-100 text-yellow-800";
     default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300 border-gray-200 dark:border-gray-800";
+      return "bg-gray-100 text-gray-800";
   }
-}
-
-// ============================================================================
-// Main Component
-// ============================================================================
-
-// Convert TraceSpan to TimelineSpan for visualization
-const convertToTimelineSpans = (spans: TraceSpan[]): TimelineSpan[] => {
-  if (!spans || !Array.isArray(spans)) return [];
-
-  return spans.map((span) => {
-    // Convert timestamp strings or numbers to Date objects
-    const startTime =
-      typeof span.start_time === "number"
-        ? new Date(span.start_time * 1000) // convert seconds to ms
-        : new Date(span.start_time);
-
-    const endTime = span.end_time
-      ? typeof span.end_time === "number"
-        ? new Date(span.end_time * 1000) // convert seconds to ms
-        : new Date(span.end_time)
-      : null;
-
-    // Calculate duration in milliseconds
-    const duration =
-      endTime && startTime ? endTime.getTime() - startTime.getTime() : 0;
-
-    return {
-      id: span.id,
-      name: span.name,
-      startTime,
-      endTime,
-      status: span.status,
-      parentId: span.parent_id,
-      children: span.children ? convertToTimelineSpans(span.children) : [],
-      depth: 0, // Will be calculated by TraceTimeline
-      duration,
-      serviceName: span.attributes?.service_name,
-      operation: span.attributes?.operation,
-    };
-  });
 };
 
-// Convert raw span to TimelineSpan format
-const convertToTimelineSpan = (span: TraceSpan): TimelineSpan => {
-  const startTime =
-    typeof span.start_time === "number"
-      ? new Date(span.start_time * 1000)
-      : new Date(span.start_time);
-
-  const endTime = span.end_time
-    ? typeof span.end_time === "number"
-      ? new Date(span.end_time * 1000)
-      : new Date(span.end_time)
-    : null;
-
-  return {
-    id: span.id,
-    name: span.name,
-    startTime,
-    endTime,
-    status: span.status,
-    parentId: span.parent_id,
-    children: span.children ? convertToTimelineSpans(span.children) : [],
-    depth: 0, // Will be calculated by TraceTimeline
-    duration:
-      endTime && startTime ? endTime.getTime() - startTime.getTime() : 0,
-    serviceName: span.attributes?.service_name,
-    operation: span.attributes?.operation,
-  };
+// Get status icon based on status
+const getStatusIcon = (status: string) => {
+  switch (status.toLowerCase()) {
+    case "completed":
+    case "success":
+      return <CheckCircle className="h-4 w-4" />;
+    case "failed":
+    case "error":
+      return <XCircle className="h-4 w-4" />;
+    case "running":
+    case "started":
+      return <Play className="h-4 w-4" />;
+    case "initializing":
+    case "pending":
+      return <Clock className="h-4 w-4" />;
+    default:
+      return <Info className="h-4 w-4" />;
+  }
 };
 
-// Convert TraceSpan to SpanData for detail view
-const convertToSpanData = (span: TraceSpan) => {
-  const startTime =
-    typeof span.start_time === "number"
-      ? new Date(span.start_time * 1000)
-      : new Date(span.start_time);
+// Extract telemetry metrics from trace
+const extractTelemetryMetrics = (trace: FlowTrace) => {
+  const methods = Object.values(trace.methods || {});
+  const totalMethods = methods.length;
+  const completedMethods = methods.filter(
+    (m) => m.status === "completed"
+  ).length;
+  const failedMethods = methods.filter((m) => m.status === "failed").length;
 
-  const endTime = span.end_time
-    ? typeof span.end_time === "number"
-      ? new Date(span.end_time * 1000)
-      : new Date(span.end_time)
-    : null;
-
-  const duration =
-    endTime && startTime ? endTime.getTime() - startTime.getTime() : 0;
+  const totalDuration =
+    trace.end_time && trace.start_time
+      ? new Date(trace.end_time).getTime() -
+        new Date(trace.start_time).getTime()
+      : 0;
 
   return {
-    id: span.id,
-    name: span.name,
-    startTime,
-    endTime,
-    status: span.status,
-    duration,
-    parentId: span.parent_id,
-    depth: 0,
-    tags: span.attributes || {},
-    logs: span.events
-      ? span.events.map((event) => ({
-          timestamp:
-            typeof event.timestamp === "number"
-              ? new Date(event.timestamp)
-              : new Date(event.timestamp),
-          fields: event.attributes || {},
-        }))
-      : [],
+    totalMethods,
+    completedMethods,
+    failedMethods,
+    totalDuration,
+    successRate: totalMethods > 0 ? (completedMethods / totalMethods) * 100 : 0,
   };
 };
 
 export default function FlowTraces() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { flows, setFlows, isDarkMode } = useChatStore();
+  const { flows, setFlows } = useChatStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedFlowId, setSelectedFlowId] = useState<string>("");
@@ -350,8 +267,6 @@ export default function FlowTraces() {
       traces.find((trace) => trace && trace.id === selectedTraceId) || null
     );
   }, [traces, selectedTraceId]);
-
-  // We'll use the rawSelectedSpan defined below instead of defining rawSelectedSpan here
 
   // Initialize from URL params
   useEffect(() => {
@@ -489,58 +404,11 @@ export default function FlowTraces() {
     fetchTraces();
   }, [selectedFlowId]);
 
-  // Get selected span from timeline
-  const rawSpan = useMemo(() => {
-    if (!selectedSpanId || !selectedTrace) return null;
-
-    const findSpan = (spans: TraceSpan[] | undefined): TraceSpan | null => {
-      if (!spans || !Array.isArray(spans)) return null;
-
-      for (const span of spans) {
-        if (!span) continue;
-        if (span.id === selectedSpanId) return span;
-        if (
-          span.children &&
-          Array.isArray(span.children) &&
-          span.children.length > 0
-        ) {
-          const found = findSpan(span.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-
-    const spans = selectedTrace.spans || [];
-    return Array.isArray(spans) ? findSpan(spans) : null;
-  }, [selectedSpanId, selectedTrace]);
-
-  // Convert raw span to SpanData format for detail component
-  const selectedSpanData = useMemo(() => {
-    return rawSpan ? convertToSpanData(rawSpan) : null;
-  }, [rawSpan, convertToSpanData]);
-
-  // Process trace data for timeline view with safety checks
-  const timelineSpans = useMemo(() => {
-    if (!selectedTrace) return [];
-
-    // Handle case where spans might be undefined or not an array
-    const spans = selectedTrace.spans || [];
-    return Array.isArray(spans) ? convertToTimelineSpans(spans) : [];
+  // Get telemetry metrics for the selected trace
+  const telemetryMetrics = useMemo(() => {
+    if (!selectedTrace) return null;
+    return extractTelemetryMetrics(selectedTrace);
   }, [selectedTrace]);
-
-  // Process trace data for hierarchical view with safety checks
-  const hierarchicalSpans = useMemo(() => {
-    if (!selectedTrace || !selectedTrace.spans) return [];
-
-    // Create a hierarchical structure from flat spans
-    const rootSpans = selectedTrace.spans.filter(
-      (span) => !span.parent_id || span.parent_id === selectedTrace.id
-    );
-    return convertToTimelineSpans(rootSpans);
-  }, [selectedTrace]);
-
-
 
   // Render the list of traces
   const renderTraceList = () => {
@@ -614,9 +482,11 @@ export default function FlowTraces() {
     <div className="space-y-6">
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">Flows & Traces</h3>
-        <p className="text-sm text-muted-foreground">Select a flow and trace to view details</p>
+        <p className="text-sm text-muted-foreground">
+          Select a flow and trace to view details
+        </p>
       </div>
-      
+
       {/* Flow selection */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Flow</label>
@@ -633,7 +503,7 @@ export default function FlowTraces() {
           </SelectContent>
         </Select>
       </div>
-      
+
       {/* Trace list */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Traces</label>
@@ -680,202 +550,200 @@ export default function FlowTraces() {
                   <TabsTrigger value="methods">Methods</TabsTrigger>
                   <TabsTrigger value="events">Events</TabsTrigger>
                 </TabsList>
-              <TabsContent value="overview">
-                <div className="space-y-6">
+                <TabsContent value="overview">
+                  <div className="space-y-6">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">Flow Summary</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Methods</div>
+                            <div className="flex items-center gap-2">
+                              <Badge className="text-lg" variant="outline">
+                                {telemetryMetrics?.totalMethods || 0}
+                              </Badge>
+                              <span className="text-sm text-muted-foreground">
+                                Total methods
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Status</div>
+                            <Badge
+                              className={getStatusColor(selectedTrace.status)}
+                              variant="outline"
+                            >
+                              {selectedTrace.status}
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Duration</div>
+                            <div className="text-sm">
+                              {calculateDuration(
+                                selectedTrace.start_time,
+                                selectedTrace.end_time
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="methods">
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">Timeline</CardTitle>
+                      <CardTitle className="text-lg">Methods</CardTitle>
                       <CardDescription>
-                        Visualization of execution spans over time
+                        Flow execution methods and their details
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <TraceTimeline
-                        spans={timelineSpans}
-                        onSpanClick={(span) => setSelectedSpanId(span.id)}
-                      />
-                    </CardContent>
-                  </Card>
+                      <div className="space-y-4">
+                        <Accordion type="single" collapsible className="w-full">
+                          {Object.entries(selectedTrace.methods || {})
+                            .map(([methodKey, method]) => ({
+                              ...method,
+                              id: methodKey,
+                              name: method.name || methodKey,
+                            }))
+                            .map((method) => (
+                              <AccordionItem key={method.id} value={method.id}>
+                                <AccordionTrigger className="hover:bg-muted px-4">
+                                  <div className="flex items-center justify-between w-full">
+                                    <div className="flex items-center">
+                                      <Badge
+                                        className={getStatusColor(
+                                          method.status
+                                        )}
+                                        variant="outline"
+                                      >
+                                        {method.status}
+                                      </Badge>
+                                      <span className="ml-2 font-medium">
+                                        {method.name}
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-muted-foreground">
+                                      {calculateDuration(
+                                        method.start_time,
+                                        method.end_time
+                                      )}
+                                    </div>
+                                  </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="px-4 py-2 space-y-4">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="text-sm text-muted-foreground">
+                                      Method ID
+                                    </div>
+                                    <div className="text-sm font-mono">
+                                      {method.id}
+                                    </div>
 
-                  {selectedSpanData && (
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-lg">Span Details</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {selectedSpanData && (
-                          <TraceSpanDetail span={selectedSpanData} />
-                        )}
-                      </CardContent>
-                    </Card>
-                  )}
+                                    <div className="text-sm text-muted-foreground">
+                                      Start Time
+                                    </div>
+                                    <div>{formatTime(method.start_time)}</div>
 
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">Flow Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Methods</div>
-                          <div className="flex items-center gap-2">
-                            <Badge className="text-lg" variant="outline">
-                              {selectedTrace.spans?.filter(
-                                (s) => s.parent_id === selectedTrace.id
-                              ).length || 0}
-                            </Badge>
-                            <span className="text-sm text-muted-foreground">
-                              Total methods
-                            </span>
-                          </div>
-                        </div>
+                                    {method.end_time && (
+                                      <>
+                                        <div className="text-sm text-muted-foreground">
+                                          End Time
+                                        </div>
+                                        <div>{formatTime(method.end_time)}</div>
+                                      </>
+                                    )}
+                                  </div>
 
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Status</div>
-                          <Badge
-                            className={getStatusColor(selectedTrace.status)}
-                            variant="outline"
-                          >
-                            {selectedTrace.status}
-                          </Badge>
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Duration</div>
-                          <div className="text-sm">
-                            {calculateDuration(
-                              selectedTrace.start_time,
-                              selectedTrace.end_time
-                            )}
-                          </div>
-                        </div>
+                                  {method.outputs &&
+                                    Object.keys(method.outputs).length > 0 && (
+                                      <div className="mt-4">
+                                        <div className="text-sm font-medium mb-2">
+                                          Outputs
+                                        </div>
+                                        <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
+                                          {JSON.stringify(
+                                            method.outputs,
+                                            null,
+                                            2
+                                          )}
+                                        </pre>
+                                      </div>
+                                    )}
+                                </AccordionContent>
+                              </AccordionItem>
+                            ))}
+                        </Accordion>
                       </div>
                     </CardContent>
                   </Card>
-                </div>
-              </TabsContent>
+                </TabsContent>
 
-              <TabsContent value="methods">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">Methods</CardTitle>
-                    <CardDescription>
-                      Flow execution methods and their details
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <Accordion type="single" collapsible className="w-full">
-                        {selectedTrace.spans
-                          ?.filter(
-                            (method) => method.parent_id === selectedTrace.id
-                          )
-                          .map((method) => (
-                            <AccordionItem key={method.id} value={method.id}>
-                              <AccordionTrigger className="hover:bg-muted px-4">
-                                <div className="flex items-center justify-between w-full">
-                                  <div className="flex items-center">
-                                    <Badge
-                                      className={getStatusColor(method.status)}
-                                      variant="outline"
-                                    >
-                                      {method.status}
-                                    </Badge>
-                                    <span className="ml-2 font-medium">
-                                      {method.name}
-                                    </span>
-                                  </div>
-                                  <div className="text-sm text-muted-foreground">
-                                    {calculateDuration(
-                                      method.start_time,
-                                      method.end_time
-                                    )}
-                                  </div>
-                                </div>
-                              </AccordionTrigger>
-                              <AccordionContent className="px-4 py-2 space-y-4">
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="text-sm text-muted-foreground">
-                                    Method ID
-                                  </div>
-                                  <div className="text-sm font-mono">
-                                    {method.id}
-                                  </div>
-
-                                  <div className="text-sm text-muted-foreground">
-                                    Start Time
-                                  </div>
-                                  <div>{formatTime(method.start_time)}</div>
-
-                                  {method.end_time && (
-                                    <>
-                                      <div className="text-sm text-muted-foreground">
-                                        End Time
-                                      </div>
-                                      <div>{formatTime(method.end_time)}</div>
-                                    </>
-                                  )}
-                                </div>
-
-                                {method.attributes &&
-                                  Object.keys(method.attributes).length > 0 && (
-                                    <div className="mt-4">
-                                      <div className="text-sm font-medium mb-2">
-                                        Attributes
-                                      </div>
-                                      <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
-                                        {JSON.stringify(
-                                          method.attributes,
-                                          null,
-                                          2
-                                        )}
-                                      </pre>
-                                    </div>
-                                  )}
-                              </AccordionContent>
-                            </AccordionItem>
-                          ))}
-                      </Accordion>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="events">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">Events</CardTitle>
-                    <CardDescription>
-                      Flow execution events and their details
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="border rounded-md divide-y">
-                        {selectedTrace.spans
-                          ?.flatMap((span) => span.events || [])
-                          .map((event, idx) => (
+                <TabsContent value="events">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-lg">Events</CardTitle>
+                      <CardDescription>
+                        Flow execution events and their details
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div className="border rounded-md divide-y">
+                          {selectedTrace.events?.map((event, idx) => (
                             <div key={idx} className="p-3 hover:bg-muted">
                               <div className="flex justify-between items-center">
-                                <Badge variant="outline">{event.name}</Badge>
+                                <Badge variant="outline">{event.type}</Badge>
                                 <span className="text-xs text-muted-foreground">
                                   {formatTime(event.timestamp)}
                                 </span>
                               </div>
-                              {event.attributes &&
-                                Object.keys(event.attributes).length > 0 && (
-                                  <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
-                                    {JSON.stringify(event.attributes, null, 2)}
-                                  </div>
-                                )}
+                              <div className="mt-2 text-sm">
+                                <div>
+                                  <strong>Method:</strong> {event.method_name}
+                                </div>
+                                <div>
+                                  <strong>Status:</strong> {event.status}
+                                </div>
+                              </div>
+                              {(event.outputs ||
+                                event.params ||
+                                event.input_state) && (
+                                <div className="mt-2 text-xs font-mono bg-muted p-2 rounded">
+                                  {JSON.stringify(
+                                    {
+                                      ...(event.outputs && {
+                                        outputs: event.outputs,
+                                      }),
+                                      ...(event.params && {
+                                        params: event.params,
+                                      }),
+                                      ...(event.input_state && {
+                                        input_state: event.input_state,
+                                      }),
+                                      ...(event.error && {
+                                        error: event.error,
+                                      }),
+                                    },
+                                    null,
+                                    2
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ))}
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         ) : loading ? (
