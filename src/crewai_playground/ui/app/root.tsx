@@ -55,17 +55,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function Root() {
-  const { isDarkMode } = useChatStore()
-
-  useEffect(() => {
-    // Update the document class when dark mode changes
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }, [isDarkMode])
-
   return <Outlet />;
 }
 
