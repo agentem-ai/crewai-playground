@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useNavigate, useLocation } from "react-router";
 import { Layout } from "../components/Layout";
 import { KickoffNavigation } from "../components/KickoffNavigation";
@@ -43,6 +43,12 @@ import { TraceSpanView } from "../components/TraceSpanView";
 import { TraceSpanDetail } from "../components/TraceSpanDetail";
 import { Separator } from "../components/ui/separator";
 import { ScrollArea } from "../components/ui/scroll-area";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "../components/ui/sheet";
 
 // Define trace data// Type definitions
 interface TraceEvent {
@@ -171,6 +177,13 @@ export default function TracesPage() {
     toolExecutions: ToolExecution[];
     metrics: TelemetryMetrics;
   } | null>(null);
+
+  // Drawer state for list/drawer UI pattern
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedTraceDetails, setSelectedTraceDetails] = useState<Trace | null>(null);
+
+  // Ref for span details card to enable smooth scrolling
+  const spanDetailsRef = useRef<HTMLDivElement>(null);
 
   const handleBack = () => {
     navigate(`/kickoff?crewId=${crewId}`);
@@ -409,9 +422,36 @@ export default function TracesPage() {
     return endTime - startTime;
   }, [selectedTrace]);
 
-  // Handle span selection
+  // Handle span selection with smooth scrolling
   const handleSpanClick = (span: TimelineSpan) => {
     setSelectedSpan(span);
+    
+    // Smooth scroll to span details card after a brief delay to ensure rendering
+    setTimeout(() => {
+      if (spanDetailsRef.current) {
+        spanDetailsRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+          inline: "nearest",
+        });
+      }
+    }, 100);
+  };
+
+  // Handle trace selection for drawer
+  const handleTraceSelect = (trace: Trace) => {
+    setSelectedTraceDetails(trace);
+    setSelectedTrace(trace); // Keep the existing functionality
+    setDrawerOpen(true);
+    
+    // Set telemetry data for the selected trace
+    if (trace.llmCalls && trace.toolExecutions && trace.telemetryMetrics) {
+      setTelemetryData({
+        llmCalls: trace.llmCalls,
+        toolExecutions: trace.toolExecutions,
+        metrics: trace.telemetryMetrics
+      });
+    }
   };
 
   // Render timeline visualization
@@ -996,7 +1036,7 @@ export default function TracesPage() {
         </Card>
 
         {selectedSpan && (
-          <Card>
+          <Card ref={spanDetailsRef}>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Span Details</CardTitle>
               <CardDescription>
@@ -1401,32 +1441,145 @@ export default function TracesPage() {
     );
   };
 
-  // Create right sidebar with trace selection
-  const rightSidebar = (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <h3 className="text-lg font-semibold">Traces</h3>
-        <p className="text-sm text-muted-foreground">Select a trace to view details</p>
-      </div>
-      <ScrollArea className="h-[500px] border rounded-md">
-        <div className="p-4">{renderTraceList()}</div>
-      </ScrollArea>
-    </div>
-  );
-
   return (
-    <Layout rightSidebar={rightSidebar}>
+    <Layout>
       <div className="w-full">
         {/* Navigation Menu */}
         <KickoffNavigation crewId={crewId || undefined} />
 
-        <div className="w-full">
-          {selectedTrace ? (
+        {/* Loading State */}
+        {loading ? (
+          <Card className="mb-6">
+            <CardContent className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-indigo-500 mr-2" />
+              <p>Loading crew traces...</p>
+            </CardContent>
+          </Card>
+        ) : error ? (
+          <Card className="mb-6">
+            <CardContent className="py-12">
+              <div className="text-center text-red-500">
+                <AlertCircle className="h-12 w-12 mx-auto mb-4" />
+                <h3 className="text-lg font-medium mb-2">Error Loading Traces</h3>
+                <p>{error}</p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : traces.length === 0 ? (
+          <Card className="mb-6">
+            <CardContent className="py-12">
+              <div className="text-center">
+                <Clock className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                <h3 className="text-lg font-medium mb-2">
+                  No Crew Traces Found
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  There are no execution traces available for this crew yet.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-6">
+            {/* Crew Traces List */}
             <Card>
-              <CardHeader>
-                <CardTitle>{selectedTrace.crew_name}</CardTitle>
+              <CardHeader className="flex flex-row justify-between items-start">
+                <div>
+                  <CardTitle>Crew Execution Traces</CardTitle>
+                  <CardDescription>
+                    Click a trace to view detailed execution information
+                  </CardDescription>
+                </div>
               </CardHeader>
               <CardContent>
+                <div className="space-y-2">
+                  {traces.map((trace) => (
+                    <div
+                      key={trace.id}
+                      className="border rounded-lg overflow-hidden hover:bg-muted/10 transition-all cursor-pointer w-full"
+                      onClick={() => handleTraceSelect(trace)}
+                    >
+                      <div className="p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          {/* Left section - Status and details */}
+                          <div className="flex items-center space-x-4">
+                            <div className="flex items-center">
+                              {trace.status === "completed" ? (
+                                <CheckCircle className="h-5 w-5 text-green-500" />
+                              ) : trace.status === "running" ? (
+                                <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />
+                              ) : trace.status === "failed" ? (
+                                <XCircle className="h-5 w-5 text-red-500" />
+                              ) : (
+                                <AlertCircle className="h-5 w-5 text-yellow-500" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center">
+                                <span className="font-medium mr-2">
+                                  {trace.crew_name}
+                                </span>
+                                <Badge
+                                  variant={
+                                    trace.status === "completed"
+                                      ? "outline"
+                                      : trace.status === "running"
+                                      ? "default"
+                                      : "destructive"
+                                  }
+                                  className={
+                                    trace.status === "completed"
+                                      ? "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300"
+                                      : ""
+                                  }
+                                >
+                                  {trace.status}
+                                </Badge>
+                              </div>
+                              <div className="text-sm text-muted-foreground mt-1">
+                                {formatTime(trace.start_time)} •{" "}
+                                {trace.agents && typeof trace.agents === 'object' ? Object.keys(trace.agents).length : 0} agents •{" "}
+                                {trace.tasks && typeof trace.tasks === 'object' ? Object.keys(trace.tasks).length : 0} tasks
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Right section - Duration and timestamp */}
+                          <div className="text-right">
+                            <div className="text-sm font-medium">
+                              {trace.end_time
+                                ? `${Math.round(
+                                    (new Date(trace.end_time).getTime() -
+                                      new Date(trace.start_time).getTime()) /
+                                      1000
+                                  )}s`
+                                : "Running..."}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatTime(trace.start_time)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Trace Details Drawer */}
+        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <SheetContent className="w-[75vw] max-w-[75vw] sm:w-[75vw] md:w-[75vw] lg:w-[75vw] overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>
+                {selectedTraceDetails?.crew_name || "Crew Trace Details"}
+              </SheetTitle>
+            </SheetHeader>
+            
+            {selectedTraceDetails && (
+              <div className="mt-6">
                 <Tabs
                   defaultValue="overview"
                   value={activeTab}
@@ -1462,18 +1615,10 @@ export default function TracesPage() {
 
                   <TabsContent value="events">{renderEvents()}</TabsContent>
                 </Tabs>
-              </CardContent>
-            </Card>
-          ) : loading ? (
-            <div className="flex justify-center items-center p-8">
-              <Loader2 className="h-8 w-8 animate-spin" />
-            </div>
-          ) : (
-            <div className="text-center p-8 text-gray-500">
-              Select a trace to view details
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+          </SheetContent>
+        </Sheet>
       </div>
     </Layout>
   );
