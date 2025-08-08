@@ -407,9 +407,8 @@ async def _emit_method_events_from_state(
             started_event = MethodExecutionStartedEvent(
                 method_name=method_name,
                 flow_name=flow.__class__.__name__,
-                flow_id=flow_id,
                 params={},
-                input_state=state,
+                state=state,
             )
             crewai_event_bus.emit(flow, started_event)
             logger.info(f"📡 Emitted MethodExecutionStartedEvent for: {method_name}")
@@ -530,9 +529,9 @@ def _create_event_emitting_wrapper(original_method, method_name, flow, flow_id):
         # Emit method started event
         started_event = MethodExecutionStartedEvent(
             method_name=method_name,
-            flow_id=flow_id,
+            flow_name=flow.__class__.__name__,
             params=kwargs,
-            input_state=getattr(flow, "state", None),
+            state=getattr(flow, "state", None),
         )
         crewai_event_bus.emit(flow, started_event)
         logger.info(f"📡 Emitted MethodExecutionStartedEvent for: {method_name}")
@@ -567,9 +566,9 @@ def _create_event_emitting_wrapper(original_method, method_name, flow, flow_id):
         # Emit method started event
         started_event = MethodExecutionStartedEvent(
             method_name=method_name,
-            flow_id=flow_id,
+            flow_name=flow.__class__.__name__,
             params=kwargs,
-            input_state=getattr(flow, "state", None),
+            state=getattr(flow, "state", None),
         )
         crewai_event_bus.emit(flow, started_event)
         logger.info(f"📡 Emitted MethodExecutionStartedEvent for: {method_name}")
