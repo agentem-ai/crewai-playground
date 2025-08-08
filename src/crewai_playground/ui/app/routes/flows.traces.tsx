@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router";
 import { Layout } from "../components/Layout";
 import { FlowNavigation } from "../components/FlowNavigation";
@@ -15,6 +15,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "../components/ui/tabs";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "../components/ui/sheet";
 import { Badge } from "../components/ui/badge";
 import {
   Loader2,
@@ -286,6 +293,13 @@ export default function FlowTraces() {
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [selectedSpan, setSelectedSpan] = useState<TimelineSpan | null>(null);
   const [activeTab, setActiveTab] = useState<string>("overview");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedTraceDetails, setSelectedTraceDetails] =
+    useState<FlowTrace | null>(null);
+  const [expandedFlows, setExpandedFlows] = useState<Set<string>>(new Set());
+
+  // Ref for span details card to enable smooth scrolling
+  const spanDetailsRef = useRef<HTMLDivElement>(null);
 
   // Get selected trace from traces array with safety checks
   const selectedTrace = useMemo(() => {
@@ -325,7 +339,7 @@ export default function FlowTraces() {
   useEffect(() => {
     const fetchFlows = async () => {
       try {
-        const response = await fetch("http://localhost:8000/api/flows");
+        const response = await fetch("/api/flows");
         const data = await response.json();
         if (data.flows) {
           setFlows(data.flows);
@@ -378,9 +392,7 @@ export default function FlowTraces() {
           setSearchParams({ flowId: selectedFlowId });
         }
 
-        const response = await fetch(
-          `http://localhost:8000/api/flows/${selectedFlowId}/traces`
-        );
+        const response = await fetch(`/api/flows/${selectedFlowId}/traces`);
         const data = await response.json();
 
         if (data.status === "success" && Array.isArray(data.traces)) {
@@ -558,115 +570,68 @@ export default function FlowTraces() {
   const handleSpanClick = (span: TimelineSpan) => {
     setSelectedSpan(span);
     setSelectedSpanId(span.id);
+
+    // Smooth scroll to span details card after a brief delay to ensure rendering
+    setTimeout(() => {
+      if (spanDetailsRef.current) {
+        spanDetailsRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+          inline: "nearest",
+        });
+      }
+    }, 100);
   };
 
-  // Render the list of traces
-  const renderTraceList = () => {
-    if (loading) {
-      return (
-        <div className="flex items-center justify-center p-4">
-          <Loader2 className="h-6 w-6 animate-spin mr-2" />
-          <span>Loading traces...</span>
-        </div>
-      );
-    }
-
-    if (error) {
-      return <div className="p-4 text-red-500">{error}</div>;
-    }
-
-    if (traces.length === 0) {
-      return (
-        <div className="p-4 text-gray-500 dark:text-gray-400">
-          No traces found.
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-2">
-        {traces.map((trace) => (
-          <div
-            key={trace.id}
-            className={`p-3 border rounded-md cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${
-              selectedTrace?.id === trace.id
-                ? "border-primary bg-gray-50 dark:bg-gray-800"
-                : ""
-            }`}
-            onClick={() => {
-              setSelectedTraceId(trace.id);
-              setSelectedSpanId(null); // Reset selected span when changing traces
-              setSelectedSpan(null); // Reset selected span object
-            }}
-          >
-            <div className="flex justify-between items-center">
-              <div className="font-medium">Trace {trace.id.slice(0, 7)}</div>
-              <Badge
-                variant={
-                  trace.status === "completed"
-                    ? "outline"
-                    : trace.status === "running"
-                    ? "default"
-                    : "destructive"
-                }
-                className={
-                  trace.status === "completed"
-                    ? "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300"
-                    : ""
-                }
-              >
-                {trace.status}
-              </Badge>
-            </div>
-            <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mt-1">
-              <div>{formatTime(trace.start_time)}</div>
-              <div>{calculateDuration(trace.start_time, trace.end_time)}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
+  // Handle trace selection for drawer
+  const handleTraceSelect = (trace: FlowTrace) => {
+    setSelectedTraceDetails(trace);
+    setSelectedTraceId(trace.id);
+    setSelectedSpan(null);
+    setSelectedSpanId(null);
+    setDrawerOpen(true);
   };
 
-  // Create right sidebar with flow selection and trace list
-  const rightSidebar = (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <h3 className="text-lg font-semibold">Flows & Traces</h3>
-        <p className="text-sm text-muted-foreground">
-          Select a flow and trace to view details
-        </p>
-      </div>
+  // Toggle flow expansion
+  const toggleFlowExpansion = (flowId: string) => {
+    const newExpanded = new Set(expandedFlows);
+    if (newExpanded.has(flowId)) {
+      newExpanded.delete(flowId);
+    } else {
+      newExpanded.add(flowId);
+    }
+    setExpandedFlows(newExpanded);
+  };
 
-      {/* Flow selection */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Flow</label>
-        <Select onValueChange={setSelectedFlowId} value={selectedFlowId}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select a flow" />
-          </SelectTrigger>
-          <SelectContent>
-            {flows.map((flow) => (
-              <SelectItem key={flow.id} value={flow.id}>
-                {flow.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+  // Group traces by flow
+  const groupedTraces = useMemo(() => {
+    const groups = new Map<string, { flow: any; traces: FlowTrace[] }>();
 
-      {/* Trace list */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Traces</label>
-        <ScrollArea className="h-[500px] border rounded-md">
-          <div className="p-4">{renderTraceList()}</div>
-        </ScrollArea>
-      </div>
-    </div>
-  );
+    flows.forEach((flow) => {
+      groups.set(flow.id, { flow, traces: [] });
+    });
+
+    traces.forEach((trace) => {
+      const group = groups.get(trace.flow_id);
+      if (group) {
+        group.traces.push(trace);
+      }
+    });
+
+    return Array.from(groups.entries())
+      .filter(([_, group]) => group.traces.length > 0)
+      .map(([flowId, group]) => ({ flowId, ...group }));
+  }, [flows, traces]);
+
+  // Get telemetry metrics for selected trace (for drawer)
+  const selectedTraceMetrics = useMemo(() => {
+    return selectedTraceDetails
+      ? extractTelemetryMetrics(selectedTraceDetails)
+      : null;
+  }, [selectedTraceDetails]);
 
   return (
-    <Layout rightSidebar={rightSidebar}>
+    <Layout>
       <div className="w-full">
         {error && (
           <Alert variant="destructive" className="mb-6">
@@ -676,436 +641,547 @@ export default function FlowTraces() {
         )}
 
         {/* Navigation Menu */}
-        {selectedFlowId && <FlowNavigation flowId={selectedFlowId} />}
+        <FlowNavigation />
 
-        {selectedTrace ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>{selectedTrace.flow_name}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Tabs
-                defaultValue="overview"
-                value={activeTab}
-                onValueChange={setActiveTab}
-                className="w-full"
-              >
-                <TabsList className="grid grid-cols-3 mb-4">
-                  <TabsTrigger
-                    value="overview"
-                    className="flex items-center gap-1"
-                  >
-                    <Info className="h-4 w-4" />
-                    <span>Overview</span>
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="methods"
-                    className="flex items-center gap-1"
-                  >
-                    <Play className="h-4 w-4" />
-                    <span>Methods</span>
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="events"
-                    className="flex items-center gap-1"
-                  >
-                    <Clock className="h-4 w-4" />
-                    <span>Events</span>
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value="overview">
-                  <div className="space-y-6">
-                    {/* Telemetry Metrics */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <Card>
-                        <CardContent className="p-4">
-                          <div className="flex items-center space-x-2">
-                            <Play className="h-5 w-5 text-blue-600" />
-                            <div>
-                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                                Methods
-                              </p>
-                              <p className="text-2xl font-bold">
-                                {telemetryMetrics?.totalMethods || 0}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {telemetryMetrics?.completedMethods || 0}{" "}
-                                completed,{" "}
-                                {telemetryMetrics?.failedMethods || 0} failed
-                              </p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card>
-                        <CardContent className="p-4">
-                          <div className="flex items-center space-x-2">
-                            <Clock className="h-5 w-5 text-green-600" />
-                            <div>
-                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                                Events
-                              </p>
-                              <p className="text-2xl font-bold">
-                                {telemetryMetrics?.totalEvents || 0}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Total events captured
-                              </p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card>
-                        <CardContent className="p-4">
-                          <div className="flex items-center space-x-2">
-                            <Timer className="h-5 w-5 text-orange-600" />
-                            <div>
-                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                                Execution Time
-                              </p>
-                              <p className="text-2xl font-bold">
-                                {telemetryMetrics?.executionTime
-                                  ? `${Math.round(
-                                      telemetryMetrics.executionTime / 1000
-                                    )}s`
-                                  : "0s"}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Total duration
-                              </p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    {/* Flow Summary */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-lg">Flow Summary</CardTitle>
-                        <CardDescription>
-                          Overview of flow execution and status
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Flow Name</div>
-                            <div className="text-sm font-mono">
-                              {selectedTrace.flow_name}
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Status</div>
-                            <Badge
-                              className={getStatusColor(selectedTrace.status)}
-                              variant="outline"
-                            >
-                              {getStatusIcon(selectedTrace.status)}
-                              {selectedTrace.status}
-                            </Badge>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Duration</div>
-                            <div className="text-sm">
-                              {calculateDuration(
-                                selectedTrace.start_time,
-                                selectedTrace.end_time
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {selectedTrace.output && (
-                          <div className="mt-4">
-                            <div className="text-sm font-medium mb-2">
-                              Output
-                            </div>
-                            <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[400px] whitespace-pre-wrap break-words">
-                              {typeof selectedTrace.output === "string"
-                                ? selectedTrace.output
-                                : JSON.stringify(selectedTrace.output, null, 2)}
-                            </pre>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    {/* Execution Timeline */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-lg">
-                          Execution Timeline
-                        </CardTitle>
-                        <CardDescription>
-                          Visual timeline of flow execution with methods and
-                          events
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <TraceTimeline
-                          spans={timelineSpans}
-                          onSpanClick={handleSpanClick}
-                        />
-                      </CardContent>
-                    </Card>
-
-                    {/* Span Details */}
-                    {selectedSpan && (
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-lg">
-                            Span Details
-                          </CardTitle>
-                          <CardDescription>
-                            Detailed information for the selected span:{" "}
-                            {selectedSpan.name}
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <TraceSpanDetail span={selectedSpan} />
-                        </CardContent>
-                      </Card>
-                    )}
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="methods">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">Methods</CardTitle>
-                      <CardDescription>
-                        Flow execution methods and their details
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <Accordion type="single" collapsible className="w-full">
-                          {Object.entries(selectedTrace.methods || {})
-                            .map(([methodKey, method]) => ({
-                              ...method,
-                              id: methodKey,
-                              name: method.name || methodKey,
-                            }))
-                            .map((method) => (
-                              <AccordionItem key={method.id} value={method.id}>
-                                <AccordionTrigger className="hover:bg-muted px-4">
-                                  <div className="flex items-center justify-between w-full">
+        {/* Loading State */}
+        {loading ? (
+          <Card className="mb-6">
+            <CardContent className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-indigo-500 mr-2" />
+              <p>Loading flow traces...</p>
+            </CardContent>
+          </Card>
+        ) : groupedTraces.length === 0 ? (
+          <Card className="mb-6">
+            <CardContent className="py-12">
+              <div className="text-center">
+                <List className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                <h3 className="text-lg font-medium mb-2">
+                  No Flow Traces Found
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  There are no execution traces available for flows yet.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-6">
+            {/* Flow Traces List */}
+            <Card>
+              <CardHeader className="flex flex-row justify-between items-start">
+                <div>
+                  <CardTitle>Flow Execution Traces</CardTitle>
+                  <CardDescription>
+                    Click a trace to view detailed execution information
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {groupedTraces.map(({ flowId, flow, traces }) => (
+                    <div key={flowId} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-semibold text-lg">{flow.name}</h4>
+                        <Badge variant="outline" className="text-xs">
+                          {traces.length} trace{traces.length !== 1 ? "s" : ""}
+                        </Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {traces.map((trace) => (
+                          <div
+                            key={trace.id}
+                            className="border rounded-lg overflow-hidden hover:bg-muted/10 transition-all cursor-pointer w-full"
+                            onClick={() => handleTraceSelect(trace)}
+                          >
+                            <div className="p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                {/* Left section - Status and details */}
+                                <div className="flex items-center space-x-4">
+                                  {getStatusIcon(trace.status)}
+                                  <div>
                                     <div className="flex items-center">
-                                      <Badge
-                                        className={getStatusColor(
-                                          method.status
-                                        )}
-                                        variant="outline"
-                                      >
-                                        {method.status}
-                                      </Badge>
-                                      <span className="ml-2 font-medium">
-                                        {method.name}
+                                      <span className="font-medium mr-2">
+                                        Trace {trace.id.slice(0, 8)}
                                       </span>
+                                      <Badge
+                                        variant={
+                                          trace.status === "completed"
+                                            ? "outline"
+                                            : trace.status === "running"
+                                            ? "default"
+                                            : "destructive"
+                                        }
+                                        className={
+                                          trace.status === "completed"
+                                            ? "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300"
+                                            : ""
+                                        }
+                                      >
+                                        {trace.status}
+                                      </Badge>
                                     </div>
-                                    <div className="text-sm text-muted-foreground">
+                                    <div className="text-sm text-muted-foreground mt-1">
+                                      {formatTime(trace.start_time)} •{" "}
                                       {calculateDuration(
-                                        method.start_time,
-                                        method.end_time
+                                        trace.start_time,
+                                        trace.end_time
                                       )}
                                     </div>
                                   </div>
-                                </AccordionTrigger>
-                                <AccordionContent className="px-4 py-2 space-y-4">
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div className="text-sm text-muted-foreground">
-                                      Method ID
-                                    </div>
-                                    <div className="text-sm font-mono">
-                                      {method.id}
-                                    </div>
-
-                                    <div className="text-sm text-muted-foreground">
-                                      Start Time
-                                    </div>
-                                    <div>{formatTime(method.start_time)}</div>
-
-                                    {method.end_time && (
-                                      <>
-                                        <div className="text-sm text-muted-foreground">
-                                          End Time
-                                        </div>
-                                        <div>{formatTime(method.end_time)}</div>
-                                      </>
-                                    )}
-                                  </div>
-
-                                  {method.outputs &&
-                                    Object.keys(method.outputs).length > 0 && (
-                                      <div className="mt-4">
-                                        <div className="text-sm font-medium mb-2">
-                                          Outputs
-                                        </div>
-                                        <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px]">
-                                          {JSON.stringify(
-                                            method.outputs,
-                                            null,
-                                            2
-                                          )}
-                                        </pre>
-                                      </div>
-                                    )}
-                                </AccordionContent>
-                              </AccordionItem>
-                            ))}
-                        </Accordion>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="events">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">Events</CardTitle>
-                      <CardDescription>
-                        Chronological timeline of flow execution events
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ScrollArea className="h-[600px]">
-                        <div className="space-y-2">
-                          {selectedTrace.events
-                            ?.sort(
-                              (a, b) =>
-                                new Date(a.timestamp).getTime() -
-                                new Date(b.timestamp).getTime()
-                            )
-                            ?.map((event, idx) => {
-                              const eventType = event.type.toLowerCase();
-                              const isCompleted = event.status === "completed";
-                              const isFailed = event.status === "failed";
-                              const isStarted = event.status === "started";
-
-                              let bgColor = "bg-gray-50 dark:bg-gray-900/20";
-                              let borderColor =
-                                "border-gray-200 dark:border-gray-700";
-                              let iconColor = "text-gray-500";
-                              let StatusIcon = Info;
-
-                              if (isCompleted) {
-                                bgColor = "bg-green-50 dark:bg-green-900/20";
-                                borderColor =
-                                  "border-green-200 dark:border-green-700";
-                                iconColor = "text-green-600";
-                                StatusIcon = CheckCircle;
-                              } else if (isFailed) {
-                                bgColor = "bg-red-50 dark:bg-red-900/20";
-                                borderColor =
-                                  "border-red-200 dark:border-red-700";
-                                iconColor = "text-red-600";
-                                StatusIcon = XCircle;
-                              } else if (isStarted) {
-                                bgColor = "bg-blue-50 dark:bg-blue-900/20";
-                                borderColor =
-                                  "border-blue-200 dark:border-blue-700";
-                                iconColor = "text-blue-600";
-                                StatusIcon = Clock;
-                              }
-
-                              if (eventType.includes("method")) {
-                                StatusIcon = Play;
-                                if (!isFailed && !isCompleted && !isStarted) {
-                                  iconColor = "text-purple-600";
-                                }
-                              }
-
-                              return (
-                                <div
-                                  key={idx}
-                                  className={`border rounded-md p-3 ${bgColor} ${borderColor}`}
-                                >
-                                  <div className="flex justify-between items-start">
-                                    <div className="flex items-center gap-2">
-                                      <StatusIcon
-                                        className={`h-4 w-4 ${iconColor}`}
-                                      />
-                                      <div>
-                                        <Badge
-                                          variant={
-                                            isCompleted
-                                              ? "default"
-                                              : isFailed
-                                              ? "destructive"
-                                              : "secondary"
-                                          }
-                                          className="text-xs"
-                                        >
-                                          {event.type}
-                                        </Badge>
-                                        <div className="text-sm font-medium mt-1">
-                                          Method: {event.method_name}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">
-                                          Status: {event.status}
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {formatTime(event.timestamp)}
-                                    </div>
-                                  </div>
-
-                                  {(event.outputs ||
-                                    event.params ||
-                                    event.input_state ||
-                                    event.error) && (
-                                    <details className="mt-3">
-                                      <summary className="text-sm font-medium cursor-pointer hover:text-primary">
-                                        View Event Data
-                                      </summary>
-                                      <div className="mt-2 text-xs font-mono bg-background/50 p-2 rounded border">
-                                        {JSON.stringify(
-                                          {
-                                            ...(event.outputs && {
-                                              outputs: event.outputs,
-                                            }),
-                                            ...(event.params && {
-                                              params: event.params,
-                                            }),
-                                            ...(event.input_state && {
-                                              input_state: event.input_state,
-                                            }),
-                                            ...(event.error && {
-                                              error: event.error,
-                                            }),
-                                          },
-                                          null,
-                                          2
-                                        )}
-                                      </div>
-                                    </details>
-                                  )}
                                 </div>
-                              );
-                            })}
-                        </div>
-                      </ScrollArea>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-        ) : loading ? (
-          <div className="flex justify-center items-center p-8">
-            <Loader2 className="h-8 w-8 animate-spin" />
-          </div>
-        ) : (
-          <div className="text-center p-8 text-gray-500">
-            Select a flow and trace to view details
+
+                                {/* Right section - Methods and events count */}
+                                <div className="flex items-center space-x-6">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-sm text-muted-foreground whitespace-nowrap">
+                                      Methods:
+                                    </span>
+                                    <span className="font-bold">
+                                      {Object.keys(trace.methods || {}).length}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-sm text-muted-foreground whitespace-nowrap">
+                                      Events:
+                                    </span>
+                                    <span className="font-bold">
+                                      {trace.events?.length || 0}
+                                    </span>
+                                  </div>
+
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="ml-2"
+                                  >
+                                    <ChevronRight className="h-5 w-5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
+
+        {/* Trace Details Drawer */}
+        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <SheetContent className="w-[75vw] max-w-[75vw] sm:w-[75vw] md:w-[75vw] lg:w-[75vw] overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>
+                {selectedTraceDetails?.flow_name || "Flow Trace Details"}
+              </SheetTitle>
+              <SheetDescription>
+                Detailed execution information for trace{" "}
+                {selectedTraceDetails?.id?.slice(0, 8)}
+              </SheetDescription>
+            </SheetHeader>
+
+            {selectedTraceDetails && (
+              <div className="mt-6">
+                <Tabs
+                  defaultValue="overview"
+                  value={activeTab}
+                  onValueChange={setActiveTab}
+                  className="w-full"
+                >
+                  <TabsList className="grid grid-cols-3 mb-4">
+                    <TabsTrigger
+                      value="overview"
+                      className="flex items-center gap-1"
+                    >
+                      <Info className="h-4 w-4" />
+                      <span>Overview</span>
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="methods"
+                      className="flex items-center gap-1"
+                    >
+                      <Play className="h-4 w-4" />
+                      <span>Methods</span>
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="events"
+                      className="flex items-center gap-1"
+                    >
+                      <Clock className="h-4 w-4" />
+                      <span>Events</span>
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="overview">
+                    <div className="space-y-6">
+                      {/* Telemetry Metrics */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="flex items-center space-x-2">
+                              <Play className="h-5 w-5 text-blue-600" />
+                              <div>
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                  Methods
+                                </p>
+                                <p className="text-2xl font-bold">
+                                  {selectedTraceMetrics?.totalMethods || 0}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {selectedTraceMetrics?.completedMethods || 0}{" "}
+                                  completed,{" "}
+                                  {selectedTraceMetrics?.failedMethods || 0}{" "}
+                                  failed
+                                </p>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="flex items-center space-x-2">
+                              <Clock className="h-5 w-5 text-green-600" />
+                              <div>
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                  Events
+                                </p>
+                                <p className="text-2xl font-bold">
+                                  {selectedTraceMetrics?.totalEvents || 0}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  Total events captured
+                                </p>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="flex items-center space-x-2">
+                              <Timer className="h-5 w-5 text-orange-600" />
+                              <div>
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                  Execution Time
+                                </p>
+                                <p className="text-2xl font-bold">
+                                  {selectedTraceMetrics?.executionTime
+                                    ? `${Math.round(
+                                        selectedTraceMetrics.executionTime /
+                                          1000
+                                      )}s`
+                                    : "0s"}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  Total duration
+                                </p>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                      {/* Flow Summary */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-lg">
+                            Flow Summary
+                          </CardTitle>
+                          <CardDescription>
+                            Overview of flow execution and status
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                              <div className="text-sm font-medium">
+                                Flow Name
+                              </div>
+                              <div className="text-sm font-mono">
+                                {selectedTraceDetails.flow_name}
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-sm font-medium">Status</div>
+                              <Badge
+                                className={getStatusColor(
+                                  selectedTraceDetails.status
+                                )}
+                                variant="outline"
+                              >
+                                {getStatusIcon(selectedTraceDetails.status)}
+                                {selectedTraceDetails.status}
+                              </Badge>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="text-sm font-medium">
+                                Duration
+                              </div>
+                              <div className="text-sm">
+                                {calculateDuration(
+                                  selectedTraceDetails.start_time,
+                                  selectedTraceDetails.end_time
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {selectedTraceDetails.output && (
+                            <div className="mt-4">
+                              <div className="text-sm font-medium mb-2">
+                                Output
+                              </div>
+                              <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[400px] whitespace-pre-wrap break-words">
+                                {typeof selectedTraceDetails.output === "string"
+                                  ? selectedTraceDetails.output
+                                  : JSON.stringify(
+                                      selectedTraceDetails.output,
+                                      null,
+                                      2
+                                    )}
+                              </pre>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                      {/* Timeline Section */}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-lg">
+                            Execution Timeline
+                          </CardTitle>
+                          <CardDescription>
+                            Visualization of execution spans over time
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <TraceTimeline
+                            spans={timelineSpans}
+                            onSpanClick={handleSpanClick}
+                          />
+                        </CardContent>
+                      </Card>
+                      {/* Span Details */}
+                      {selectedSpan && (
+                        <Card ref={spanDetailsRef}>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-lg">
+                              Span Details
+                            </CardTitle>
+                            <CardDescription>
+                              Detailed information for the selected span:{" "}
+                              {selectedSpan.name}
+                            </CardDescription>
+                          </CardHeader>
+                          <CardContent>
+                            <TraceSpanDetail span={selectedSpan} />
+                          </CardContent>
+                        </Card>
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="methods">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">Methods</CardTitle>
+                        <CardDescription>
+                          Flow execution methods and their details
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <Accordion
+                            type="single"
+                            collapsible
+                            className="w-full"
+                          >
+                            {Object.entries(selectedTraceDetails.methods || {})
+                              .map(([methodKey, method]) => ({
+                                ...method,
+                                id: methodKey,
+                                name: method.name || methodKey,
+                              }))
+                              .map((method) => (
+                                <AccordionItem
+                                  key={method.id}
+                                  value={method.id}
+                                >
+                                  <AccordionTrigger className="hover:bg-muted px-4">
+                                    <div className="flex items-center justify-between w-full">
+                                      <div className="flex items-center">
+                                        <Badge
+                                          className={getStatusColor(
+                                            method.status
+                                          )}
+                                          variant="outline"
+                                        >
+                                          {getStatusIcon(method.status)}
+                                          {method.status}
+                                        </Badge>
+                                        <span className="ml-3 font-medium">
+                                          {method.name}
+                                        </span>
+                                      </div>
+                                      <div className="text-sm text-muted-foreground mr-4">
+                                        {calculateDuration(
+                                          method.start_time,
+                                          method.end_time
+                                        )}
+                                      </div>
+                                    </div>
+                                  </AccordionTrigger>
+                                  <AccordionContent className="px-4 pb-4">
+                                    <div className="space-y-4">
+                                      <div className="grid grid-cols-2 gap-4 text-sm">
+                                        <div>
+                                          <span className="font-medium">
+                                            Started:
+                                          </span>
+                                          <br />
+                                          {formatTime(method.start_time)}
+                                        </div>
+                                        {method.end_time && (
+                                          <div>
+                                            <span className="font-medium">
+                                              Completed:
+                                            </span>
+                                            <br />
+                                            {formatTime(method.end_time)}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {method.outputs && (
+                                        <div>
+                                          <div className="font-medium mb-2">
+                                            Outputs:
+                                          </div>
+                                          <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[200px] whitespace-pre-wrap break-words">
+                                            {typeof method.outputs === "string"
+                                              ? method.outputs
+                                              : JSON.stringify(
+                                                  method.outputs,
+                                                  null,
+                                                  2
+                                                )}
+                                          </pre>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              ))}
+                          </Accordion>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+
+                  <TabsContent value="events">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">Events</CardTitle>
+                        <CardDescription>
+                          Chronological list of all flow execution events
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <ScrollArea className="h-[600px]">
+                          <div className="space-y-3">
+                            {selectedTraceDetails.events &&
+                              selectedTraceDetails.events
+                                .sort(
+                                  (a, b) =>
+                                    new Date(a.timestamp).getTime() -
+                                    new Date(b.timestamp).getTime()
+                                )
+                                .map((event, index) => {
+                                  const eventIcon = getStatusIcon(event.status);
+                                  const eventColor = getStatusColor(
+                                    event.status
+                                  );
+
+                                  return (
+                                    <div
+                                      key={index}
+                                      className="border rounded-lg p-4 hover:bg-muted/10 transition-colors"
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center space-x-3">
+                                          <div className={`${eventColor}`}>
+                                            {eventIcon}
+                                          </div>
+                                          <div>
+                                            <div className="flex items-center space-x-2">
+                                              <span className="font-medium">
+                                                {event.type}
+                                              </span>
+                                              <Badge variant="outline">
+                                                {event.method_name || "N/A"}
+                                              </Badge>
+                                            </div>
+                                            <div className="text-sm text-muted-foreground mt-1">
+                                              Status: {event.status}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                          {formatTime(event.timestamp)}
+                                        </div>
+                                      </div>
+
+                                      {(event.outputs ||
+                                        event.params ||
+                                        event.input_state ||
+                                        event.error) && (
+                                        <details className="mt-3">
+                                          <summary className="text-sm font-medium cursor-pointer hover:text-primary">
+                                            View Event Data
+                                          </summary>
+                                          <div className="mt-2 text-xs font-mono bg-background/50 p-2 rounded border">
+                                            {JSON.stringify(
+                                              {
+                                                ...(event.outputs && {
+                                                  outputs: event.outputs,
+                                                }),
+                                                ...(event.params && {
+                                                  params: event.params,
+                                                }),
+                                                ...(event.input_state && {
+                                                  input_state:
+                                                    event.input_state,
+                                                }),
+                                                ...(event.error && {
+                                                  error: event.error,
+                                                }),
+                                              },
+                                              null,
+                                              2
+                                            )}
+                                          </div>
+                                        </details>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                          </div>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                </Tabs>
+              </div>
+            )}
+          </SheetContent>
+        </Sheet>
       </div>
     </Layout>
   );
