@@ -227,16 +227,6 @@ async def _execute_flow_with_real_time_events(
             f"🔍 Found {len(flow_methods)} methods to track: {[m.__name__ for m in flow_methods]}"
         )
 
-        # Debug: Log all methods on the flow instance
-        all_methods = [
-            name
-            for name, method in inspect.getmembers(flow, predicate=inspect.ismethod)
-        ]
-        print(f"🔍 All methods on flow instance: {all_methods}")
-
-        # Debug: Log flow class name and type
-        print(f"🔍 Flow class: {flow.__class__.__name__}, type: {type(flow)}")
-
         # Instead of wrapping methods, we'll monitor flow state changes
         # CrewAI flows have internal execution that bypasses method wrapping
         logger.info(f"🔄 Setting up flow state monitoring for real-time events")
@@ -252,27 +242,6 @@ async def _execute_flow_with_real_time_events(
         result = await _execute_flow_with_state_monitoring(
             flow, flow_id, inputs, flow_methods
         )
-
-        # # Execute the flow using the appropriate method
-        # result = None
-        # if hasattr(flow, 'run_async'):
-        #     logger.info(f"✅ Using flow.run_async() for real-time execution")
-        #     result = await flow.run_async()
-        # elif hasattr(flow, 'kickoff_async'):
-        #     logger.info(f"✅ Using flow.kickoff_async() for real-time execution")
-        #     result = await flow.kickoff_async(inputs=inputs)
-        # elif hasattr(flow, 'run'):
-        #     logger.info(f"⚠️ Using flow.run() in thread pool")
-        #     loop = asyncio.get_event_loop()
-        #     result = await loop.run_in_executor(None, lambda: flow.run())
-        # elif hasattr(flow, 'kickoff'):
-        #     logger.info(f"⚠️ Using flow.kickoff() in thread pool")
-        #     loop = asyncio.get_event_loop()
-        #     result = await loop.run_in_executor(None, lambda: flow.kickoff(inputs=inputs))
-        # else:
-        #     raise AttributeError(
-        #         f"'{flow.__class__.__name__}' object has no run, run_async, kickoff_async, or kickoff method"
-        #     )
 
         # Restore original methods
         for method_name, original_method in original_methods.items():
@@ -463,10 +432,10 @@ def _get_flow_execution_methods(flow):
     import inspect
 
     methods = []
-    print(f"🔍 Analyzing flow methods for: {flow.__class__.__name__}")
+    logger.debug(f"🔍 Analyzing flow methods for: {flow.__class__.__name__}")
 
     for name, method in inspect.getmembers(flow, predicate=inspect.ismethod):
-        print(f"🔍 Checking method: {name}")
+        logger.debug(f"🔍 Checking method: {name}")
 
         # Skip private methods and built-in methods
         if name.startswith("_") or name in [
@@ -475,18 +444,18 @@ def _get_flow_execution_methods(flow):
             "run_async",
             "kickoff_async",
         ]:
-            print(f"⏭️ Skipping method {name} (private or built-in)")
+            logger.debug(f"⏭️ Skipping method {name} (private or built-in)")
             continue
 
         # Check if method has flow decorators or is likely a flow step
         is_flow_method = _is_flow_step_method(method)
-        print(f"🔍 Method {name} is flow step: {is_flow_method}")
+        logger.debug(f"🔍 Method {name} is flow step: {is_flow_method}")
 
         if is_flow_method:
             methods.append(method)
-            print(f"✅ Added method {name} to tracking list")
+            logger.debug(f"✅ Added method {name} to tracking list")
 
-    print(f"🔍 Final method list: {[m.__name__ for m in methods]}")
+    logger.debug(f"🔍 Final method list: {[m.__name__ for m in methods]}")
     return methods
 
 
@@ -495,25 +464,27 @@ def _is_flow_step_method(method):
     Check if a method is likely a flow step that should be tracked.
     """
     method_name = method.__name__
-    print(f"🔍 Analyzing method {method_name} for flow step detection")
+    logger.debug(f"🔍 Analyzing method {method_name} for flow step detection")
 
     # Check for common flow decorators
     has_wrapped = hasattr(method, "__wrapped__")
     has_annotations = hasattr(method, "__annotations__")
-    print(
+    logger.debug(
         f"🔍 Method {method_name}: __wrapped__={has_wrapped}, __annotations__={has_annotations}"
     )
 
     if has_wrapped or has_annotations:
         method_str = str(method)
-        print(f"🔍 Method {method_name} string representation: {method_str[:200]}...")
+        logger.debug(
+            f"🔍 Method {method_name} string representation: {method_str[:200]}..."
+        )
 
         flow_decorators = ["start", "listen", "router", "persist", "step"]
         for decorator in flow_decorators:
             if decorator in method_str:
-                print(f"✅ Method {method_name} has flow decorator: {decorator}")
+                logger.debug(f"✅ Method {method_name} has flow decorator: {decorator}")
                 return True
-        print(f"❌ Method {method_name} has no flow decorators")
+        logger.debug(f"❌ Method {method_name} has no flow decorators")
 
     # Check method name patterns common in flows
     flow_patterns = [
@@ -528,10 +499,10 @@ def _is_flow_step_method(method):
 
     for pattern in flow_patterns:
         if pattern in method_name.lower():
-            print(f"✅ Method {method_name} matches flow pattern: {pattern}")
+            logger.debug(f"✅ Method {method_name} matches flow pattern: {pattern}")
             return True
 
-    print(f"❌ Method {method_name} matches no flow patterns")
+    logger.debug(f"❌ Method {method_name} matches no flow patterns")
     return False
 
 

@@ -305,7 +305,9 @@ class CrewAITelemetry:
 
         logger.info(f"Completed trace with ID: {trace_id} for crew_id: {crew_id}")
 
-    def start_flow_trace(self, flow_id: str, flow_name: str, internal_flow_id: str = None) -> str:
+    def start_flow_trace(
+        self, flow_id: str, flow_name: str, internal_flow_id: str = None
+    ) -> str:
         """Start a new trace for a flow execution.
 
         Args:
@@ -334,7 +336,10 @@ class CrewAITelemetry:
         try:
             # Prefer an existing running trace for the API flow_id
             existing_by_api = self._get_trace_id_for_flow(flow_id, prefer_running=True)
-            if existing_by_api and traces_storage.get(existing_by_api, {}).get("status") != "completed":
+            if (
+                existing_by_api
+                and traces_storage.get(existing_by_api, {}).get("status") != "completed"
+            ):
                 logger.warning(
                     f"Duplicate flow trace start detected for flow_id={flow_id}. Reusing trace_id={existing_by_api}"
                 )
@@ -364,7 +369,9 @@ class CrewAITelemetry:
         try:
             entity_service.register_entity(
                 primary_id=flow_id,  # API flow ID as primary
-                internal_id=internal_flow_id if internal_flow_id != flow_id else None,  # Internal flow ID if different
+                internal_id=(
+                    internal_flow_id if internal_flow_id != flow_id else None
+                ),  # Internal flow ID if different
                 entity_type="flow",
                 name=flow_name,
             )
@@ -1041,17 +1048,8 @@ class CrewAITelemetry:
         # Ensure flow_id is a string
         flow_id = str(flow_id).strip()
 
-        print(
-            f"Adding flow method execution: flow_id={flow_id}, method={method_name}, status={status}"
-        )
-
-        logger.info(
-            f"Adding flow method execution: flow_id={flow_id}, method={method_name}, status={status}"
-        )
-
         # Find the trace for this flow
         trace_id = self._get_trace_id_for_flow(flow_id)
-        print(f"Trace ID for flow {flow_id}: {trace_id}")
         if not trace_id:
             logger.warning(f"No trace found for flow {flow_id}")
             return
@@ -1065,7 +1063,6 @@ class CrewAITelemetry:
             "status": status,
             **kwargs,
         }
-        print(f"Event: {event}")
 
         # Add to trace events
         traces_storage[trace_id]["events"].append(event)
@@ -1073,7 +1070,6 @@ class CrewAITelemetry:
         # Update methods tracking
         if "methods" not in traces_storage[trace_id]:
             traces_storage[trace_id]["methods"] = {}
-            print(f"Methods tracking initialized for trace {trace_id}")
 
         if method_name not in traces_storage[trace_id]["methods"]:
             traces_storage[trace_id]["methods"][method_name] = {
@@ -1083,11 +1079,9 @@ class CrewAITelemetry:
                 "end_time": None,
                 "events": [],
             }
-            print(f"Method tracking initialized for trace {trace_id}")
 
         method_data = traces_storage[trace_id]["methods"][method_name]
         method_data["events"].append(event)
-        print(f"Method data: {method_data}")
 
         if status == "started":
             method_data["status"] = "running"
@@ -1099,7 +1093,6 @@ class CrewAITelemetry:
                 method_data["outputs"] = kwargs["outputs"]
             if "error" in kwargs:
                 method_data["error"] = kwargs["error"]
-            print(f"Method data: {method_data}")
 
         logger.info(
             f"Added flow method execution event for flow {flow_id}, method {method_name}"
