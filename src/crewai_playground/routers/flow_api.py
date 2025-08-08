@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import inspect
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -701,24 +702,9 @@ async def execute_flow(flow_id: str, request: FlowExecuteRequest) -> Dict[str, A
 
     try:
         flow_info = flows_cache[flow_id]
-
-        # Create a trace entry immediately to ensure it exists before WebSocket connection
-        trace_id = f"trace_{len(flow_traces.get(flow_id, []))}"
-        trace = {
-            "id": trace_id,
-            "flow_id": flow_id,
-            "flow_name": flow_info.name,
-            "status": "initializing",
-            "start_time": asyncio.get_event_loop().time(),
-            "nodes": {},
-            "edges": [],
-            "events": [],
-        }
-
-        # Store trace
-        if flow_id not in flow_traces:
-            flow_traces[flow_id] = []
-        flow_traces[flow_id].append(trace)
+        # Do NOT create a placeholder trace here. Traces should start only
+        # when the actual flow run begins (on FlowStartedEvent via telemetry).
+        trace_id = None
 
         # Initialize a simple reference in active_flows for tracking
         # The event listener will handle the full flow state management
@@ -874,60 +860,21 @@ async def get_flow_traces(flow_id: str):
             logger.info(f"Found {len(traces)} traces for flow_id: {flow_id}")
             return {"status": "success", "traces": traces}
         else:
-            logger.info(f"No traces found for flow_id: {flow_id}")
-            # Create an initializing trace if none exists
-            flow_name = flows_cache.get(
-                flow_id,
-                FlowInfo(
-                    id=flow_id,
-                    name="Unknown",
-                    description="",
-                    file_path="",
-                    class_name="",
-                    flow_class=None,
-                ),
-            ).name
-            initial_trace = {
-                "id": f"trace_{uuid.uuid4()}",
-                "flow_id": flow_id,
-                "flow_name": flow_name,
-                "status": "initializing",
-                "start_time": datetime.now().timestamp(),
-                "spans": [],  # Empty spans array for initialization
-                "events": [],
-            }
-            return {"status": "success", "traces": [initial_trace]}
+            logger.info(
+                f"No traces found for flow_id: {flow_id}. Returning empty traces without creating placeholder."
+            )
+            return {"status": "success", "traces": []}
     except Exception as e:
         logger.error(f"Error fetching traces from telemetry service: {e}")
         # Fallback to original logic
         logger.info(f"Falling back to original trace logic for flow_id: {flow_id}")
 
         # Check if flow has any traces in old system
-        if flow_id not in flow_traces:
-            logger.info(f"No traces found for flow_id: {flow_id}")
-            # Create an initializing trace if none exists
-            flow_name = flows_cache.get(
-                flow_id,
-                FlowInfo(
-                    id=flow_id,
-                    name="Unknown",
-                    description="",
-                    file_path="",
-                    class_name="",
-                    flow_class=None,
-                ),
-            ).name
-            initial_trace = {
-                "id": f"trace_{uuid.uuid4()}",
-                "flow_id": flow_id,
-                "flow_name": flow_name,
-                "status": "initializing",
-                "start_time": datetime.now().timestamp(),
-                "spans": [],  # Empty spans array for initialization
-                "events": [],
-            }
-            flow_traces[flow_id] = [initial_trace]
-            return {"status": "success", "traces": [initial_trace]}
+        if flow_id not in flow_traces or not flow_traces[flow_id]:
+            logger.info(
+                f"No traces found for flow_id: {flow_id} in legacy storage. Returning empty traces."
+            )
+            return {"status": "success", "traces": []}
 
     # Get flow state to access steps information
     flow_state = flow_states.get(flow_id, {})
