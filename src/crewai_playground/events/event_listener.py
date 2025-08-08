@@ -1675,29 +1675,26 @@ class EventListener:
 
         flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
 
-        # Start telemetry trace for flow with proper ID mapping
+        # Since we now standardize flow IDs, the flow_id should already be the API UUID
+        # No need for complex ID mapping - use the flow_id directly
+        standardized_flow_id = str(flow_id)
+        
+        # Start telemetry trace for flow with standardized ID
         try:
-            from crewai_playground.services.entities import entity_service
-
-            # Get the API flow ID (primary ID) for telemetry
-            api_flow_id = entity_service.get_primary_id(str(flow_id))
-            if not api_flow_id:
-                api_flow_id = str(flow_id)  # Fallback to original ID
-
             logger.info(
-                f"📊 Starting telemetry trace | api_flow_id={api_flow_id} | internal_flow_id={flow_id} | name={flow_name}"
+                f"📊 Starting telemetry trace | flow_id={standardized_flow_id} | name={flow_name}"
             )
             trace_id = telemetry_service.start_flow_trace(
-                api_flow_id, flow_name, internal_flow_id=str(flow_id)
+                standardized_flow_id, flow_name, internal_flow_id=None
             )
             logger.info(
-                f"📊 Telemetry start_flow_trace returned trace_id={trace_id} for api_flow_id={api_flow_id}"
+                f"📊 Telemetry start_flow_trace returned trace_id={trace_id} for flow_id={standardized_flow_id}"
             )
         except Exception as e:
             logger.error(f"Error starting flow telemetry trace: {e}")
 
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
-            flow_id, "flow_started", flow_name
+            standardized_flow_id, "flow_started", flow_name
         )
 
         flow_state.update(
@@ -1719,11 +1716,14 @@ class EventListener:
 
     async def _handle_flow_finished(self, flow_id: str, event, source=None):
         """Handle flow finished event asynchronously."""
-        logger.info(f"Flow finished event handler for flow: {flow_id}")
+        logger.info(f"Flow finished: {flow_id}")
 
-        flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
+        # Since we now standardize flow IDs, use the flow_id directly
+        standardized_flow_id = str(flow_id)
+        flow_name = getattr(event, "flow_name", f"Flow {standardized_flow_id}")
+        
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
-            flow_id, "flow_finished", flow_name
+            standardized_flow_id, "flow_finished", flow_name
         )
 
         # Extract result from source.state if available
@@ -1755,17 +1755,12 @@ class EventListener:
             }
         )
 
-        # End telemetry trace for flow
+        # End telemetry trace for flow using standardized ID
         try:
-            from crewai_playground.services.entities import entity_service
-
-            # Use API flow ID for telemetry
-            api_flow_id = entity_service.get_primary_id(str(flow_id)) or str(flow_id)
-
             logger.info(
-                f"📊 Ending telemetry trace for flow: {flow_id} (api_id={api_flow_id})"
+                f"📊 Ending telemetry trace for flow: {standardized_flow_id}"
             )
-            telemetry_service.end_flow_trace(api_flow_id, output=result)
+            telemetry_service.end_flow_trace(standardized_flow_id, output=result)
         except Exception as e:
             logger.error(f"Error ending flow telemetry trace: {e}")
 
@@ -1777,24 +1772,21 @@ class EventListener:
 
     async def _handle_method_started(self, flow_id: str, event):
         """Handle method execution started event asynchronously."""
-        logger.info(f"Method started: {flow_id}, method: {event.method_name}")
+        # Since we now standardize flow IDs, use the flow_id directly
+        standardized_flow_id = str(flow_id)
+        logger.info(f"Method started: {standardized_flow_id}, method: {event.method_name}")
 
         # Add telemetry for method execution started
         try:
-            from crewai_playground.services.entities import entity_service
-
             method_name = getattr(event, "method_name", "unknown_method")
             input_state = getattr(event, "input_state", None)
             params = getattr(event, "params", None)
 
-            # Use API flow ID for telemetry
-            api_flow_id = entity_service.get_primary_id(str(flow_id)) or str(flow_id)
-
             logger.info(
-                f"📊 Adding telemetry for method started: {method_name} (api_id={api_flow_id})"
+                f"📊 Adding telemetry for method started: {method_name} (flow_id={standardized_flow_id})"
             )
             telemetry_service.add_flow_method_execution(
-                flow_id=api_flow_id,
+                flow_id=standardized_flow_id,
                 method_name=method_name,
                 status="started",
                 input_state=input_state,
@@ -1804,7 +1796,7 @@ class EventListener:
             logger.error(f"Error adding method started telemetry: {e}")
 
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
-            flow_id, "method_started"
+            standardized_flow_id, "method_started"
         )
 
         current_time = asyncio.get_event_loop().time()
@@ -1843,19 +1835,16 @@ class EventListener:
 
         # Add telemetry for method execution finished
         try:
-            from crewai_playground.services.entities import entity_service
-
+            # Since we now standardize flow IDs, use the flow_id directly
+            standardized_flow_id = str(flow_id)
             method_name = getattr(event, "method_name", "unknown_method")
             outputs = getattr(event, "result", None)
 
-            # Use API flow ID for telemetry
-            api_flow_id = entity_service.get_primary_id(str(flow_id)) or str(flow_id)
-
             logger.info(
-                f"📊 Adding telemetry for method finished: {method_name} (api_id={api_flow_id})"
+                f"📊 Adding telemetry for method finished: {method_name} (flow_id={standardized_flow_id})"
             )
             telemetry_service.add_flow_method_execution(
-                flow_id=api_flow_id,
+                flow_id=standardized_flow_id,
                 method_name=method_name,
                 status="completed",
                 outputs=outputs,
@@ -1864,7 +1853,7 @@ class EventListener:
             logger.error(f"Error adding method finished telemetry: {e}")
 
         broadcast_flow_id, flow_state = self._ensure_flow_state_exists(
-            flow_id, "method_finished"
+            standardized_flow_id, "method_finished"
         )
 
         current_time = asyncio.get_event_loop().time()

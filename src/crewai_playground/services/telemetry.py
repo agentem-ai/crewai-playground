@@ -151,35 +151,27 @@ class CrewAITelemetry:
         status is returned.  A *None* is returned when no trace exists for the
         flow.
         """
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+        
         # 1. Fast path – did we record the id when the trace was started?
         cached = self._current_trace_for_flow.get(flow_id)
         if cached and cached in traces_storage:
             if not prefer_running or traces_storage[cached]["status"] != "completed":
                 return cached
 
-        # 2. Use entity service to resolve all possible flow IDs
-        possible_flow_ids = entity_service.resolve_broadcast_ids(flow_id)
-        logger.info(f"Looking for traces with possible flow IDs: {possible_flow_ids}")
+        # 2. Since flow IDs are now standardized, do direct lookup
+        logger.info(f"Looking for traces with standardized flow_id: {flow_id}")
 
-        # Scan storage to find all traces for any of the possible flow IDs
-        candidates = []
-        for tid, tdata in traces_storage.items():
-            stored_flow_id = str(tdata.get("flow_id", ""))
-            if stored_flow_id in possible_flow_ids:
-                candidates.append((tid, tdata))
-                logger.info(f"Found matching trace with flow_id {stored_flow_id}")
-
-        # Fallback to direct string comparison if entity service doesn't have mappings
+        # Find traces that match the standardized flow ID
+        candidates = [
+            (tid, tdata)
+            for tid, tdata in traces_storage.items()
+            if str(tdata.get("flow_id")) == flow_id
+        ]
+        
         if not candidates:
-            logger.info(
-                f"No matches found with entity service, falling back to direct comparison"
-            )
-            candidates = [
-                (tid, tdata)
-                for tid, tdata in traces_storage.items()
-                if str(tdata.get("flow_id")) == str(flow_id)
-            ]
-        if not candidates:
+            logger.info(f"No traces found for flow_id: {flow_id}")
             return None
 
         # Prefer running traces
@@ -190,12 +182,14 @@ class CrewAITelemetry:
                 running.sort(key=lambda x: x[1].get("start_time", ""))
                 trace_id = running[-1][0]
                 self._current_trace_for_flow[flow_id] = trace_id
+                logger.info(f"Found running trace {trace_id} for flow_id: {flow_id}")
                 return trace_id
 
         # Fallback: choose latest by start_time
         candidates.sort(key=lambda x: x[1].get("start_time", ""))
         trace_id = candidates[-1][0]
         self._current_trace_for_flow[flow_id] = trace_id
+        logger.info(f"Found latest trace {trace_id} for flow_id: {flow_id}")
         return trace_id
 
     def start_crew_trace(self, crew_id: str, crew_name: str) -> str:
@@ -311,9 +305,9 @@ class CrewAITelemetry:
         """Start a new trace for a flow execution.
 
         Args:
-            flow_id: The API flow ID (primary ID)
+            flow_id: The standardized flow ID (API UUID)
             flow_name: The name of the flow
-            internal_flow_id: The internal CrewAI flow ID (if different from flow_id)
+            internal_flow_id: Deprecated - no longer used since flow IDs are standardized
 
         Returns:
             The ID of the trace
@@ -321,62 +315,38 @@ class CrewAITelemetry:
         # Ensure flow_id is a string
         flow_id = str(flow_id).strip()
 
-        # Use internal_flow_id if provided, otherwise use flow_id
-        if internal_flow_id:
-            internal_flow_id = str(internal_flow_id).strip()
-        else:
-            internal_flow_id = flow_id
-
         logger.info(
-            f"Starting trace for flow_id: {flow_id}, internal_flow_id: {internal_flow_id}, flow_name: {flow_name}"
+            f"Starting trace for standardized flow_id: {flow_id}, flow_name: {flow_name}"
         )
         logger.info(f"Current traces in storage: {len(traces_storage)}")
 
         # --- Duplicate guard: if a running trace already exists, reuse it ---
         try:
-            # Prefer an existing running trace for the API flow_id
-            existing_by_api = self._get_trace_id_for_flow(flow_id, prefer_running=True)
+            # Check for existing running trace for this flow_id
+            existing_trace = self._get_trace_id_for_flow(flow_id, prefer_running=True)
             if (
-                existing_by_api
-                and traces_storage.get(existing_by_api, {}).get("status") != "completed"
+                existing_trace
+                and traces_storage.get(existing_trace, {}).get("status") != "completed"
             ):
                 logger.warning(
-                    f"Duplicate flow trace start detected for flow_id={flow_id}. Reusing trace_id={existing_by_api}"
+                    f"Duplicate flow trace start detected for flow_id={flow_id}. Reusing trace_id={existing_trace}"
                 )
                 # Maintain most recent mapping
-                self._current_trace_for_flow[flow_id] = existing_by_api
-                if internal_flow_id:
-                    self._internal_flow_to_trace[internal_flow_id] = existing_by_api
-                return existing_by_api
-
-            # Also check by internal_flow_id if available (covers early mapping scenarios)
-            if internal_flow_id:
-                for tid, tdata in traces_storage.items():
-                    if (
-                        str(tdata.get("internal_flow_id", "")) == internal_flow_id
-                        and tdata.get("status") != "completed"
-                    ):
-                        logger.warning(
-                            f"Duplicate flow trace start detected for internal_flow_id={internal_flow_id}. Reusing trace_id={tid}"
-                        )
-                        self._current_trace_for_flow[flow_id] = tid
-                        self._internal_flow_to_trace[internal_flow_id] = tid
-                        return tid
+                self._current_trace_for_flow[flow_id] = existing_trace
+                return existing_trace
         except Exception as dup_err:
             logger.warning(f"Error while checking for duplicate flow trace: {dup_err}")
 
         # Register entity mapping for this flow to ensure proper ID resolution
         try:
             entity_service.register_entity(
-                primary_id=flow_id,  # API flow ID as primary
-                internal_id=(
-                    internal_flow_id if internal_flow_id != flow_id else None
-                ),  # Internal flow ID if different
+                primary_id=flow_id,  # Standardized flow ID as primary
+                internal_id=None,  # No separate internal ID since we standardized
                 entity_type="flow",
                 name=flow_name,
             )
             logger.info(
-                f"Registered entity mapping for flow: primary_id={flow_id}, internal_id={internal_flow_id}, name={flow_name}"
+                f"Registered entity mapping for standardized flow: flow_id={flow_id}, name={flow_name}"
             )
         except Exception as e:
             logger.warning(f"Failed to register entity mapping: {e}")
@@ -395,11 +365,10 @@ class CrewAITelemetry:
             span_context = span.get_span_context()
             trace_id = format(span_context.trace_id, "032x")
 
-            # Store the trace in memory
+            # Store the trace in memory with standardized structure
             traces_storage[trace_id] = {
                 "id": trace_id,
-                "flow_id": flow_id,
-                "internal_flow_id": internal_flow_id,
+                "flow_id": flow_id,  # Standardized flow ID (API UUID)
                 "flow_name": flow_name,
                 "start_time": datetime.utcnow().isoformat(),
                 "status": "running",
@@ -412,9 +381,6 @@ class CrewAITelemetry:
             self.active_spans[flow_id] = span
             # Remember this trace as the current active one for the flow
             self._current_trace_for_flow[flow_id] = trace_id
-            # And map the internal_flow_id for dedupe/lookup
-            if internal_flow_id:
-                self._internal_flow_to_trace[internal_flow_id] = trace_id
 
             logger.info(f"Started trace with ID: {trace_id} for flow_id: {flow_id}")
             logger.info(f"Total traces in storage: {len(traces_storage)}")
@@ -957,81 +923,35 @@ class CrewAITelemetry:
         """Get all traces for a specific flow.
 
         Args:
-            flow_id: The ID of the flow
+            flow_id: The standardized flow ID (API UUID)
 
         Returns:
             A list of traces for the flow
         """
-        logger.info(f"Looking for traces with flow_id: {flow_id}")
+        # Ensure flow_id is a string
+        flow_id = str(flow_id).strip()
+        
+        logger.info(f"Looking for traces with standardized flow_id: {flow_id}")
         logger.info(f"Current traces in storage: {len(traces_storage)}")
-
-        # Normalize the flow ID for comparison
-        normalized_flow_id = str(flow_id).strip().lower()
 
         # Debug: Log all flow IDs in storage
         all_flow_ids = set(trace.get("flow_id") for trace in traces_storage.values())
         logger.info(f"Available flow IDs in storage: {all_flow_ids}")
 
-        # Use entity service to resolve all possible flow IDs
-        possible_flow_ids = entity_service.resolve_broadcast_ids(flow_id)
-        logger.info(f"Looking for traces with possible flow IDs: {possible_flow_ids}")
+        # Since flow IDs are now standardized, do direct lookup
+        traces = [
+            trace
+            for trace in traces_storage.values()
+            if str(trace.get("flow_id")) == flow_id
+        ]
 
-        # Find traces that match any of the possible flow IDs
-        traces = []
-        for trace in traces_storage.values():
-            stored_flow_id = str(trace.get("flow_id", ""))
-            if stored_flow_id in possible_flow_ids:
-                traces.append(trace)
-                logger.info(f"Found matching trace with flow_id {stored_flow_id}")
+        if traces:
+            logger.info(f"Found {len(traces)} traces for flow_id: {flow_id}")
+        else:
+            logger.info(f"No traces found for flow_id: {flow_id}")
 
-        # If no matches found with entity service, fall back to original methods
-        if not traces:
-            logger.info(
-                f"No matches found with entity service, falling back to direct comparison"
-            )
-
-            # Try exact match first
-            traces = [
-                trace
-                for trace in traces_storage.values()
-                if trace.get("flow_id") == flow_id
-            ]
-
-            # If no exact matches, try case-insensitive comparison
-            if not traces:
-                logger.info(
-                    f"No exact matches found, trying case-insensitive comparison for: {flow_id}"
-                )
-                traces = [
-                    trace
-                    for trace in traces_storage.values()
-                    if trace.get("flow_id")
-                    and str(trace.get("flow_id")).strip().lower() == normalized_flow_id
-                ]
-
-            # If still no matches and flow_id looks like a simple name (e.g., "flow_0"), try to find any trace
-            # that might contain this as part of the flow name
-            if not traces and ("_" in flow_id or flow_id.isalnum()):
-                logger.info(
-                    f"No matches found, trying to match by flow name pattern: {flow_id}"
-                )
-                traces = [
-                    trace
-                    for trace in traces_storage.values()
-                    if trace.get("flow_name")
-                    and flow_id.lower() in str(trace.get("flow_name")).lower()
-                ]
-
-            # If we found traces by name pattern, log this information
-            if traces:
-                logger.info(
-                    f"Found {len(traces)} traces by matching flow name pattern: {flow_id}"
-                )
-                # Log the actual flow IDs that were matched
-                matched_ids = set(trace.get("flow_id") for trace in traces)
-                logger.info(f"Matched flow IDs: {matched_ids}")
-
-        logger.info(f"Found {len(traces)} traces for flow_id: {flow_id}")
+        # Sort traces by start time (newest first)
+        traces.sort(key=lambda t: t.get("start_time", ""), reverse=True)
         return traces
 
     def add_flow_method_execution(

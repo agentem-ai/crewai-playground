@@ -44,23 +44,31 @@ from crewai_playground.services.entities import entity_service
 
 def register_flow_entity(flow, flow_id: str):
     """Register a flow entity with the entity service."""
+    # Since we now standardize the flow.id to match flow_id, they should be the same
     internal_flow_id = getattr(flow, "id", None)
     python_object_id = str(id(flow))
     flow_name = getattr(
         flow, "name", getattr(flow.__class__, "__name__", "Unknown Flow")
     )
 
-    # Register with entity service
+    # Register with entity service - since flow.id is now standardized to flow_id,
+    # we only need to register aliases for the Python object ID
+    aliases = [python_object_id]
+    
+    # If for some reason the internal_flow_id is different, add it as an alias
+    if internal_flow_id and internal_flow_id != flow_id:
+        aliases.append(internal_flow_id)
+
     entity_service.register_entity(
         primary_id=flow_id,
-        internal_id=internal_flow_id if internal_flow_id != flow_id else None,
+        internal_id=None,  # No separate internal ID since we standardized it
         entity_type="flow",
         name=flow_name,
-        aliases=[python_object_id] if python_object_id != flow_id else None,
+        aliases=aliases,
     )
 
     logger.info(
-        f"Registered flow entity: API {flow_id} -> Internal {internal_flow_id}, Object ID {python_object_id}"
+        f"Registered standardized flow entity: {flow_id} (aliases: {aliases})"
     )
 
 
@@ -113,10 +121,8 @@ def refresh_flows():
     logger.info(f"Loaded {len(flows_cache)} flows")
 
 
-# Load flows immediately on module import to ensure cache is populated even if
-# the router-level startup event is not executed (which can happen when
-# FastAPI mounts routers without triggering individual router events).
-refresh_flows()
+# Note: Flow loading is now handled by the startup event to avoid circular imports
+# during flow discovery. The flows cache will be populated when the router starts.
 
 
 @router.get("/")
@@ -630,6 +636,12 @@ async def _execute_flow_async(flow_id: str, inputs: Dict[str, Any]):
             return {"status": "error", "message": f"Flow {flow_id} not found"}
 
         logger.info(f"Flow loaded successfully: {flow_id}")
+
+        # CRITICAL: Set the flow instance ID to the API flow_id to ensure consistency
+        # This prevents CrewAI from generating its own internal ID during execution
+        original_flow_id = getattr(flow, 'id', None)
+        flow.id = flow_id
+        logger.info(f"Standardized flow ID: {original_flow_id} -> {flow_id}")
 
         # Register flow entity early for proper ID mapping and WebSocket routing
         register_flow_entity(flow, flow_id)
