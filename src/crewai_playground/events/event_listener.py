@@ -1669,7 +1669,9 @@ class EventListener:
     # Async Implementation Methods
     async def _handle_flow_started(self, flow_id: str, event, source=None):
         """Handle flow started event asynchronously."""
-        logger.info(f"Flow started event handler for flow: {flow_id}")
+        logger.info(
+            f"Flow started event handler invoked | flow_id={flow_id} | event_type={getattr(event, '__class__', type(event)).__name__} | source_type={getattr(source, '__class__', type(source)).__name__ if source else 'None'}"
+        )
 
         flow_name = getattr(event, "flow_name", f"Flow {flow_id}")
 
@@ -1683,10 +1685,13 @@ class EventListener:
                 api_flow_id = str(flow_id)  # Fallback to original ID
 
             logger.info(
-                f"📊 Starting telemetry trace for flow: api_id={api_flow_id}, internal_id={flow_id}, name: {flow_name}"
+                f"📊 Starting telemetry trace | api_flow_id={api_flow_id} | internal_flow_id={flow_id} | name={flow_name}"
             )
-            telemetry_service.start_flow_trace(
+            trace_id = telemetry_service.start_flow_trace(
                 api_flow_id, flow_name, internal_flow_id=str(flow_id)
+            )
+            logger.info(
+                f"📊 Telemetry start_flow_trace returned trace_id={trace_id} for api_flow_id={api_flow_id}"
             )
         except Exception as e:
             logger.error(f"Error starting flow telemetry trace: {e}")
@@ -1702,6 +1707,8 @@ class EventListener:
                 "inputs": (
                     getattr(event, "inputs", {}) if hasattr(event, "inputs") else {}
                 ),
+                # Keep trace id in state for easier debugging/lookup
+                **({"trace_id": trace_id} if "trace_id" in locals() and trace_id else {}),
                 "timestamp": asyncio.get_event_loop().time(),
             }
         )

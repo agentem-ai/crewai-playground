@@ -81,6 +81,8 @@ class CrewAITelemetry:
         self._current_trace_for_crew: Dict[str, str] = {}
         # Map flow_id -> currently active trace id (latest run)
         self._current_trace_for_flow: Dict[str, str] = {}
+        # Map internal_flow_id -> current trace id (helps dedupe when internal ids are used)
+        self._internal_flow_to_trace: Dict[str, str] = {}
 
     def _get_trace_id_for_crew(
         self, crew_id: str, prefer_running: bool = True
@@ -316,15 +318,47 @@ class CrewAITelemetry:
         """
         # Ensure flow_id is a string
         flow_id = str(flow_id).strip()
-        
+
         # Use internal_flow_id if provided, otherwise use flow_id
         if internal_flow_id:
             internal_flow_id = str(internal_flow_id).strip()
         else:
             internal_flow_id = flow_id
 
-        logger.info(f"Starting trace for flow_id: {flow_id}, internal_flow_id: {internal_flow_id}, flow_name: {flow_name}")
+        logger.info(
+            f"Starting trace for flow_id: {flow_id}, internal_flow_id: {internal_flow_id}, flow_name: {flow_name}"
+        )
         logger.info(f"Current traces in storage: {len(traces_storage)}")
+
+        # --- Duplicate guard: if a running trace already exists, reuse it ---
+        try:
+            # Prefer an existing running trace for the API flow_id
+            existing_by_api = self._get_trace_id_for_flow(flow_id, prefer_running=True)
+            if existing_by_api and traces_storage.get(existing_by_api, {}).get("status") != "completed":
+                logger.warning(
+                    f"Duplicate flow trace start detected for flow_id={flow_id}. Reusing trace_id={existing_by_api}"
+                )
+                # Maintain most recent mapping
+                self._current_trace_for_flow[flow_id] = existing_by_api
+                if internal_flow_id:
+                    self._internal_flow_to_trace[internal_flow_id] = existing_by_api
+                return existing_by_api
+
+            # Also check by internal_flow_id if available (covers early mapping scenarios)
+            if internal_flow_id:
+                for tid, tdata in traces_storage.items():
+                    if (
+                        str(tdata.get("internal_flow_id", "")) == internal_flow_id
+                        and tdata.get("status") != "completed"
+                    ):
+                        logger.warning(
+                            f"Duplicate flow trace start detected for internal_flow_id={internal_flow_id}. Reusing trace_id={tid}"
+                        )
+                        self._current_trace_for_flow[flow_id] = tid
+                        self._internal_flow_to_trace[internal_flow_id] = tid
+                        return tid
+        except Exception as dup_err:
+            logger.warning(f"Error while checking for duplicate flow trace: {dup_err}")
 
         # Register entity mapping for this flow to ensure proper ID resolution
         try:
@@ -358,6 +392,7 @@ class CrewAITelemetry:
             traces_storage[trace_id] = {
                 "id": trace_id,
                 "flow_id": flow_id,
+                "internal_flow_id": internal_flow_id,
                 "flow_name": flow_name,
                 "start_time": datetime.utcnow().isoformat(),
                 "status": "running",
@@ -370,6 +405,9 @@ class CrewAITelemetry:
             self.active_spans[flow_id] = span
             # Remember this trace as the current active one for the flow
             self._current_trace_for_flow[flow_id] = trace_id
+            # And map the internal_flow_id for dedupe/lookup
+            if internal_flow_id:
+                self._internal_flow_to_trace[internal_flow_id] = trace_id
 
             logger.info(f"Started trace with ID: {trace_id} for flow_id: {flow_id}")
             logger.info(f"Total traces in storage: {len(traces_storage)}")

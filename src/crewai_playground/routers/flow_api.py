@@ -739,8 +739,6 @@ async def execute_flow(flow_id: str, request: FlowExecuteRequest) -> Dict[str, A
                 # Run the flow using async method to maintain event loop context
                 result = await _execute_flow_async(flow_id, request.inputs)
 
-                print(f"Flow execution result: {result}")
-
                 # Safely handle the result
                 if result is None:
                     result = {
