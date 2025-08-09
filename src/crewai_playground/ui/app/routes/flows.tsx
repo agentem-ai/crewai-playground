@@ -103,9 +103,9 @@ export default function Flow() {
     fetchFlows();
   }, [setFlows]);
 
-  // Fetch flow details and required inputs when a flow is selected
+  // Initialize flow and fetch details when a flow is selected
   useEffect(() => {
-    const fetchFlowDetails = async () => {
+    const initializeFlowDetails = async () => {
       if (!selectedFlowId) {
         setFlowDetails(null);
         setInputFields([]);
@@ -125,8 +125,13 @@ export default function Flow() {
           return;
         }
 
-        // Fetch flow initialization details
-        const response = await fetch(`/api/flows/${selectedFlowId}/initialize`);
+        // Use unified initialization endpoint (matching crew pattern)
+        const response = await fetch(`/api/initialize?flow_id=${selectedFlowId}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -134,7 +139,7 @@ export default function Flow() {
               `Flow with ID ${selectedFlowId} not found. Please select a valid flow.`
             );
           } else {
-            setError(`Error fetching flow details: ${response.statusText}`);
+            setError(`Error initializing flow: ${response.statusText}`);
           }
           setLoading(false);
           return;
@@ -143,6 +148,8 @@ export default function Flow() {
         const data = await response.json();
 
         if (data.status === "success") {
+          console.log("Flow initialization successful:", data);
+          
           setFlowDetails({
             id: flow.id,
             name: flow.name,
@@ -161,17 +168,17 @@ export default function Flow() {
             )
           );
         } else {
-          setError(data.detail || "Failed to fetch flow details");
+          setError(data.detail || "Failed to initialize flow");
         }
       } catch (error) {
-        console.error("Error fetching flow details:", error);
-        setError("Failed to fetch flow details. Please try again later.");
+        console.error("Error initializing flow:", error);
+        setError("Failed to initialize flow. Please try again later.");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchFlowDetails();
+    initializeFlowDetails();
   }, [selectedFlowId, flows]);
 
   const handleInputChange = (name: string, value: string) => {

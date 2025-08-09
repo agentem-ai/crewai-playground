@@ -1305,24 +1305,25 @@ def get_flow_structure(flow_info: FlowInfo) -> Dict[str, Any]:
     Returns:
         Dictionary with comprehensive flow structure for visualization
     """
-    # Build methods dictionary (similar to flow._methods)
+    # Build methods dictionary with serializable data instead of MockMethod objects
     methods_dict = {}
     for method in flow_info.methods:
-        # Create a mock method object with the required attributes
-        class MockMethod:
-            def __init__(self, method_info: FlowMethod):
-                self.name = method_info.name
-                self.__name__ = method_info.name
-                if method_info.is_start:
-                    self.__is_start_method__ = True
-                if method_info.is_router:
-                    self.__is_router__ = True
-                if method_info.is_listener:
-                    self.__is_listener__ = True
-                if method_info.has_persist:
-                    self.__persist__ = True
+        # Create a serializable dictionary with method attributes
+        method_data = {
+            "name": method.name,
+            "__name__": method.name,
+        }
+        
+        if method.is_start:
+            method_data["__is_start_method__"] = True
+        if method.is_router:
+            method_data["__is_router__"] = True
+        if method.is_listener:
+            method_data["__is_listener__"] = True
+        if method.has_persist:
+            method_data["__persist__"] = True
                     
-        methods_dict[method.name] = MockMethod(method)
+        methods_dict[method.name] = method_data
     
     return {
         "_methods": methods_dict,

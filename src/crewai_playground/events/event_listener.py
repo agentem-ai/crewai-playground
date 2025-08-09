@@ -53,11 +53,15 @@ try:
     from crewai_playground.events.events import (
         CrewInitializationRequestedEvent,
         CrewInitializationCompletedEvent,
+        FlowInitializationRequestedEvent,
+        FlowInitializationCompletedEvent,
     )
 except ImportError:
     # Custom events may not be available in all environments
     CrewInitializationRequestedEvent = None
     CrewInitializationCompletedEvent = None
+    FlowInitializationRequestedEvent = None
+    FlowInitializationCompletedEvent = None
 
 # broadcast_flow_update functionality is now integrated into broadcast_update method
 from crewai_playground.services.telemetry import telemetry_service
@@ -91,7 +95,8 @@ class EventListener:
         self.task_states: Dict[str, Dict[str, Any]] = {}
 
         # WebSocket client management
-        self.clients: Dict[str, Dict[str, Any]] = {}
+        self.clients: Dict[str, Dict[str, Any]] = {}  # Crew clients
+        self.flow_clients: Dict[str, Dict[str, Any]] = {}  # Flow clients
 
         # Event loop reference
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -896,6 +901,35 @@ class EventListener:
                     self._handle_crew_initialization_completed_crew(execution_id, event)
                 )
 
+        # Flow initialization event handlers
+        if FlowInitializationRequestedEvent:
+            @crewai_event_bus.on(FlowInitializationRequestedEvent)
+            def handle_flow_initialization_requested(source, event):
+                """Handle flow initialization requested event."""
+                flow_id = getattr(event, 'flow_id', None)
+                internal_flow_id = getattr(event, 'internal_flow_id', None)
+                if flow_id:
+                    logger.info(
+                        f"Flow initialization requested for flow: {flow_id} (internal: {internal_flow_id})"
+                    )
+                    self._schedule(
+                        self._handle_flow_initialization_requested(flow_id, internal_flow_id, event)
+                    )
+
+        if FlowInitializationCompletedEvent:
+            @crewai_event_bus.on(FlowInitializationCompletedEvent)
+            def handle_flow_initialization_completed(source, event):
+                """Handle flow initialization completed event."""
+                flow_id = getattr(event, 'flow_id', None)
+                internal_flow_id = getattr(event, 'internal_flow_id', None)
+                if flow_id:
+                    logger.info(
+                        f"Flow initialization completed for flow: {flow_id} (internal: {internal_flow_id})"
+                    )
+                    self._schedule(
+                        self._handle_flow_initialization_completed(flow_id, internal_flow_id, event)
+                    )
+
         self._registered_buses.add(id(crewai_event_bus))
         logger.info("Unified event listeners registered successfully")
 
@@ -1171,9 +1205,10 @@ class EventListener:
             except ImportError as e:
                 pass
 
-        flow_clients_updated = 0
+        flow_execution_clients_updated = 0
+        flow_visualization_clients_updated = 0
 
-        # Broadcast to flow WebSocket queues (existing flow system)
+        # Broadcast to flow WebSocket queues (existing flow execution system)
         if flow_id in flow_websocket_queues:
             connection_count = len(flow_websocket_queues[flow_id])
 
@@ -1181,58 +1216,65 @@ class EventListener:
             for connection_id, queue in flow_websocket_queues[flow_id].items():
                 try:
                     await queue.put(message)
-                    flow_clients_updated += 1
+                    flow_execution_clients_updated += 1
                 except Exception as e:
                     pass
         else:
             pass
 
-        # Also broadcast to crew clients if they might be interested in flow updates
-        crew_clients_updated = 0
-        if self.clients:
+        # NEW: Broadcast to flow visualization WebSocket clients (flow initialization system)
+        if self.flow_clients:
             logger.info(
-                f"📡 Broadcasting flow update to {len(self.clients)} crew WebSocket clients"
+                f"📡 Broadcasting flow update to {len(self.flow_clients)} flow visualization WebSocket clients"
             )
 
-            # Prepare flow update message for crew clients
-            flow_message = {
-                "type": "flow_state",
-                "flow_id": flow_id,
-                "flow_state": flow_state,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
+            # Get API flow ID for matching clients
+            api_flow_id = None
+            if flow_id in self.flow_states:
+                # flow_id is internal flow ID
+                api_flow_id = self.flow_states[flow_id].get("api_flow_id")
+            else:
+                # flow_id might be API flow ID, find internal flow ID
+                for internal_id, state in self.flow_states.items():
+                    if state.get("api_flow_id") == flow_id:
+                        api_flow_id = flow_id
+                        break
 
-            disconnected_clients = []
-            clients_snapshot = list(self.clients.items())
+            disconnected_flow_clients = []
+            flow_clients_snapshot = list(self.flow_clients.items())
 
-            for client_id, client in clients_snapshot:
-                if client_id not in self.clients:
+            for client_id, client in flow_clients_snapshot:
+                if client_id not in self.flow_clients:
                     continue
 
-                try:
-                    websocket = client["websocket"]
-                    json_data = json.dumps(flow_message, cls=CustomJSONEncoder)
-                    await websocket.send_text(json_data)
-                    logger.info(
-                        f"✅ Successfully sent flow update to crew client {client_id}"
-                    )
-                    crew_clients_updated += 1
-                except Exception as e:
-                    logger.error(
-                        f"❌ Error broadcasting flow update to crew client {client_id}: {str(e)}"
-                    )
-                    disconnected_clients.append(client_id)
+                client_flow_id = client.get("flow_id")
+                
+                # Match client by internal flow ID or API flow ID
+                if client_flow_id == flow_id or client_flow_id == api_flow_id:
+                    try:
+                        websocket = client["websocket"]
+                        json_data = json.dumps(flow_state, cls=CustomJSONEncoder)
+                        await websocket.send_text(json_data)
+                        logger.info(
+                            f"✅ Successfully sent flow update to flow visualization client {client_id} (flow: {client_flow_id})"
+                        )
+                        flow_visualization_clients_updated += 1
+                    except Exception as e:
+                        logger.error(
+                            f"❌ Error broadcasting flow update to flow visualization client {client_id}: {str(e)}"
+                        )
+                        disconnected_flow_clients.append(client_id)
 
-            # Clean up disconnected clients
-            for client_id in disconnected_clients:
-                self._safe_disconnect(client_id)
+            # Clean up disconnected flow clients
+            for client_id in disconnected_flow_clients:
+                self._safe_disconnect_flow(client_id)
         else:
-            logger.info(f"📡 No crew WebSocket clients connected for flow updates")
+            logger.info(f"📡 No flow visualization WebSocket clients connected")
 
         # Summary logging
-        total_clients_updated = flow_clients_updated + crew_clients_updated
+        total_clients_updated = flow_execution_clients_updated + flow_visualization_clients_updated
         logger.info(
-            f"📊 Flow broadcast summary: {total_clients_updated} total clients updated (flow: {flow_clients_updated}, crew: {crew_clients_updated})"
+            f"📊 Flow broadcast summary: {total_clients_updated} total clients updated (execution: {flow_execution_clients_updated}, visualization: {flow_visualization_clients_updated})"
         )
 
         if total_clients_updated == 0:
@@ -2654,6 +2696,276 @@ class EventListener:
             )
 
             await self.broadcast_update()
+
+    # Flow initialization handlers
+    async def _handle_flow_initialization_requested(
+        self, flow_id: str, internal_flow_id: str, event
+    ):
+        """Handle flow initialization requested event."""
+        logger.info(
+            f"Flow initialization requested for API flow: {flow_id} (internal: {internal_flow_id})"
+        )
+
+        # Use internal flow ID as the primary key for flow states
+        if internal_flow_id not in self.flow_states:
+            self.flow_states[internal_flow_id] = {}
+
+        self.flow_states[internal_flow_id].update({
+            "id": internal_flow_id,  # Use internal flow ID as primary ID
+            "api_flow_id": flow_id,  # Keep API flow ID for reference
+            "name": getattr(event, "flow_name", f"Flow {internal_flow_id}"),
+            "status": "initializing",
+            "timestamp": datetime.utcnow().isoformat(),
+            "steps": [],
+            "outputs": None,
+        })
+
+        # Broadcast flow state update using internal flow ID
+        await self._broadcast_flow_update(internal_flow_id, {
+            "type": "flow_initialization_requested",
+            "flow_id": internal_flow_id,  # Use internal flow ID as primary
+            "api_flow_id": flow_id,       # Keep API flow ID for reference
+            "state": self.flow_states[internal_flow_id],
+        })
+
+    async def _handle_flow_initialization_completed(
+        self, flow_id: str, internal_flow_id: str, event
+    ):
+        """Handle flow initialization completed event."""
+        logger.info(
+            f"Flow initialization completed for API flow: {flow_id} (internal: {internal_flow_id})"
+        )
+
+        # Update flow state using internal flow ID as primary key
+        if internal_flow_id in self.flow_states:
+            self.flow_states[internal_flow_id].update({
+                "status": "initialized",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+
+            # Extract methods information if available
+            methods = getattr(event, "methods", [])
+            if methods:
+                # Initialize steps from methods
+                steps = []
+                for method in methods:
+                    steps.append({
+                        "name": method.get("name", "Unknown"),
+                        "description": method.get("description", ""),
+                        "status": "pending",
+                        "is_start": method.get("is_start", False),
+                        "is_listener": method.get("is_listener", False),
+                        "is_router": method.get("is_router", False),
+                        "level": method.get("level", 0),
+                    })
+                
+                self.flow_states[internal_flow_id]["steps"] = steps
+                self.flow_states[internal_flow_id]["method_count"] = len(methods)
+
+            # Extract structure information if available
+            structure = getattr(event, "structure", {})
+            if structure:
+                self.flow_states[internal_flow_id]["structure"] = structure
+
+        # Broadcast flow state update using internal flow ID
+        await self._broadcast_flow_update(internal_flow_id, {
+            "type": "flow_initialization_completed",
+            "flow_id": internal_flow_id,  # Use internal flow ID as primary
+            "api_flow_id": flow_id,       # Keep API flow ID for reference
+            "state": self.flow_states.get(internal_flow_id, {}),
+        })
+
+    # Utility methods for accessing flow information
+    def get_flow_internal_id(self, api_flow_id: str) -> Optional[str]:
+        """
+        Get the internal flow ID for a given API flow ID.
+        
+        Args:
+            api_flow_id: The API flow ID
+            
+        Returns:
+            The internal flow ID if found, None otherwise
+        """
+        # Search through flow states to find matching API flow ID
+        for internal_id, flow_state in self.flow_states.items():
+            if flow_state.get("api_flow_id") == api_flow_id:
+                return internal_id
+        
+        # Fallback to entity service
+        from crewai_playground.services.entities import entity_service
+        mapping = entity_service.get_mapping(api_flow_id)
+        if mapping:
+            return mapping.internal_id
+        
+        return None
+
+    def get_flow_state_by_internal_id(self, internal_flow_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get flow state by internal flow ID.
+        
+        Args:
+            internal_flow_id: The internal flow ID
+            
+        Returns:
+            Flow state dictionary if found, None otherwise
+        """
+        # Since we now use internal flow ID as the primary key, direct lookup
+        return self.flow_states.get(internal_flow_id)
+
+    def get_all_flow_ids(self, flow_id: str) -> Dict[str, str]:
+        """
+        Get all related IDs for a flow (API ID, internal ID, etc.).
+        
+        Args:
+            flow_id: Any known flow ID (could be internal or API flow ID)
+            
+        Returns:
+            Dictionary with all known IDs for the flow
+        """
+        result = {"api_id": None, "internal_id": None}
+        
+        # Check if this is an internal flow ID (primary key)
+        if flow_id in self.flow_states:
+            result["internal_id"] = flow_id
+            result["api_id"] = self.flow_states[flow_id].get("api_flow_id")
+        else:
+            # Check if this is an API flow ID
+            for internal_id, state in self.flow_states.items():
+                if state.get("api_flow_id") == flow_id:
+                    result["internal_id"] = internal_id
+                    result["api_id"] = flow_id
+                    break
+        
+        # Fallback to entity service
+        if not result["api_id"] or not result["internal_id"]:
+            from crewai_playground.services.entities import entity_service
+            mapping = entity_service.get_mapping(flow_id)
+            if mapping:
+                result["api_id"] = mapping.primary_id
+                result["internal_id"] = mapping.internal_id
+        
+        return result
+
+    # Flow WebSocket Client Management Methods
+    async def connect_flow(self, websocket: WebSocket, client_id: str, flow_id: str = None):
+        """Connect a new flow WebSocket client."""
+        try:
+            await websocket.accept()
+            self.flow_clients[client_id] = {
+                "websocket": websocket,
+                "flow_id": flow_id,
+                "connected_at": datetime.utcnow().isoformat(),
+                "last_ping": datetime.utcnow().isoformat(),
+                "connection_status": "active",
+            }
+            logger.info(
+                f"Flow WebSocket client {client_id} connected for flow {flow_id}. Total flow connections: {len(self.flow_clients)}"
+            )
+            
+            # Send current flow state to the newly connected client
+            if flow_id:
+                try:
+                    await self.send_flow_state_to_client(client_id)
+                except Exception as e:
+                    logger.error(
+                        f"Error sending initial flow state to client {client_id}: {e}"
+                    )
+        except Exception as e:
+            logger.error(
+                f"Error accepting flow WebSocket connection for client {client_id}: {e}"
+            )
+            if client_id in self.flow_clients:
+                del self.flow_clients[client_id]
+            raise
+
+    def disconnect_flow(self, client_id: str):
+        """Disconnect a flow client by ID."""
+        if client_id not in self.flow_clients:
+            logger.warning(f"Attempted to disconnect non-existent flow client {client_id}")
+            return
+        self._safe_disconnect_flow(client_id)
+
+    def _safe_disconnect_flow(self, client_id: str):
+        """Safely disconnect a flow client."""
+        try:
+            if client_id in self.flow_clients:
+                client = self.flow_clients[client_id]
+                websocket = client.get("websocket")
+                if websocket:
+                    try:
+                        # Try to close the WebSocket connection gracefully
+                        asyncio.create_task(websocket.close())
+                    except Exception as close_error:
+                        logger.debug(f"Error closing flow WebSocket for client {client_id}: {close_error}")
+                
+                del self.flow_clients[client_id]
+                logger.info(f"Flow client {client_id} disconnected. Remaining flow connections: {len(self.flow_clients)}")
+        except Exception as e:
+            logger.error(f"Error during flow client disconnect for {client_id}: {e}")
+
+    async def register_client_for_flow(self, client_id: str, flow_id: str):
+        """Register a flow client for a specific flow."""
+        if client_id in self.flow_clients:
+            self.flow_clients[client_id]["flow_id"] = flow_id
+            logger.info(f"Flow client {client_id} registered for flow {flow_id}")
+            # Send current flow state after registration
+            await self.send_flow_state_to_client(client_id)
+
+    async def send_flow_state_to_client(self, client_id: str):
+        """Send current flow state to a specific flow client."""
+        if client_id not in self.flow_clients:
+            logger.warning(f"Flow client {client_id} not found in connected clients")
+            return
+
+        client = self.flow_clients[client_id]
+        websocket = client["websocket"]
+        client_flow_id = client.get("flow_id")
+
+        if not client_flow_id:
+            logger.debug(f"No flow ID registered for flow client {client_id}")
+            return
+
+        # Find flow state by API flow ID or internal flow ID
+        flow_state = None
+        internal_flow_id = None
+        
+        # First check if client_flow_id is an internal flow ID
+        if client_flow_id in self.flow_states:
+            internal_flow_id = client_flow_id
+            flow_state = self.flow_states[client_flow_id]
+        else:
+            # Check if client_flow_id is an API flow ID
+            for internal_id, state in self.flow_states.items():
+                if state.get("api_flow_id") == client_flow_id:
+                    internal_flow_id = internal_id
+                    flow_state = state
+                    break
+
+        if flow_state and internal_flow_id:
+            try:
+                # Send flow state in the same format as crew state
+                state_data = {
+                    "type": "flow_state",
+                    "flow_id": internal_flow_id,
+                    "api_flow_id": client_flow_id,
+                    "state": flow_state,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                
+                json_data = json.dumps(state_data, cls=CustomJSONEncoder)
+                await websocket.send_text(json_data)
+                logger.info(
+                    f"Sent flow state to client {client_id} (flow: {client_flow_id}, internal: {internal_flow_id})"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error sending flow state to client {client_id}: {str(e)}"
+                )
+                self.disconnect_flow(client_id)
+        else:
+            logger.debug(
+                f"No flow state found for client {client_id} (flow_id: {client_flow_id})"
+            )
 
 
 # Create a singleton instance of the unified event listener
