@@ -911,19 +911,36 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
       const nodeMap = new Map(currentNodes.map((node) => [node.id, node]));
 
       // Update the flow node status if it exists
-      const flowNodeId = `flow-${state.id}`;
+      // Try multiple possible flow node IDs to handle ID mismatches
+      const possibleFlowNodeIds = [
+        `flow-${state.id}`,
+        `flow-${internalFlowId}`,
+        (state as any).api_flow_id ? `flow-${(state as any).api_flow_id}` : null,
+      ].filter(Boolean);
+      
       const updatedNodes = [...currentNodes];
+      let flowNodeFound = false;
 
-      // Update flow node if it exists
-      const flowNodeIndex = currentNodes.findIndex((n) => n.id === flowNodeId);
-      if (flowNodeIndex >= 0) {
-        updatedNodes[flowNodeIndex] = {
-          ...currentNodes[flowNodeIndex],
-          data: {
-            ...currentNodes[flowNodeIndex].data,
-            status: state.status,
-          },
-        };
+      // Try to find the flow node using any of the possible IDs
+      for (const flowNodeId of possibleFlowNodeIds) {
+        const flowNodeIndex = currentNodes.findIndex((n) => n.id === flowNodeId);
+        if (flowNodeIndex >= 0) {
+          console.log(`Updating flow node with ID: ${flowNodeId}, status: ${state.status}`);
+          updatedNodes[flowNodeIndex] = {
+            ...currentNodes[flowNodeIndex],
+            data: {
+              ...currentNodes[flowNodeIndex].data,
+              status: state.status,
+            },
+          };
+          flowNodeFound = true;
+          break;
+        }
+      }
+
+      if (!flowNodeFound) {
+        console.warn(`Flow node not found. Tried IDs:`, possibleFlowNodeIds);
+        console.warn(`Available nodes:`, currentNodes.map(n => n.id));
       }
 
       // Update step nodes with their current status
