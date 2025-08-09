@@ -282,6 +282,7 @@ class ChatMessage(BaseModel):
 
 class InitializeRequest(BaseModel):
     crew_id: Optional[str] = None
+    flow_id: Optional[str] = None
     chat_id: Optional[str] = None
 
 
@@ -447,19 +448,35 @@ async def chat(message: ChatMessage) -> JSONResponse:
 
 @app.post("/api/initialize")
 @app.get("/api/initialize")
-async def initialize(request: InitializeRequest = None) -> JSONResponse:
-    """Initialize the chat handler and return initial message."""
+async def initialize(
+    request: InitializeRequest = None,
+    crew_id: str = None,
+    flow_id: str = None,
+    chat_id: str = None
+) -> JSONResponse:
+    """Initialize crew or flow and return initial message."""
     global chat_handler
 
     # Handle both GET and POST requests
-    crew_id = None
-    chat_id = None
-
+    # For POST requests, extract from request body
     if request:
-        crew_id = request.crew_id
-        chat_id = request.chat_id
+        crew_id = request.crew_id or crew_id
+        flow_id = request.flow_id or flow_id
+        chat_id = request.chat_id or chat_id
+    # For GET requests, parameters come from query parameters (already extracted above)
 
-    logging.debug(f"Initializing chat with crew_id: {crew_id}, chat_id: {chat_id}")
+    # Validate that only one of crew_id or flow_id is provided
+    if crew_id and flow_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot initialize both crew and flow simultaneously. Provide either crew_id or flow_id, not both."
+        )
+
+    if not crew_id and not flow_id:
+        # Default to crew initialization for backward compatibility
+        logging.debug("No crew_id or flow_id provided, defaulting to crew initialization")
+
+    logging.debug(f"Initializing with crew_id: {crew_id}, flow_id: {flow_id}, chat_id: {chat_id}")
 
     try:
         # If crew_id is provided and valid, initialize that specific crew
@@ -486,6 +503,109 @@ async def initialize(request: InitializeRequest = None) -> JSONResponse:
                 new_handler = ChatHandler(crew_instance, crew_name)
                 chat_handlers[crew_id] = new_handler
                 chat_handler = new_handler
+
+        # If flow_id is provided, initialize that specific flow
+        elif flow_id:
+            # Import flow-related modules
+            from crewai_playground.routers.flow_api import flows_cache
+            from crewai_playground.loaders.flow_loader import load_flow
+            from crewai_playground.services.entities import register_flow
+            from crewai_playground.events.events import (
+                FlowInitializationRequestedEvent,
+                FlowInitializationCompletedEvent,
+            )
+            from crewai.utilities.events.crewai_event_bus import crewai_event_bus
+            from crewai_playground.events.event_listener import event_listener
+            import uuid
+            from datetime import datetime
+
+            # Check if flow exists
+            if flow_id not in flows_cache:
+                raise HTTPException(status_code=404, detail=f"Flow with ID {flow_id} not found")
+
+            flow_info = flows_cache[flow_id]
+            logging.info(f"Initializing flow comprehensively: {flow_id}")
+
+            # Load the flow instance to get internal flow ID
+            flow_instance = load_flow(flow_info, inputs={})
+            
+            # Extract internal flow ID from the flow instance
+            internal_flow_id = None
+            if hasattr(flow_instance, 'id') and flow_instance.id:
+                internal_flow_id = str(flow_instance.id)
+            else:
+                # Generate a UUID if flow doesn't have an ID
+                internal_flow_id = str(uuid.uuid4())
+                flow_instance.id = internal_flow_id
+
+            logging.info(f"Flow {flow_id} internal ID: {internal_flow_id}")
+
+            # Register flow entity with entity service for ID mapping
+            register_flow(flow_id, internal_flow_id, flow_info.name)
+            
+            # Ensure listener is setup for flow events
+            event_listener.setup_listeners(crewai_event_bus)
+            
+            # Extract comprehensive flow structure
+            from crewai_playground.loaders.flow_loader import get_flow_structure
+            flow_structure = get_flow_structure(flow_info)
+            
+            # Extract methods information for visualization
+            methods = []
+            for method_info in flow_info.methods:
+                methods.append({
+                    "name": method_info.name,
+                    "description": method_info.description,
+                    "is_start": method_info.is_start,
+                    "is_listener": method_info.is_listener,
+                    "listens_to": method_info.listens_to,
+                    "is_router": method_info.is_router,
+                    "router_paths": method_info.router_paths,
+                    "level": method_info.level,
+                    "status": "pending"
+                })
+
+            # Emit flow initialization events (these will trigger WebSocket updates)
+            crewai_event_bus.emit(
+                flow_instance,
+                FlowInitializationRequestedEvent(
+                    flow_id=flow_id,
+                    internal_flow_id=internal_flow_id,
+                    flow_name=flow_info.name,
+                    timestamp=datetime.utcnow(),
+                ),
+            )
+
+            # Emit initialization completed event with structure
+            crewai_event_bus.emit(
+                flow_instance,
+                FlowInitializationCompletedEvent(
+                    flow_id=flow_id,
+                    internal_flow_id=internal_flow_id,
+                    flow_name=flow_info.name,
+                    methods=methods,
+                    structure=flow_structure,
+                    timestamp=datetime.utcnow(),
+                ),
+            )
+
+            # Return flow initialization response (structure will be sent via WebSocket)
+            return JSONResponse(
+                content={
+                    "status": "success",
+                    "message": f"Flow {flow_info.name} initialized successfully",
+                    "flow_id": internal_flow_id,  # Use internal flow ID as primary identifier
+                    "api_flow_id": flow_id,       # Keep API flow ID for reference
+                    "flow_name": flow_info.name,
+                    "description": flow_info.description,
+                    "required_inputs": [
+                        {"name": input.name, "description": input.description}
+                        for input in flow_info.required_inputs
+                    ],
+                    "method_count": len(methods),
+                    "state_type": flow_info.state_type,
+                }
+            )
 
         # If no chat handler is set at this point, initialize with the default
         if not chat_handler:
@@ -1034,122 +1154,98 @@ async def websocket_endpoint(websocket: WebSocket, crew_id: str = None):
             pass
 
 
-@app.websocket("/ws/flow/{flow_id}")
-async def flow_websocket_endpoint(websocket: WebSocket, flow_id: str):
-    """WebSocket endpoint for real-time flow execution visualization."""
-    logging.info(f"New WebSocket connection request for flow {flow_id}")
-    await websocket.accept()
-    logging.info(f"WebSocket connection attempt for flow: {flow_id}")
+@app.websocket("/ws/flow-visualization/{flow_id}")
+async def flow_visualization_websocket_endpoint(websocket: WebSocket, flow_id: str = None):
+    """WebSocket endpoint for flow visualization with optional flow_id path parameter."""
+    client_id = str(uuid.uuid4())
+    logging.info(
+        f"New WebSocket connection request for flow visualization, flow_id: {flow_id}, client_id: {client_id}"
+    )
 
     try:
-        # Check if this is an API flow ID that needs to be mapped to internal flow ID
-        from crewai_playground.services.entities import entity_service
+        # Connect the WebSocket client to the event listener
+        await crew_visualization_listener.connect_flow(websocket, client_id, flow_id)
+        logging.info(f"Flow WebSocket client {client_id} connected successfully")
 
-        internal_flow_id = entity_service.get_internal_id(flow_id) or flow_id
+        # Send confirmation message
+        await websocket.send_json(
+            {
+                "type": "connection_established",
+                "client_id": client_id,
+                "flow_id": flow_id,
+                "timestamp": datetime.datetime.now().isoformat(),
+            }
+        )
 
-        # Check if flow execution exists using the API flow ID (since active flows are stored with API flow ID)
-        execution = get_active_execution(flow_id)
+        # Keep the connection open and handle messages
+        while True:
+            # Check for shutdown signal
+            if shutdown_event.is_set():
+                logging.info(f"Shutdown signal received, closing WebSocket for flow {flow_id}")
+                break
+            
+            # Wait for messages from the client
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                logging.debug(f"Received message from flow client {client_id}: {data}")
 
-        # If no active execution is found, wait a short time for it to be created
-        # This helps with race conditions where the WebSocket connects before the flow is fully initialized
-        if not execution:
-            logging.info(
-                f"No active execution found for API flow {flow_id}, waiting for initialization..."
-            )
-            # Wait up to 5 seconds for the flow execution to be created
-            for i in range(10):
-                await asyncio.sleep(0.5)
-                execution = get_active_execution(flow_id)
-                if execution:
-                    logging.info(
-                        f"Flow execution for API flow {flow_id} found after waiting"
-                    )
-                    break
-
-        # If still no execution found after waiting, send error
-        if not execution:
-            logging.error(
-                f"No active execution found for API flow {flow_id} after waiting"
-            )
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": f"No active execution found for flow {flow_id}. Please try running the flow again.",
-                }
-            )
-            logging.info(f"Closing WebSocket for flow {flow_id} - no execution found")
-            await websocket.close()
-            return
-
-        # Create a queue for this connection
-        queue: asyncio.Queue = asyncio.Queue()
-
-        # Register this connection with the API flow ID (for UI compatibility)
-        connection_id = str(uuid.uuid4())
-
-        register_websocket_queue(flow_id, connection_id, queue)
-
-        # Also register with internal flow ID if different (for event compatibility)
-        if internal_flow_id != flow_id:
-            register_websocket_queue(
-                internal_flow_id, f"{connection_id}_internal", queue
-            )
-
-        try:
-            # Send initial state using the API flow ID (where states are now stored)
-            initial_state = flow_websocket_listener.get_flow_state(flow_id)
-            if initial_state:
-                await websocket.send_json(
-                    {"type": "flow_state", "payload": initial_state}
-                )
-                logging.info(f"Initial state sent for flow {flow_id}")
-
-            # Listen for updates from the flow execution
-            while True:
                 try:
-                    # Check for shutdown signal
-                    if shutdown_event.is_set():
-                        logging.info(f"Shutdown signal received, closing WebSocket for flow {flow_id}")
-                        break
-                    
-                    # Wait for messages with a timeout
-                    message = await asyncio.wait_for(queue.get(), timeout=1.0)
-                    await websocket.send_json(message)
-                except asyncio.TimeoutError:
-                    # Check if the flow execution is still active using API flow ID
-                    if not is_execution_active(flow_id):
-                        # Send final state before closing using API flow ID
-                        final_state = flow_websocket_listener.get_flow_state(flow_id)
-                        if final_state:
-                            await websocket.send_json(
-                                {"type": "flow_state", "payload": final_state}
-                            )
-                        logging.info(
-                            f"Flow execution completed for {flow_id}, closing WebSocket"
-                        )
-                        break
-                    # Otherwise continue waiting
-                    continue
-                except asyncio.CancelledError:
-                    logging.info(f"Flow WebSocket task cancelled for {flow_id}, closing gracefully")
-                    break
-        except WebSocketDisconnect:
-            logging.info(f"WebSocket client disconnected: {connection_id}")
-        except Exception as e:
-            logging.error(f"Error in flow WebSocket: {str(e)}")
-        finally:
-            # Unregister this connection
-            unregister_websocket_queue(flow_id, connection_id)
+                    message = json.loads(data)
+                    msg_type = message.get("type", "")
 
-            # Also unregister internal flow ID if it was registered
-            if internal_flow_id != flow_id:
-                unregister_websocket_queue(
-                    internal_flow_id, f"{connection_id}_internal"
-                )
+                    # Handle flow registration message
+                    if msg_type == "register_flow":
+                        new_flow_id = message.get("flow_id")
+                        if new_flow_id:
+                            await crew_visualization_listener.register_client_for_flow(
+                                client_id, new_flow_id
+                            )
+                            await websocket.send_json(
+                                {"type": "flow_registered", "flow_id": new_flow_id}
+                            )
+
+                    # Handle state request message
+                    elif msg_type == "request_state":
+                        await crew_visualization_listener.send_flow_state_to_client(
+                            client_id
+                        )
+
+                    # Handle ping message for heartbeat
+                    elif msg_type == "ping":
+                        await websocket.send_json({"type": "pong"})
+
+                except json.JSONDecodeError:
+                    logging.error(
+                        f"Invalid JSON message from flow client {client_id}: {data}"
+                    )
+            
+            except asyncio.TimeoutError:
+                # Timeout is expected, continue the loop
+                continue
+            except asyncio.CancelledError:
+                logging.info(f"Flow WebSocket task cancelled for client {client_id}, closing gracefully")
+                break
+            except WebSocketDisconnect:
+                # Handle disconnection
+                logging.info(f"Flow WebSocket client {client_id} disconnected")
+                crew_visualization_listener.disconnect_flow(client_id)
+                break
+    except WebSocketDisconnect:
+        logging.info(f"Flow WebSocket client {client_id} disconnected during handshake")
+        crew_visualization_listener.disconnect_flow(client_id)
     except Exception as e:
-        logging.error(f"Flow WebSocket error: {str(e)}", exc_info=True)
-    finally:
-        await websocket.close()
+        logging.error(
+            f"Flow WebSocket error for client {client_id}: {str(e)}", exc_info=True
+        )
+        # Try to disconnect if there was an error
+        try:
+            crew_visualization_listener.disconnect_flow(client_id)
+        except Exception as disconnect_error:
+            logging.error(
+                f"Error during flow WebSocket cleanup for client {client_id}: {str(disconnect_error)}"
+            )
+            pass
+
 
 
 @app.get("/{full_path:path}")

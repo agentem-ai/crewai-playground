@@ -595,6 +595,7 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [visualizationSocket, setVisualizationSocket] = useState<WebSocket | null>(null);
   const [state, setState] = useState<FlowState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -632,6 +633,55 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
   // State for initialization view
   const [flowStructure, setFlowStructure] = useState<any>(null);
   const [loadingStructure, setLoadingStructure] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [internalFlowId, setInternalFlowId] = useState<string | null>(null);
+
+  // Initialize flow function using unified /api/initialize endpoint
+  const initializeFlow = useCallback(async (flowId: string) => {
+    if (!flowId) return;
+
+    setIsInitializing(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/initialize?flow_id=${flowId}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to initialize flow");
+      }
+
+      console.log("Flow initialization successful:", data);
+      
+      // Store the internal flow ID for use throughout the application
+      // flow_id is now the internal flow ID (primary identifier)
+      if (data.flow_id) {
+        setInternalFlowId(data.flow_id);
+      }
+
+      // Note: Flow structure will now come via WebSocket events, not HTTP response
+      // The initialization response only contains metadata
+      console.log("Flow initialized, waiting for structure via WebSocket...");
+
+      return data;
+    } catch (err) {
+      console.error("Error initializing flow:", err);
+      setError(
+        `Failed to initialize flow: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      throw err;
+    } finally {
+      setIsInitializing(false);
+    }
+  }, []);
 
   // Reset execution state when resetKey changes, but preserve flow structure
   useEffect(() => {
@@ -647,11 +697,11 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
     }
   }, [resetKey]);
 
-  // Fetch flow structure when flowId changes or component mounts
+  // Initialize flow when flowId changes or component mounts
   useEffect(() => {
     if (!flowId) return;
 
-    const fetchFlowStructure = async () => {
+    const initializeFlowAndStructure = async () => {
       setLoadingStructure(true);
       setError(null);
 
@@ -674,181 +724,180 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
           }
         }
 
-        // Fetch the flow structure
-        const response = await fetch(`/api/flows/${flowId}/structure`);
+        // Initialize flow comprehensively (similar to crew initialization)
+        await initializeFlow(flowId);
 
-        if (!response.ok) {
-          if (response.status === 404) {
-            setError(
-              `Flow with ID ${flowId} not found. Please select a valid flow.`
-            );
-          } else {
-            setError(`Error fetching flow structure: ${response.statusText}`);
-          }
-          setLoadingStructure(false);
-          return;
-        }
-
-        const data = await response.json();
-
-        if (data.status === "success" && data.flow) {
-          setFlowStructure(data.flow);
-          createInitialVisualization(data.flow);
-        } else {
-          setError(data.detail || "Failed to fetch flow structure");
-        }
       } catch (err) {
-        console.error("Error fetching flow structure:", err);
-        setError("Failed to fetch flow structure. Please try again.");
+        console.error("Error initializing flow:", err);
+        setError("Failed to initialize flow. Please try again.");
       } finally {
         setLoadingStructure(false);
       }
     };
 
-    fetchFlowStructure();
-  }, [flowId]);
+    initializeFlowAndStructure();
+  }, [flowId, initializeFlow]);
 
-  // Connect to WebSocket when flowId changes or isRunning becomes true
+  // Connect to flow visualization WebSocket for initialization structure delivery
   useEffect(() => {
-    if (!flowId || !isRunning) return;
+    if (!flowId) return;
 
-    setLoading(true);
-    setError(null);
+    console.log(`Setting up flow visualization WebSocket for flow: ${flowId}`);
 
-    // Track connection attempts
-    let connectionAttempts = 0;
-    const maxConnectionAttempts = 3;
-    let connectionTimer: ReturnType<typeof setTimeout> | null = null;
-
-    // Function to create and connect WebSocket
-    const connectWebSocket = () => {
-      // Determine WebSocket URL based on current location
+    const connectFlowVisualizationWebSocket = () => {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws/flow/${flowId}`;
-
-      const newSocket = new WebSocket(wsUrl);
-
-      // Set a timeout for connection establishment
-      const connectionTimeout = setTimeout(() => {
-        if (newSocket.readyState !== WebSocket.OPEN) {
-          console.warn("WebSocket connection timeout");
-          newSocket.close();
-
-          // Try to reconnect if we haven't exceeded max attempts
-          if (connectionAttempts < maxConnectionAttempts) {
-            connectionAttempts++;
-            connectionTimer = setTimeout(connectWebSocket, 1000); // Wait 1 second before retry
-          } else {
-            setError(
-              "Failed to connect to flow execution after multiple attempts. Please try again."
-            );
-            setLoading(false);
-          }
-        }
-      }, 5000); // 5 second timeout
-
-      newSocket.onopen = () => {
-        clearTimeout(connectionTimeout);
-        setLoading(false);
+      const wsUrl = `${protocol}//${window.location.host}/ws/flow-visualization/${flowId}`;
+      
+      console.log(`Connecting to flow visualization WebSocket at ${wsUrl}`);
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log("Flow visualization WebSocket connection established");
+        
+        // Register for flow updates
+        ws.send(JSON.stringify({
+          type: "register_flow",
+          flow_id: flowId,
+        }));
+        
+        // Request current state
+        ws.send(JSON.stringify({ type: "request_state" }));
       };
 
-      newSocket.onmessage = (event) => {
+      ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log("Flow visualization WebSocket message:", data);
 
-          if (data.type === "flow_state") {
-            // Deep copy to avoid state mutation issues
+          // Handle connection established message
+          if (data.type === "connection_established") {
+            console.log(`Flow visualization connection established with client ID: ${data.client_id}`);
+          }
+          // Handle flow registration confirmation
+          else if (data.type === "flow_registered") {
+            console.log(`Registered for flow visualization: ${data.flow_id}`);
+          }
+          // Handle flow initialization events
+          else if (data.type === "flow_initialization_requested") {
+            console.log("Flow initialization requested via visualization WebSocket:", data);
+            if (data.flow_id) {
+              setInternalFlowId(data.flow_id);
+            }
+          }
+          else if (data.type === "flow_initialization_completed") {
+            console.log("Flow initialization completed via visualization WebSocket:", data);
+            
+            // Extract flow structure and methods from WebSocket event
+            const flowState = data.state;
+            if (flowState && flowState.structure) {
+              console.log("Received flow structure via visualization WebSocket:", flowState.structure);
+              
+              // Transform the data for visualization
+              // Extract methods from structure.methods_info, not from steps (steps are execution state)
+              const methodsInfo = flowState.structure?.methods_info || {};
+              const methods = Object.values(methodsInfo);
+              
+              const transformedFlowData = {
+                id: data.flow_id,  // Internal flow ID
+                name: flowState.name || "Flow",
+                description: flowState.description || "",
+                methods: methods,  // Use methods from structure, not execution steps
+                structure: flowState.structure,
+                api_flow_id: data.api_flow_id
+              };
+              
+              console.log("Creating visualization from WebSocket data:", transformedFlowData);
+              setFlowStructure(flowState.structure);
+              createInitialVisualization(transformedFlowData);
+            }
+          }
+          // Handle flow state updates
+          else if (data.type === "flow_state") {
+            console.log("Flow state update via visualization WebSocket:", data);
+            const flowState = data.state;
+            if (flowState) {
+              // Update internal flow ID if provided
+              if (data.flow_id) {
+                setInternalFlowId(data.flow_id);
+              }
+              
+              // Update flow structure if available
+              if (flowState.structure) {
+                console.log("Updating flow structure from state:", flowState.structure);
+                
+                // Transform the data for visualization
+                // Extract methods from structure.methods_info, not from steps (steps are execution state)
+                const methodsInfo = flowState.structure?.methods_info || {};
+                const methods = Object.values(methodsInfo);
+                
+                const transformedFlowData = {
+                  id: data.flow_id,  // Internal flow ID
+                  name: flowState.name || "Flow",
+                  description: flowState.description || "",
+                  methods: methods,  // Use methods from structure, not execution steps
+                  structure: flowState.structure,
+                  api_flow_id: data.api_flow_id
+                };
+                
+                setFlowStructure(flowState.structure);
+                createInitialVisualization(transformedFlowData);
+              }
+            }
+          }
+          // Fallback: Handle direct flow state objects (execution updates)
+          else if (
+            typeof data === "object" &&
+            data !== null &&
+            ("id" in data || "name" in data || "status" in data || "steps" in data)
+          ) {
+            console.log("Direct flow state update received:", data);
+            
+            // This is likely a direct flow execution state update
             setState((prevState) => {
-              // If no previous state, just use the new payload
-              if (!prevState) return data.payload;
-
-              const newState = JSON.parse(JSON.stringify(prevState));
-
-              // Update flow status
-              newState.status = data.payload.status;
-
-              // Update outputs if available
-              if (data.payload.outputs) {
-                newState.outputs = data.payload.outputs;
+              // If we don't have a previous state, initialize with the received data
+              if (!prevState) {
+                return data;
               }
-
-              // Update steps using a Map for efficient merging
-              if (data.payload.steps && Array.isArray(data.payload.steps)) {
-                const stepMap = new Map(
-                  newState.steps.map((s: any) => [s.id, s])
-                );
-
-                data.payload.steps.forEach((newStep: any) => {
-                  stepMap.set(newStep.id, {
-                    ...(stepMap.get(newStep.id) || {}),
-                    ...newStep,
-                  });
-                });
-
-                newState.steps = Array.from(stepMap.values());
-              }
-
-              // Update errors if any
-              if (data.payload.errors && Array.isArray(data.payload.errors)) {
-                newState.errors = [
-                  ...(newState.errors || []),
-                  ...data.payload.errors,
-                ];
-              }
-
-              return newState;
+              
+              // Merge the new state with the existing state
+              return {
+                ...prevState,
+                ...data,
+                // Ensure steps are properly updated
+                steps: data.steps || prevState.steps || [],
+              };
             });
-          } else if (data.type === "error") {
-            setError(data.message || "An error occurred during flow execution");
           }
         } catch (err) {
-          console.error("Error parsing WebSocket message:", err);
+          console.error("Error parsing flow visualization WebSocket message:", err);
         }
       };
 
-      newSocket.onerror = (event) => {
-        console.error("WebSocket error:", event);
-        clearTimeout(connectionTimeout);
-
-        // Only set error if we've exhausted our retries
-        if (connectionAttempts >= maxConnectionAttempts) {
-          setError("Failed to connect to flow execution. Please try again.");
-          setLoading(false);
-        }
+      ws.onerror = (event) => {
+        console.error("Flow visualization WebSocket error:", event);
       };
 
-      newSocket.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-
-        // If this wasn't a normal closure and we haven't exceeded retries, try to reconnect
-        if (
-          event.code !== 1000 &&
-          event.code !== 1001 &&
-          connectionAttempts < maxConnectionAttempts
-        ) {
-          connectionAttempts++;
-          connectionTimer = setTimeout(connectWebSocket, 1000);
-        }
+      ws.onclose = (event) => {
+        console.log(`Flow visualization WebSocket connection closed: ${event.code} ${event.reason}`);
+        setVisualizationSocket(null);
       };
 
-      setSocket(newSocket);
+      setVisualizationSocket(ws);
     };
 
-    // Start the connection process
-    connectWebSocket();
+    connectFlowVisualizationWebSocket();
 
-    // Clean up on unmount
+    // Cleanup function
     return () => {
-      if (socket) {
-        socket.close();
-      }
-
-      // Clear any pending connection timers
-      if (connectionTimer) {
-        clearTimeout(connectionTimer);
+      if (visualizationSocket) {
+        console.log("Closing flow visualization WebSocket connection");
+        visualizationSocket.close();
+        setVisualizationSocket(null);
       }
     };
-  }, [flowId, isRunning, resetKey]);
+  }, [flowId, layoutDirection]);
+
+  // Note: Flow execution WebSocket connection removed - now using unified flow visualization WebSocket
 
   // Update nodes and edges based on flow state during execution
   useEffect(() => {
@@ -1065,34 +1114,34 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
     const horizontalCenter = 0; // Center horizontally
     const startY = 150; // Distance from root node
 
-    // First, map of methodId -> method for quick lookup
+    // First, map of methodName -> method for quick lookup
     const methodMap: Record<string, any> = {};
     flowData.methods.forEach((m: any) => {
-      methodMap[m.id] = m;
+      methodMap[m.name] = m;
     });
 
-    // Create a topological sort to properly arrange nodes
+    // Create a topological sort to properly arrange nodes based on listens_to relationships
     const visited = new Set<string>();
     const visiting = new Set<string>();
     const sortedMethods: any[] = [];
 
-    const topologicalSort = (methodId: string) => {
-      if (visiting.has(methodId)) return; // Circular dependency
-      if (visited.has(methodId)) return;
+    const topologicalSort = (methodName: string) => {
+      if (visiting.has(methodName)) return; // Circular dependency
+      if (visited.has(methodName)) return;
 
-      visiting.add(methodId);
-      const method = methodMap[methodId];
+      visiting.add(methodName);
+      const method = methodMap[methodName];
 
-      if (method && method.dependencies) {
-        method.dependencies.forEach((depId: string) => {
-          if (methodMap[depId]) {
-            topologicalSort(depId);
+      if (method && method.listens_to && method.listens_to.length > 0) {
+        method.listens_to.forEach((depName: string) => {
+          if (methodMap[depName]) {
+            topologicalSort(depName);
           }
         });
       }
 
-      visiting.delete(methodId);
-      visited.add(methodId);
+      visiting.delete(methodName);
+      visited.add(methodName);
       if (method) {
         sortedMethods.push(method);
       }
@@ -1100,32 +1149,35 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
 
     // Sort all methods
     flowData.methods.forEach((method: any) => {
-      topologicalSort(method.id);
+      topologicalSort(method.name);
     });
 
     // Add method nodes with proper vertical spacing
     sortedMethods.forEach((method: any, index: number) => {
       const nodeY = startY + index * verticalGap;
       newNodes.push({
-        id: `method-${method.id}`,
+        id: `method-${method.name}`,
         type: "methodNode",
         position: { x: horizontalCenter, y: nodeY },
         data: {
           label: method.name,
           description: method.description,
-          is_step: method.is_step,
-          dependencies: method.dependencies || [],
+          is_start: method.is_start,
+          is_listener: method.is_listener,
+          is_router: method.is_router,
+          listens_to: method.listens_to || [],
+          status: method.status || "pending",
           isFirst: index === 0,
           isLast: index === sortedMethods.length - 1,
         },
       });
 
-      // Edge from flow root to methods without dependencies
-      if (!method.dependencies || method.dependencies.length === 0) {
+      // Edge from flow root to start methods (methods without listens_to)
+      if (!method.listens_to || method.listens_to.length === 0 || method.is_start) {
         newEdges.push({
-          id: `edge-flow-${method.id}`,
+          id: `edge-flow-${method.name}`,
           source: `flow-${flowData.id}`,
-          target: `method-${method.id}`,
+          target: `method-${method.name}`,
           type: "smoothstep",
           markerEnd: { type: MarkerType.ArrowClosed, color: "#2196f3" },
           style: { stroke: "#2196f3", strokeWidth: 2 },
@@ -1133,15 +1185,15 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
       }
     });
 
-    // Add dependency edges between method nodes
+    // Add listener edges between method nodes
     sortedMethods.forEach((method: any) => {
-      if (method.dependencies && method.dependencies.length > 0) {
-        method.dependencies.forEach((depId: string) => {
-          if (methodMap[depId]) {
+      if (method.listens_to && method.listens_to.length > 0) {
+        method.listens_to.forEach((depName: string) => {
+          if (methodMap[depName]) {
             newEdges.push({
-              id: `edge-${depId}-to-${method.id}`,
-              source: `method-${depId}`,
-              target: `method-${method.id}`,
+              id: `edge-${depName}-to-${method.name}`,
+              source: `method-${depName}`,
+              target: `method-${method.name}`,
               type: "smoothstep",
               markerEnd: { type: MarkerType.ArrowClosed, color: "#ff9800" },
               style: {
@@ -1167,14 +1219,23 @@ const FlowCanvas = ({ flowId, isRunning, resetKey }: FlowCanvasProps) => {
   return (
     <Card className="p-6 mb-6 overflow-hidden">
       <div className="p-4 flex justify-between items-center flex-shrink-0">
-        <h3 className="font-semibold text-lg">Flow Visualization</h3>
+        <div>
+          <h3 className="font-semibold text-lg">Flow Visualization</h3>
+          {internalFlowId && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Internal Flow ID: <code className="bg-muted px-1 py-0.5 rounded text-xs">{internalFlowId}</code>
+            </p>
+          )}
+        </div>
       </div>
-      {(loading || loadingStructure) && (
+      {(loading || loadingStructure || isInitializing) && (
         <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/80">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
             <p className="text-sm text-muted-foreground">
-              {loading
+              {isInitializing
+                ? "Initializing flow..."
+                : loading
                 ? "Connecting to flow execution..."
                 : "Loading flow structure..."}
             </p>

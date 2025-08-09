@@ -19,3 +19,23 @@ class CrewInitializationCompletedEvent(BaseEvent):
     agents: List[Dict[str, Any]]
     tasks: List[Dict[str, Any]]
     timestamp: datetime = None
+
+
+class FlowInitializationRequestedEvent(BaseEvent):
+    """Event emitted when a flow initialization is requested."""
+    type: str = "flow_initialization_requested"
+    flow_id: str
+    internal_flow_id: str
+    flow_name: str
+    timestamp: datetime = None
+
+
+class FlowInitializationCompletedEvent(BaseEvent):
+    """Event emitted when flow initialization is completed."""
+    type: str = "flow_initialization_completed"
+    flow_id: str
+    internal_flow_id: str
+    flow_name: str
+    methods: List[Dict[str, Any]]
+    structure: Dict[str, Any]
+    timestamp: datetime = None
